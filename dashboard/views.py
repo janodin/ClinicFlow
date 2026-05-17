@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.conf import settings as django_settings
 
 from appointments.forms import AppointmentNoteForm, AppointmentStatusForm, StaffAppointmentForm
 from appointments.models import Appointment
@@ -1229,10 +1230,10 @@ def messenger_settings(request):
         raise PermissionDenied
     connection = getattr(clinic, "messenger_connection", None)
     webhook_url = request.build_absolute_uri(reverse("messenger:webhook"))
-    verify_token = settings.MESSENGER_VERIFY_TOKEN
+    verify_token = django_settings.MESSENGER_VERIFY_TOKEN
     connect_url = (
         f"https://www.facebook.com/v18.0/dialog/oauth"
-        f"?client_id={settings.MESSENGER_APP_ID}"
+        f"?client_id={django_settings.MESSENGER_APP_ID}"
         f"&redirect_uri={request.build_absolute_uri(reverse('dashboard:messenger_callback'))}"
         f"&scope=pages_messaging,pages_read_engagement"
     )
@@ -1254,8 +1255,8 @@ def messenger_callback(request):
 
     token_url = "https://graph.facebook.com/v18.0/oauth/access_token"
     params = {
-        "client_id": settings.MESSENGER_APP_ID,
-        "client_secret": settings.MESSENGER_APP_SECRET,
+        "client_id": django_settings.MESSENGER_APP_ID,
+        "client_secret": django_settings.MESSENGER_APP_SECRET,
         "redirect_uri": request.build_absolute_uri(reverse("dashboard:messenger_callback")),
         "code": code,
     }
