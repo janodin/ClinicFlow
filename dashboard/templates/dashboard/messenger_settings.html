@@ -1,34 +1,116 @@
 {% extends "dashboard/base.html" %}
+{% block title %}Messenger Settings{% endblock %}
 {% block content %}
 <div class="cf-page">
   <div class="cf-page-header">
-    <h1 class="ui-page-title">Messenger Settings</h1>
+    <div>
+      <h1 class="ui-page-title">Messenger Settings</h1>
+      <p class="mt-2 text-[var(--cf-muted)]">Connect your clinic's Facebook Page to let patients book appointments via Messenger.</p>
+    </div>
   </div>
-  <div class="card">
-    <h2 class="section-title">Facebook Page Connection</h2>
+
+  <!-- Connection Status Card -->
+  <section class="cf-card p-6">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="cf-icon-box p-3">
+        <i data-lucide="message-circle" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h2 class="cf-section-title">Facebook Page Connection</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Link your clinic's Facebook Page to enable booking via Messenger.</p>
+      </div>
+    </div>
+
     {% if connection and connection.is_active %}
-      <div class="badge" style="background:#E7F3EE;color:#0F6B55;">Connected</div>
-      <p class="body-sm" style="margin-top:12px;">Page ID: <code>{{ connection.page_id }}</code></p>
-      <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" style="margin-top:12px;">
+      <!-- Connected State -->
+      <div class="flex flex-wrap items-center gap-3 mb-5">
+        <span class="cf-badge cf-status-confirmed">
+          <i data-lucide="check-circle-2" class="h-3 w-3"></i> Connected
+        </span>
+        <span class="text-sm text-[var(--cf-muted)]">Page ID: <code class="cf-mono text-[var(--cf-blue)]">{{ connection.page_id }}</code></span>
+      </div>
+      <form action="{% url 'dashboard:messenger_disconnect' %}" method="post">
         {% csrf_token %}
-        <button type="submit" class="cf-btn" style="background:#B94444;color:white;">Disconnect</button>
+        <button type="submit" class="cf-btn cf-btn-danger">
+          <i data-lucide="unlink" class="h-4 w-4"></i> Disconnect Facebook Page
+        </button>
       </form>
     {% else %}
-      <div class="badge" style="background:#FBE5E2;color:#A73F3F;">Not connected</div>
-      <a href="{{ connect_url }}" class="cf-btn button-primary" style="margin-top:12px;display:inline-block;">Connect Facebook Page</a>
+      <!-- Disconnected State -->
+      <div class="flex flex-wrap items-center gap-3 mb-5">
+        <span class="cf-badge cf-status-cancelled">
+          <i data-lucide="x-circle" class="h-3 w-3"></i> Not Connected
+        </span>
+      </div>
+      <a href="{{ connect_url }}" class="cf-btn cf-btn-primary">
+        <i data-lucide="link" class="h-4 w-4"></i> Connect Facebook Page
+      </a>
     {% endif %}
+  </section>
 
-    <hr style="margin:24px 0;border:none;border-top:1px solid #D5E3EB;">
-    <h3 class="section-title">Webhook Setup</h3>
-    <p class="body-sm">Use these values in your Meta Developer dashboard:</p>
-    <div style="margin-top:12px;">
-      <label class="label">Webhook URL</label>
-      <div class="mono" style="background:#F4F9FB;padding:12px;border-radius:9px;margin-top:4px;">{{ webhook_url }}</div>
+  <!-- Webhook Setup Card -->
+  <section class="cf-card p-6">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="cf-icon-box p-3">
+        <i data-lucide="webhook" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h2 class="cf-section-title">Webhook Setup</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Use these values in your Meta Developer dashboard to receive messages.</p>
+      </div>
     </div>
-    <div style="margin-top:12px;">
-      <label class="label">Verify Token</label>
-      <div class="mono" style="background:#F4F9FB;padding:12px;border-radius:9px;margin-top:4px;">{{ verify_token }}</div>
+
+    <div class="grid gap-5 md:grid-cols-2">
+      <div class="cf-field">
+        <label class="cf-label">Webhook URL</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="cf-mono rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0 truncate">{{ webhook_url }}</div>
+          <button @click="navigator.clipboard.writeText('{{ webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+            <i data-lucide="copy" class="h-4 w-4"></i>
+            <span class="copy-label">Copy</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="cf-field">
+        <label class="cf-label">Verify Token</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="cf-mono rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0 truncate">{{ verify_token }}</div>
+          <button @click="navigator.clipboard.writeText('{{ verify_token|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+            <i data-lucide="copy" class="h-4 w-4"></i>
+            <span class="copy-label">Copy</span>
+          </button>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
+
+  <!-- Instructions Card -->
+  <section class="cf-card p-6">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="cf-icon-box p-3">
+        <i data-lucide="book-open" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h2 class="cf-section-title">Setup Instructions</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Follow these steps to activate Messenger booking.</p>
+      </div>
+    </div>
+
+    <ol class="grid gap-4 text-sm text-[var(--cf-muted)]">
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">1</span>
+        <span>Click <strong class="text-[var(--cf-ink)]">Connect Facebook Page</strong> above and authorize your clinic's Facebook Page.</span>
+      </li>
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">2</span>
+        <span>In your <a href="https://developers.facebook.com/" target="_blank" class="text-[var(--cf-brand)] hover:underline">Meta Developer dashboard</a>, subscribe the Page webhook using the <strong class="text-[var(--cf-ink)]">Webhook URL</strong> and <strong class="text-[var(--cf-ink)]">Verify Token</strong> shown above.</span>
+      </li>
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">3</span>
+        <span>Patients can now message your Facebook Page to book appointments. The bot will guide them through service selection, date, time, and confirmation.</span>
+      </li>
+    </ol>
+  </section>
 </div>
 {% endblock %}
