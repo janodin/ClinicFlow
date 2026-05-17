@@ -153,6 +153,11 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 APP_NAME = os.getenv("APP_NAME", "ClinicFlow")
 
+MESSENGER_VERIFY_TOKEN = os.getenv("MESSENGER_VERIFY_TOKEN", "")
+MESSENGER_APP_SECRET = os.getenv("MESSENGER_APP_SECRET", "")
+MESSENGER_APP_ID = os.getenv("MESSENGER_APP_ID", "")
+MESSENGER_SESSION_TIMEOUT_MINUTES = int(os.getenv("MESSENGER_SESSION_TIMEOUT_MINUTES", "30"))
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

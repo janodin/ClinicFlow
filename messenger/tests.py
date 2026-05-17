@@ -136,3 +136,74 @@ def test_parse_name_phone_valid():
 
 def test_parse_name_phone_invalid():
     assert _parse_name_phone("only name") == (None, None)
+
+
+import json
+from django.urls import reverse
+from django.test import Client
+from django.test import override_settings
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_VERIFY_TOKEN="test_token")
+def test_webhook_get_verification():
+    client = Client()
+    url = reverse("messenger:webhook")
+    resp = client.get(url, {
+        "hub.mode": "subscribe",
+        "hub.verify_token": "test_token",
+        "hub.challenge": "CHALLENGE123",
+    })
+    assert resp.status_code == 200
+    assert resp.content.decode() == "CHALLENGE123"
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_VERIFY_TOKEN="test_token")
+def test_webhook_get_invalid_token():
+    client = Client()
+    url = reverse("messenger:webhook")
+    resp = client.get(url, {
+        "hub.mode": "subscribe",
+        "hub.verify_token": "bad_token",
+        "hub.challenge": "CHALLENGE123",
+    })
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_webhook_post_valid_message():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh", email="owner_wh@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWH", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicWH")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE1", page_access_token="TOKEN")
+    Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE1",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE1"},
+                "message": {"text": "Book an appointment"},
+            }]
+        }]
+    }).encode()
+
+    import hmac, hashlib
+    signature = "sha256=" + hmac.new("test_secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    url = reverse("messenger:webhook")
+    resp = client.post(
+        url,
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+    assert resp.status_code == 200
+    session = MessengerSession.objects.get(connection=conn, psid="PSID1")
+    assert session.state == MessengerSession.STATE_SELECT_SERVICE
