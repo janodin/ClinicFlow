@@ -26,7 +26,12 @@ SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-dev-clinic-booking-saas")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "1") == "1"
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",")
+_allowed_hosts = os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",")
+# Auto-allow ngrok domains for local webhook testing
+if os.getenv("DEBUG", "1") == "1":
+    _allowed_hosts.append(".ngrok-free.dev")
+    _allowed_hosts.append(".ngrok.io")
+ALLOWED_HOSTS = _allowed_hosts
 
 
 # Application definition
