@@ -40,7 +40,9 @@ class MessengerSession(TimeStampedModel):
     last_activity_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [("connection", "psid")]
+        constraints = [
+            models.UniqueConstraint(fields=["connection", "psid"], name="unique_messenger_session_psid"),
+        ]
 
     def reset(self):
         self.state = self.STATE_GREETING

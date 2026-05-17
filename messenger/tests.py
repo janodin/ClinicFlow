@@ -35,3 +35,15 @@ def test_messenger_session_defaults():
     session = MessengerSession.objects.create(connection=conn, psid="PSID1")
     assert session.state == MessengerSession.STATE_GREETING
     assert session.data == {}
+
+
+@pytest.mark.django_db
+def test_messenger_session_reset():
+    user = User.objects.create_user(username="owner3", email="owner3@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="Group3", owner=user)
+    clinic = Clinic.objects.create(group=group, name="Clinic3")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="789", page_access_token="xyz")
+    session = MessengerSession.objects.create(connection=conn, psid="PSID3", state=MessengerSession.STATE_SELECT_SERVICE, data={"service_id": 1})
+    session.reset()
+    assert session.state == MessengerSession.STATE_GREETING
+    assert session.data == {}
