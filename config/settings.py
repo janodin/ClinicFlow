@@ -153,7 +153,20 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 APP_NAME = os.getenv("APP_NAME", "ClinicFlow")
 
-MESSENGER_VERIFY_TOKEN = os.getenv("MESSENGER_VERIFY_TOKEN", "")
+# Auto-generate verify token if not configured
+_messenger_verify_token = os.getenv("MESSENGER_VERIFY_TOKEN", "")
+if not _messenger_verify_token:
+    import secrets
+    _messenger_verify_token = secrets.token_urlsafe(32)
+    _env_path = BASE_DIR / ".env"
+    if _env_path.exists():
+        with open(_env_path, "r") as f:
+            _env_content = f.read()
+        if "MESSENGER_VERIFY_TOKEN" not in _env_content:
+            with open(_env_path, "a") as f:
+                f.write(f"\nMESSENGER_VERIFY_TOKEN={_messenger_verify_token}\n")
+MESSENGER_VERIFY_TOKEN = _messenger_verify_token
+
 MESSENGER_APP_SECRET = os.getenv("MESSENGER_APP_SECRET", "")
 MESSENGER_APP_ID = os.getenv("MESSENGER_APP_ID", "")
 MESSENGER_SESSION_TIMEOUT_MINUTES = int(os.getenv("MESSENGER_SESSION_TIMEOUT_MINUTES", "30"))
