@@ -1231,21 +1231,18 @@ def messenger_settings(request):
     connection = getattr(clinic, "messenger_connection", None)
     webhook_url = request.build_absolute_uri(reverse("messenger:webhook"))
     verify_token = django_settings.MESSENGER_VERIFY_TOKEN
-    app_id = django_settings.MESSENGER_APP_ID
-    is_configured = bool(app_id and django_settings.MESSENGER_APP_SECRET and verify_token)
     connect_url = (
         f"https://www.facebook.com/v18.0/dialog/oauth"
-        f"?client_id={app_id}"
+        f"?client_id={django_settings.MESSENGER_APP_ID}"
         f"&redirect_uri={request.build_absolute_uri(reverse('dashboard:messenger_callback'))}"
         f"&scope=pages_messaging,pages_read_engagement"
-    ) if is_configured else ""
+    )
     return render(request, "dashboard/messenger_settings.html", {
         "clinic": clinic,
         "connection": connection,
         "webhook_url": webhook_url,
         "verify_token": verify_token,
         "connect_url": connect_url,
-        "is_configured": is_configured,
     })
 
 
