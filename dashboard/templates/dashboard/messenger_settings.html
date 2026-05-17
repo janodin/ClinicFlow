@@ -1,0 +1,34 @@
+{% extends "dashboard/base.html" %}
+{% block content %}
+<div class="cf-page">
+  <div class="cf-page-header">
+    <h1 class="ui-page-title">Messenger Settings</h1>
+  </div>
+  <div class="card">
+    <h2 class="section-title">Facebook Page Connection</h2>
+    {% if connection and connection.is_active %}
+      <div class="badge" style="background:#E7F3EE;color:#0F6B55;">Connected</div>
+      <p class="body-sm" style="margin-top:12px;">Page ID: <code>{{ connection.page_id }}</code></p>
+      <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" style="margin-top:12px;">
+        {% csrf_token %}
+        <button type="submit" class="cf-btn" style="background:#B94444;color:white;">Disconnect</button>
+      </form>
+    {% else %}
+      <div class="badge" style="background:#FBE5E2;color:#A73F3F;">Not connected</div>
+      <a href="{{ connect_url }}" class="cf-btn button-primary" style="margin-top:12px;display:inline-block;">Connect Facebook Page</a>
+    {% endif %}
+
+    <hr style="margin:24px 0;border:none;border-top:1px solid #D5E3EB;">
+    <h3 class="section-title">Webhook Setup</h3>
+    <p class="body-sm">Use these values in your Meta Developer dashboard:</p>
+    <div style="margin-top:12px;">
+      <label class="label">Webhook URL</label>
+      <div class="mono" style="background:#F4F9FB;padding:12px;border-radius:9px;margin-top:4px;">{{ webhook_url }}</div>
+    </div>
+    <div style="margin-top:12px;">
+      <label class="label">Verify Token</label>
+      <div class="mono" style="background:#F4F9FB;padding:12px;border-radius:9px;margin-top:4px;">{{ verify_token }}</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
