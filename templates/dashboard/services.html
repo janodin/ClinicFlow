@@ -1,0 +1,48 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Services{% endblock %}
+{% block content %}
+<div x-data="{open:false, editModalOpen:false, tab:'active'}" class="cf-page">
+  <div class="cf-page-header">
+    <div>
+      <h1 class="ui-page-title">Services</h1>
+      <p class="mt-2 text-[var(--cf-muted)]">{{ active_services|length }} active · {{ archived_services|length }} archived</p>
+    </div>
+    {% if can_manage %}
+      <button @click="open=true" class="cf-btn cf-btn-primary">Add Service</button>
+    {% endif %}
+  </div>
+
+  <div class="cf-tabs">
+    <button
+      @click="tab='active'"
+      :class="tab==='active' ? 'cf-tab-active' : ''"
+      class="cf-tab"
+    >Active</button>
+    <button
+      @click="tab='archived'"
+      :class="tab==='archived' ? 'cf-tab-active' : ''"
+      class="cf-tab"
+    >Archived</button>
+  </div>
+
+  <div id="services-list-container">
+    {% include "dashboard/partials/service_list.html" %}
+  </div>
+
+  <!-- Add Modal -->
+  <div x-show="open" class="cf-modal-backdrop" x-cloak @click.away="open=false" x-on:service-created.camel="open=false">
+    <div id="add-modal-body" class="cf-modal max-w-xl p-6" @click.stop>
+      {% include "dashboard/partials/service_form.html" with service=None form=form %}
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div x-show="editModalOpen" class="cf-modal-backdrop" x-cloak @click.away="editModalOpen=false" x-on:service-saved.camel="editModalOpen=false">
+    <div id="edit-modal-body" class="cf-modal max-w-xl p-6" @click.stop>
+      <div class="flex items-center justify-center py-12">
+        <i data-lucide="loader-2" class="h-8 w-8 animate-spin text-[var(--cf-muted)]"></i>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

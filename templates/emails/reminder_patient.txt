@@ -1,0 +1,8 @@
+Hi {{ appointment.patient.full_name }},
+
+This is a reminder for your appointment at {{ appointment.clinic.name }}.
+
+Service: {{ appointment.service.name }}
+Date and time: {{ appointment.starts_at|date:"M j, Y g:i A" }}
+
+See you soon.

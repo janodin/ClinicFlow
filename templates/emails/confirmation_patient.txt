@@ -1,0 +1,9 @@
+Hi {{ appointment.patient.full_name }},
+
+Your appointment has been confirmed.
+
+Clinic: {{ appointment.clinic.name }}
+Service: {{ appointment.service.name }}
+Date and time: {{ appointment.starts_at|date:"M j, Y g:i A" }}
+
+Please arrive 5-10 minutes early. If you need to cancel or reschedule, contact the clinic at least 24 hours in advance.

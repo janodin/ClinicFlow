@@ -1,0 +1,154 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Billing{% endblock %}
+{% block content %}
+<div class="cf-page">
+  <div class="cf-page-header">
+    <div>
+      <div class="cf-eyebrow"><i data-lucide="credit-card" class="h-3.5 w-3.5"></i> Subscription</div>
+      <h1 class="mt-2 ui-page-title">Billing & Subscription</h1>
+      <p class="mt-2 text-sm text-[var(--cf-muted)]">Manage your clinic plan, usage limits, and billing preferences.</p>
+    </div>
+  </div>
+
+  <!-- Current Plan Status -->
+  <div class="cf-card p-5 lg:p-6">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex items-center gap-4">
+        <div class="cf-icon-box h-12 w-12 shrink-0 rounded-xl">
+          <i data-lucide="shield-check" class="h-6 w-6"></i>
+        </div>
+        <div>
+          <h2 class="cf-section-title">{{ clinic.group.get_plan_display }} Plan</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">
+            {{ clinic.group.appointment_limit }} appointments/month
+            {% if clinic.group.staff_limit %} · {{ clinic.group.staff_limit }} staff account{% if clinic.group.staff_limit > 1 %}s{% endif %}{% endif %}
+          </p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        {% if clinic.group.status == "active" %}
+          <span class="inline-flex items-center gap-2 rounded-full bg-[var(--cf-status-completed-bg)] px-4 py-2 text-sm font-bold text-[var(--cf-status-completed-text)] border border-[var(--cf-brand)]/20"><i data-lucide="check-circle-2" class="h-5 w-5"></i>{{ clinic.group.get_status_display }}</span>
+        {% elif clinic.group.status == "trial" %}
+          <span class="inline-flex items-center gap-2 rounded-full bg-[var(--cf-status-pending-bg)] px-4 py-2 text-sm font-bold text-[var(--cf-status-pending-text)] border border-[var(--cf-amber)]/20"><i data-lucide="clock" class="h-5 w-5"></i>{{ clinic.group.get_status_display }}</span>
+        {% elif clinic.group.status == "past_due" %}
+          <span class="inline-flex items-center gap-2 rounded-full bg-[var(--cf-status-cancelled-bg)] px-4 py-2 text-sm font-bold text-[var(--cf-status-cancelled-text)] border border-[var(--cf-red)]/20"><i data-lucide="alert-circle" class="h-5 w-5"></i>{{ clinic.group.get_status_display }}</span>
+        {% else %}
+          <span class="inline-flex items-center gap-2 rounded-full bg-[var(--cf-status-cancelled-bg)] px-4 py-2 text-sm font-bold text-[var(--cf-status-cancelled-text)] border border-[var(--cf-red)]/20"><i data-lucide="x-circle" class="h-5 w-5"></i>{{ clinic.group.get_status_display }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if clinic.group.status == "trial" and clinic.group.trial_ends_at %}
+      <div class="mt-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] px-4 py-3 text-sm text-[var(--cf-muted)]">
+        <i data-lucide="info" class="mr-1 inline h-4 w-4 text-[var(--cf-amber)]"></i>
+        Your trial ends on <span class="font-semibold text-[var(--cf-ink)]">{{ clinic.group.trial_ends_at|date:"M j, Y" }}</span>. Choose a plan to keep your clinic active.
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Plan Comparison -->
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <!-- Free -->
+    <div class="cf-card relative p-5 {% if clinic.group.plan == 'free' %}ring-2 ring-[var(--cf-brand)]{% endif %}">
+      {% if clinic.group.plan == "free" %}
+        <div class="absolute -top-3 left-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--cf-brand-strong)] px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white shadow-md">
+          <i data-lucide="check" class="h-4 w-4 stroke-[3]"></i>Current
+        </div>
+      {% endif %}
+      <div class="flex items-start justify-between">
+        <div class="cf-icon-box h-10 w-10 rounded-lg">
+          <i data-lucide="zap" class="h-5 w-5"></i>
+        </div>
+        <span class="cf-kpi-value text-2xl">Free</span>
+      </div>
+      <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Free</h3>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">For small practices getting started.</p>
+      <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>50 appointments/month</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>1 staff account</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Booking widget</li>
+      </ul>
+    </div>
+
+    <!-- Starter -->
+    <div class="cf-card relative p-5 {% if clinic.group.plan == 'starter' %}ring-2 ring-[var(--cf-brand)]{% endif %}">
+      {% if clinic.group.plan == "starter" %}
+        <div class="absolute -top-3 left-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--cf-brand-strong)] px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white shadow-md">
+          <i data-lucide="check" class="h-4 w-4 stroke-[3]"></i>Current
+        </div>
+      {% endif %}
+      <div class="flex items-start justify-between">
+        <div class="cf-icon-box h-10 w-10 rounded-lg">
+          <i data-lucide="rocket" class="h-5 w-5"></i>
+        </div>
+        <span class="cf-kpi-value text-2xl">₱</span>
+      </div>
+      <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Starter</h3>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">More room to grow your practice.</p>
+      <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>More appointments</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Patient CRM</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Full calendar</li>
+      </ul>
+    </div>
+
+    <!-- Professional -->
+    <div class="cf-card relative p-5 {% if clinic.group.plan == 'professional' %}ring-2 ring-[var(--cf-brand)]{% endif %}">
+      {% if clinic.group.plan == "professional" %}
+        <div class="absolute -top-3 left-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--cf-brand-strong)] px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white shadow-md">
+          <i data-lucide="check" class="h-4 w-4 stroke-[3]"></i>Current
+        </div>
+      {% endif %}
+      <div class="flex items-start justify-between">
+        <div class="cf-icon-box h-10 w-10 rounded-lg">
+          <i data-lucide="star" class="h-5 w-5"></i>
+        </div>
+        <span class="cf-kpi-value text-2xl">₱₱</span>
+      </div>
+      <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Professional</h3>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Advanced tools for busy clinics.</p>
+      <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Advanced analytics</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Custom assistant</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Priority support</li>
+      </ul>
+    </div>
+
+    <!-- Enterprise -->
+    <div class="cf-card relative p-5 {% if clinic.group.plan == 'enterprise' %}ring-2 ring-[var(--cf-brand)]{% endif %}">
+      {% if clinic.group.plan == "enterprise" %}
+        <div class="absolute -top-3 left-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--cf-brand-strong)] px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white shadow-md">
+          <i data-lucide="check" class="h-4 w-4 stroke-[3]"></i>Current
+        </div>
+      {% endif %}
+      <div class="flex items-start justify-between">
+        <div class="cf-icon-box h-10 w-10 rounded-lg">
+          <i data-lucide="building-2" class="h-5 w-5"></i>
+        </div>
+        <span class="cf-kpi-value text-2xl">Custom</span>
+      </div>
+      <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Enterprise</h3>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Multi-branch and custom needs.</p>
+      <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Multiple branches</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Custom integrations</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Dedicated support</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- V1 Notice -->
+  <div class="cf-card p-5 lg:p-6">
+    <div class="flex items-start gap-4">
+      <div class="cf-icon-box h-11 w-11 shrink-0 rounded-xl">
+        <i data-lucide="info" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-[var(--cf-ink)]">Manual plan management</h3>
+        <p class="mt-1.5 text-sm leading-relaxed text-[var(--cf-muted)]">
+          Plan upgrades and billing are managed manually in V1. Contact support to change your plan or for any billing questions.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

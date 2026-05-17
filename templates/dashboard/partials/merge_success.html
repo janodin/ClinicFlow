@@ -1,0 +1,7 @@
+<div class="soft-card rounded-3xl p-6 space-y-4">
+  <div class="rounded-2xl border border-cyan-100 bg-cyan-50 p-4 text-sm text-cyan-800">
+    <p class="font-black">Merge Complete</p>
+    <p class="mt-1">All appointments have been moved to <strong>{{ primary.full_name }}</strong>.</p>
+  </div>
+  <a href="{% url 'dashboard:patients' %}" class="inline-block rounded-2xl bg-cyan-700 px-5 py-3 font-black text-white shadow-lg shadow-cyan-700/20">Back to Patients</a>
+</div>

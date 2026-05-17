@@ -1,0 +1,5 @@
+{% url url_name as nav_url %}
+<a href="{{ nav_url }}" class="cf-nav-link {% if request.path == nav_url %}cf-nav-link-active{% endif %}">
+  <i data-lucide="{{ icon }}" class="h-[18px] w-[18px]"></i>
+  <span>{{ label }}</span>
+</a>

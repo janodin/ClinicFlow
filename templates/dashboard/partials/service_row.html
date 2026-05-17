@@ -1,0 +1,63 @@
+<article id="service-card-{{ service.id }}" class="cf-card p-5 flex flex-col">
+  <div class="flex-1">
+    <div class="flex items-center justify-between">
+      <div class="grid h-14 w-14 place-items-center rounded-2xl text-[var(--cf-surface)]" style="background-color: {{ service.color }};">
+        <i data-lucide="stethoscope"></i>
+      </div>
+      {% if service.is_active %}
+        <span class="inline-flex items-center rounded-full bg-[var(--cf-status-completed-bg)] px-2.5 py-1 text-xs font-bold text-[var(--cf-status-completed-text)]">Active</span>
+      {% else %}
+        <span class="inline-flex items-center rounded-full bg-[var(--cf-status-no-show-bg)] px-2.5 py-1 text-xs font-bold text-[var(--cf-status-no-show-text)]">Inactive</span>
+      {% endif %}
+    </div>
+    <h2 class="mt-3 text-xl font-[850] text-[var(--cf-ink)]">{{ service.name }}</h2>
+    <p class="mt-1.5 text-sm text-[var(--cf-muted)]">{{ service.effective_duration }} minutes</p>
+    {% if service.display_price %}
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">₱ {{ service.price }}</p>
+    {% endif %}
+    {% if service.description %}
+      <p class="mt-1 text-sm text-[var(--cf-faint)]">{{ service.description|truncatewords:12 }}</p>
+    {% endif %}
+  </div>
+  <div class="mt-auto flex flex-wrap gap-3 border-t border-[var(--cf-line)] pt-4">
+    {% if not service.is_archived %}
+      <button
+        hx-get="{% url 'dashboard:edit_service' service.id %}"
+        hx-target="#edit-modal-body"
+        hx-swap="innerHTML"
+        @click="editModalOpen=true"
+        class="cf-btn cf-btn-sm cf-btn-secondary"
+      >Edit</button>
+      <form
+        hx-post="{% url 'dashboard:archive_service' service.id %}"
+        hx-target="#services-list-container"
+        hx-swap="innerHTML"
+        class="inline"
+      >
+        {% csrf_token %}
+        <button type="submit" class="cf-btn cf-btn-sm cf-btn-danger">Archive</button>
+      </form>
+      <form
+        hx-post="{% url 'dashboard:toggle_service' service.id %}"
+        hx-target="#service-card-{{ service.id }}"
+        hx-swap="outerHTML"
+        class="inline"
+      >
+        {% csrf_token %}
+        <button type="submit" class="cf-btn cf-btn-sm cf-btn-ghost" aria-label="Toggle {{ service.name }} active status">
+          {{ service.is_active|yesno:"Deactivate,Activate" }}
+        </button>
+      </form>
+    {% else %}
+      <form
+        hx-post="{% url 'dashboard:restore_service' service.id %}"
+        hx-target="#services-list-container"
+        hx-swap="innerHTML"
+        class="inline"
+      >
+        {% csrf_token %}
+        <button type="submit" class="cf-btn cf-btn-sm cf-btn-primary">Restore</button>
+      </form>
+    {% endif %}
+  </div>
+</article>

@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+{% block title %}{{ clinic.name }} Widget{% endblock %}
+{% block body %}
+<main class="min-h-screen bg-transparent p-2 sm:p-3" x-data="widgetApp()" x-init="init()">
+  <section class="cf-widget-shell ml-auto flex h-[650px] max-h-[calc(100vh-1rem)] max-w-[420px] flex-col overflow-hidden">
+    <header class="flex items-center justify-between px-4 py-3.5 text-white" :style="'background-color:' + accentColor">
+      <div class="flex items-center gap-3">
+        {% if clinic.logo %}
+          <img src="{{ clinic.logo.url }}" alt="{{ clinic.name }}" class="h-10 w-10 rounded-full object-cover bg-white/20">
+        {% else %}
+          <div class="grid h-10 w-10 place-items-center rounded-2xl bg-white/15"><i data-lucide="bot"></i></div>
+        {% endif %}
+        <div>
+          <h1 class="max-w-56 truncate text-sm font-black">{{ clinic.name }}</h1>
+          <p class="text-xs text-white/80">Booking Assistant Online</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="{% url 'public_booking:book' clinic.slug %}" target="_blank"><i data-lucide="maximize-2" class="h-5 w-5"></i></a>
+        <button @click="minimize()" aria-label="Minimize"><i data-lucide="minus" class="h-5 w-5"></i></button>
+      </div>
+    </header>
+
+    <div class="flex-1 overflow-y-auto p-4">
+      <!-- HOME -->
+      <div x-show="mode==='home'" class="text-center" x-transition>
+        <div class="mx-auto grid h-16 w-16 place-items-center rounded-3xl text-white" :style="'background-color:' + accentColor"><i data-lucide="bot" class="h-8 w-8"></i></div>
+        <h2 class="mt-5 text-xl font-black">{{ clinic.name }}</h2>
+        <p class="mx-auto mt-2 max-w-xs text-sm leading-6 text-slate-500">{{ clinic.widget_welcome_message }}</p>
+        <button @click="startBook()" class="mt-6 flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition hover:bg-slate-50" :style="'border-color:' + accentColor">
+          <span class="grid h-11 w-11 place-items-center rounded-2xl text-white" :style="'background-color:' + accentColor"><i data-lucide="calendar-days" class="h-5 w-5"></i></span>
+          <span><strong>Book an Appointment</strong><br><span class="text-sm text-slate-500">Choose a service, date & time</span></span>
+        </button>
+        <button @click="startChat()" class="mt-3 flex w-full items-center gap-3 rounded-2xl border border-[var(--cf-line)] p-3 text-left transition hover:bg-[var(--cf-surface-muted)]">
+          <span class="grid h-11 w-11 place-items-center rounded-2xl bg-[var(--cf-surface-muted)] text-[var(--cf-muted)]"><i data-lucide="message-circle" class="h-5 w-5"></i></span>
+          <span><strong class="text-[var(--cf-ink)]">Chat with Assistant</strong><br><span class="text-sm text-[var(--cf-muted)]">Ask questions or get help</span></span>
+        </button>
+      </div>
+
+      <!-- BOOK MODE -->
+      <div x-show="mode==='book'" x-transition>
+        <!-- Step indicator -->
+        <div class="mb-4 flex items-center gap-2">
+          <template x-for="s in [1,2,3]" :key="s">
+            <div class="h-1.5 flex-1 rounded-full" :class="bookStep >= s ? 'bg-cyan-700' : 'bg-slate-100'" :style="bookStep >= s ? 'background-color:' + accentColor : ''"></div>
+          </template>
+        </div>
+
+        <!-- Step 1: Service -->
+        <div x-show="bookStep===1" class="space-y-3">
+          <h3 class="font-black text-lg">Select a service</h3>
+          {% for item in services %}
+          <button type="button" @click="selectService({{ item.id }})" class="flex w-full items-center gap-3 rounded-2xl border border-slate-200 p-3 text-left transition hover:bg-slate-50">
+            <span class="grid h-10 w-10 place-items-center rounded-xl text-white text-sm font-black" style="background-color: {{ clinic.widget_accent_color }}">{{ item.name|first }}</span>
+            <div class="flex-1">
+              <p class="font-bold text-sm">{{ item.name }}</p>
+              <p class="text-xs text-slate-500">{{ item.effective_duration }} min{% if item.display_price %} · ₱{{ item.price }}{% endif %}</p>
+            </div>
+            <i data-lucide="chevron-right" class="h-4 w-4 text-slate-300"></i>
+          </button>
+          {% empty %}
+          <p class="text-slate-500">No services available.</p>
+          {% endfor %}
+        </div>
+
+        <!-- Step 2: Date + Slots -->
+        <div x-show="bookStep===2" class="space-y-4">
+          <div class="flex items-center gap-2">
+            <button @click="back()" class="rounded-xl p-2 hover:bg-slate-50"><i data-lucide="arrow-left" class="h-4 w-4"></i></button>
+            <h3 class="font-black text-lg">Date & Time</h3>
+          </div>
+
+          <div>
+            <label class="text-xs font-bold text-slate-500 uppercase">Date</label>
+            <div class="mt-1 flex gap-2 overflow-x-auto pb-2">
+              {% for day in dates %}
+              <button type="button" @click="selectDate('{{ day|date:'Y-m-d' }}')" class="flex-shrink-0 rounded-xl border px-3 py-2 text-center text-sm transition" :class="date === '{{ day|date:'Y-m-d' }}' ? 'text-white border-transparent' : 'bg-white text-slate-600 border-slate-200'" :style="date === '{{ day|date:'Y-m-d' }}' ? 'background-color:' + accentColor : ''">
+                <span class="block text-xs uppercase">{{ day|date:"D" }}</span>
+                <span class="block font-bold">{{ day|date:"j" }}</span>
+              </button>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs font-bold text-slate-500 uppercase">Available Times</label>
+            <div id="slots-container" class="mt-1">
+              {% include "widget/partials/slots.html" %}
+            </div>
+          </div>
+
+          <button @click="goToStep3()" class="cf-btn w-full text-white disabled:opacity-50" :style="'background-color:' + accentColor" :disabled="!slot">Continue</button>
+        </div>
+
+        <!-- Step 3: Patient Info -->
+        <div x-show="bookStep===3" class="space-y-4">
+          <div class="flex items-center gap-2">
+            <button @click="back()" class="rounded-xl p-2 hover:bg-slate-50"><i data-lucide="arrow-left" class="h-4 w-4"></i></button>
+            <h3 class="font-black text-lg">Your Details</h3>
+          </div>
+          <form method="post" action="{% url 'public_booking:book' clinic.slug %}" target="_top" class="space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="source" value="{{ widget_source }}">
+            <input type="hidden" name="service" :value="selectedService">
+            <input type="hidden" name="starts_at" :value="slot">
+            <div><label class="text-xs font-bold text-slate-500 uppercase">Full Name</label><input name="full_name" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
+            <div><label class="text-xs font-bold text-slate-500 uppercase">Phone</label><input name="phone" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
+            <div><label class="text-xs font-bold text-slate-500 uppercase">Email</label><input name="email" type="email" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
+            <button type="submit" class="cf-btn w-full text-white" :style="'background-color:' + accentColor">Confirm Appointment</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- CHAT MODE -->
+      <div x-show="mode==='chat'" class="flex h-full flex-col" x-transition>
+        <!-- Tabs -->
+        <div class="mb-3 flex gap-1 rounded-xl bg-slate-100 p-1">
+          <button @click="chatTab='conversation'" class="flex-1 rounded-lg py-1.5 text-xs font-bold transition" :class="chatTab==='conversation' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'" :style="chatTab==='conversation' ? 'color:' + accentColor : ''">Conversation</button>
+          <button @click="chatTab='faqs'" class="flex-1 rounded-lg py-1.5 text-xs font-bold transition" :class="chatTab==='faqs' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'" :style="chatTab==='faqs' ? 'color:' + accentColor : ''">FAQs</button>
+        </div>
+
+        <!-- Conversation -->
+        <div x-show="chatTab==='conversation'" class="flex-1 overflow-y-auto space-y-3 pr-1">
+          <template x-for="msg in chatHistory" :key="msg.id">
+            <div class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div class="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm" :class="msg.role === 'user' ? 'text-white' : 'border border-slate-100 bg-white text-slate-700'" :style="msg.role === 'user' ? 'background-color:' + accentColor : ''">
+                <p x-text="msg.text"></p>
+              </div>
+            </div>
+          </template>
+
+          <div x-show="chatOptions.length" class="flex flex-wrap gap-2">
+            <template x-for="opt in chatOptions" :key="opt.value">
+              <button @click="selectChatOption(opt)" class="rounded-xl border px-3 py-1.5 text-xs font-semibold transition" :style="'border-color:' + accentColor + '; color:' + accentColor" x-text="opt.label"></button>
+            </template>
+          </div>
+
+          <!-- collect_info form inside chat -->
+          <div x-show="chatState === 'collect_info'" class="rounded-2xl border border-slate-100 bg-white p-3 space-y-2">
+            <input x-model="collectInfo.full_name" placeholder="Full Name" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="collectInfo.phone" placeholder="Phone" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="collectInfo.email" placeholder="Email (optional)" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <button @click="submitCollectInfo()" class="w-full rounded-xl py-2 text-sm font-bold text-white" :style="'background-color:' + accentColor">Continue</button>
+          </div>
+        </div>
+
+        <!-- FAQs -->
+        <div x-show="chatTab==='faqs'" class="flex-1 overflow-y-auto space-y-2 pr-1">
+          <input x-model="faqQuery" placeholder="Search FAQs..." class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <template x-for="faq in filteredFaqs" :key="faq.id">
+            <div class="rounded-2xl border border-slate-100 bg-white overflow-hidden">
+              <button @click="faq.open = !faq.open" class="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                <span x-text="faq.question"></span>
+                <i data-lucide="chevron-down" class="h-4 w-4 text-slate-400 transition" :class="faq.open ? 'rotate-180' : ''"></i>
+              </button>
+              <div x-show="faq.open" class="px-4 pb-3 text-sm text-slate-600" x-text="faq.answer"></div>
+            </div>
+          </template>
+          <p x-show="filteredFaqs.length === 0" class="text-center text-xs text-slate-400 py-4">No FAQs found.</p>
+        </div>
+
+        <!-- Chat Input -->
+        <div x-show="chatTab==='conversation' && chatState !== 'collect_info'" class="mt-3 flex gap-2">
+          <input x-model="chatInput" @keydown.enter="sendChat()" placeholder="Type a message..." class="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <button @click="sendChat()" class="rounded-xl px-3 py-2 text-white" :style="'background-color:' + accentColor"><i data-lucide="send" class="h-4 w-4"></i></button>
+        </div>
+      </div>
+    </div>
+
+    <footer class="border-t border-[var(--cf-line)] p-3 text-center text-xs text-[var(--cf-muted)]">Powered by ClinicFlow</footer>
+  </section>
+</main>
+
+<script>
+  function widgetApp() {
+    return {
+      accentColor: '{{ clinic.widget_accent_color|default:"#0891b2" }}',
+      mode: 'home',
+      bookStep: 1,
+      selectedService: '',
+      date: '{{ selected_date|date:"Y-m-d" }}',
+      slot: '',
+      chatTab: 'conversation',
+      chatHistory: [],
+      chatOptions: [],
+      chatState: 'greeting',
+      chatInput: '',
+      faqQuery: '',
+      faqs: [
+        {% for faq in faqs %}
+        {id: {{ faq.id }}, question: "{{ faq.question|escapejs }}", answer: "{{ faq.answer|escapejs }}", open: false}{% if not forloop.last %},{% endif %}
+        {% endfor %}
+      ],
+      collectInfo: { full_name: '', phone: '', email: '' },
+      nextId: 1,
+      init() {
+        // optional initialization
+      },
+      startBook() {
+        this.mode = 'book';
+        this.bookStep = 1;
+        this.selectedService = '';
+        this.date = '{{ selected_date|date:"Y-m-d" }}';
+        this.slot = '';
+      },
+      selectService(id) {
+        this.selectedService = String(id);
+        this.bookStep = 2;
+        this.$nextTick(() => this.loadSlots());
+      },
+      selectDate(date) {
+        this.date = date;
+        this.loadSlots();
+      },
+      loadSlots() {
+        if (!this.selectedService || !this.date) return;
+        const url = '{% url "widget:slots" clinic.slug %}?service=' + this.selectedService + '&date=' + this.date;
+        htmx.ajax('GET', url, {target: '#slots-container', swap: 'innerHTML'});
+      },
+      goToStep3() {
+        if (!this.slot) return;
+        this.bookStep = 3;
+      },
+      back() {
+        if (this.bookStep > 1) this.bookStep--;
+      },
+      minimize() {
+        if (window.parent !== window) {
+          window.parent.postMessage({type: 'clinicflow-minimize'}, '*');
+        } else {
+          this.mode = 'home';
+        }
+      },
+      startChat() {
+        this.mode = 'chat';
+        this.chatTab = 'conversation';
+        if (this.chatHistory.length === 0) {
+          this.sendChatAction('init');
+        }
+      },
+      async sendChatAction(action, value, extra) {
+        const formData = new FormData();
+        formData.append('action', action);
+        if (value !== undefined && value !== null) formData.append('value', value);
+        if (extra) {
+          if (extra.full_name) formData.append('full_name', extra.full_name);
+          if (extra.phone) formData.append('phone', extra.phone);
+          if (extra.email) formData.append('email', extra.email);
+        }
+        const resp = await fetch('{% url "widget:chat_step" clinic.slug %}', {
+          method: 'POST',
+          body: formData,
+          headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
+        });
+        const data = await resp.json();
+        this.chatState = data.state;
+        this.chatOptions = data.options || [];
+        if (data.message) {
+          this.chatHistory.push({id: this.nextId++, role: 'assistant', text: data.message});
+        }
+        this.$nextTick(() => {
+          const container = this.$el.querySelector('.flex-1.overflow-y-auto');
+          if (container) container.scrollTop = container.scrollHeight;
+        });
+      },
+      selectChatOption(opt) {
+        this.chatHistory.push({id: this.nextId++, role: 'user', text: opt.label});
+        this.chatOptions = [];
+        if (opt.value === 'restart') {
+          this.chatHistory = [];
+          this.sendChatAction('init');
+          return;
+        }
+        if (opt.type === 'faq') {
+          const faqId = parseInt(opt.value.split(':')[1], 10);
+          const faq = this.faqs.find(f => f.id === faqId);
+          if (faq) {
+            this.chatHistory.push({id: this.nextId++, role: 'assistant', text: faq.answer});
+          }
+          this.sendChatAction('init');
+          return;
+        }
+        this.sendChatAction('select_option', opt.value);
+      },
+      async sendChat() {
+        const text = this.chatInput.trim();
+        if (!text) return;
+        this.chatHistory.push({id: this.nextId++, role: 'user', text: text});
+        this.chatInput = '';
+        if ((text.toLowerCase().includes('faq') || text.toLowerCase().includes('help')) && this.chatState === 'greeting') {
+          this.chatTab = 'faqs';
+          return;
+        }
+        await this.sendChatAction('text_input', text);
+      },
+      submitCollectInfo() {
+        const { full_name, phone, email } = this.collectInfo;
+        if (!full_name || !phone) return;
+        this.chatHistory.push({id: this.nextId++, role: 'user', text: full_name + ' / ' + phone});
+        this.sendChatAction('submit_info', '', {full_name, phone, email});
+      },
+      get filteredFaqs() {
+        const q = this.faqQuery.toLowerCase();
+        return this.faqs.filter(f => f.question.toLowerCase().includes(q) || f.answer.toLowerCase().includes(q));
+      }
+    }
+  }
+</script>
+{% endblock %}

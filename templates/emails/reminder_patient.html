@@ -1,0 +1,11 @@
+{% extends "emails/base_email.html" %}
+{% block email_title %}Appointment Reminder{% endblock %}
+{% block content %}
+<h2>Hi {{ appointment.patient.full_name }},</h2>
+<p>This is a reminder for your appointment at <strong>{{ appointment.clinic.name }}</strong>.</p>
+
+<div class="detail-row"><span class="detail-label">Service:</span> {{ appointment.service.name }}</div>
+<div class="detail-row"><span class="detail-label">Date and time:</span> {{ appointment.starts_at|date:"M j, Y g:i A" }}</div>
+
+<p style="margin-top: 16px;">See you soon.</p>
+{% endblock %}

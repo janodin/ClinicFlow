@@ -1,0 +1,12 @@
+{% extends "emails/base_email.html" %}
+{% block email_title %}Appointment Confirmed{% endblock %}
+{% block content %}
+<h2>Hi {{ appointment.patient.full_name }},</h2>
+<p>Your appointment has been confirmed.</p>
+
+<div class="detail-row"><span class="detail-label">Clinic:</span> {{ appointment.clinic.name }}</div>
+<div class="detail-row"><span class="detail-label">Service:</span> {{ appointment.service.name }}</div>
+<div class="detail-row"><span class="detail-label">Date and time:</span> {{ appointment.starts_at|date:"M j, Y g:i A" }}</div>
+
+<p style="margin-top: 16px;">Please arrive 5–10 minutes early. If you need to cancel or reschedule, contact the clinic at least 24 hours in advance.</p>
+{% endblock %}

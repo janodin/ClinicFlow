@@ -1,0 +1,77 @@
+<section class="cf-table-wrap">
+  <div class="overflow-x-auto">
+    <table class="cf-table">
+      <thead class="border-b border-[var(--cf-line)] text-xs uppercase text-[var(--cf-faint)]">
+        <tr>
+          <th class="p-5">Patient</th>
+          <th>Service</th>
+          <th>Date & Time</th>
+          <th>Source</th>
+          <th>Status</th>
+          <th class="pr-5 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-[var(--cf-line-soft)]">
+        {% for appointment in appointments %}
+          {% include "dashboard/partials/appointment_row.html" %}
+        {% empty %}
+          <tr><td colspan="6">
+            <div class="flex flex-col items-center justify-center px-6 py-14 text-center">
+              <div class="cf-icon-box h-16 w-16">
+                <i data-lucide="calendar-x" class="h-8 w-8"></i>
+              </div>
+              <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No appointments found</p>
+              <p class="mt-1 text-sm text-[var(--cf-muted)]">Try adjusting your filters or add a new appointment.</p>
+              <a href="{% url 'dashboard:appointments' %}" class="cf-btn cf-btn-primary mt-4">Clear Filters</a>
+            </div>
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="flex items-center justify-between px-5 py-4 border-t border-[var(--cf-line)]">
+  <p class="text-sm text-[var(--cf-muted)]">
+    Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }}
+  </p>
+  <div class="flex gap-1">
+    {% if page_obj.has_previous %}
+      <a href="?page=1{% if status %}&status={{ status }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if service_filter %}&service={{ service_filter }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}{% if payment_filter %}&payment_state={{ payment_filter }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="{% url 'dashboard:appointments' %}"
+         hx-target="#appointments-table"
+         hx-push-url="true">First</a>
+      <a href="?page={{ page_obj.previous_page_number }}{% if status %}&status={{ status }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if service_filter %}&service={{ service_filter }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}{% if payment_filter %}&payment_state={{ payment_filter }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="{% url 'dashboard:appointments' %}"
+         hx-target="#appointments-table"
+         hx-push-url="true">Previous</a>
+    {% endif %}
+    {% for num in page_obj.paginator.page_range %}
+      {% if page_obj.number == num %}
+        <span class="cf-btn cf-btn-primary px-3 py-1.5 text-sm">{{ num }}</span>
+      {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+        <a href="?page={{ num }}{% if status %}&status={{ status }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if service_filter %}&service={{ service_filter }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}{% if payment_filter %}&payment_state={{ payment_filter }}{% endif %}"
+           class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+           hx-get="{% url 'dashboard:appointments' %}"
+           hx-target="#appointments-table"
+           hx-push-url="true">{{ num }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+      <a href="?page={{ page_obj.next_page_number }}{% if status %}&status={{ status }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if service_filter %}&service={{ service_filter }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}{% if payment_filter %}&payment_state={{ payment_filter }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="{% url 'dashboard:appointments' %}"
+         hx-target="#appointments-table"
+         hx-push-url="true">Next</a>
+      <a href="?page={{ page_obj.paginator.num_pages }}{% if status %}&status={{ status }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if service_filter %}&service={{ service_filter }}{% endif %}{% if source_filter %}&source={{ source_filter }}{% endif %}{% if payment_filter %}&payment_state={{ payment_filter }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="{% url 'dashboard:appointments' %}"
+         hx-target="#appointments-table"
+         hx-push-url="true">Last</a>
+    {% endif %}
+  </div>
+</nav>
+{% endif %}

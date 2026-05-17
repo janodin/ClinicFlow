@@ -1,0 +1,32 @@
+<div class="soft-card rounded-3xl p-6 space-y-4">
+  <div class="flex items-center justify-between">
+    <h2 class="text-xl font-black">Potential Duplicates</h2>
+    <div class="flex items-center gap-2">
+      <button hx-get="{% url 'dashboard:find_duplicates' %}" hx-target="#duplicate-panel" hx-swap="innerHTML" hx-disabled-elt="this"
+              hx-on::before-request="this.querySelector('.refresh-spinner').style.display='inline-flex'; this.querySelector('.refresh-text').style.display='none';"
+              hx-on::after-request="this.querySelector('.refresh-spinner').style.display='none'; this.querySelector('.refresh-text').style.display='inline';"
+               class="inline-flex items-center justify-center rounded-xl border border-transparent bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-700 transition hover:border-cyan-200 hover:bg-cyan-100">
+        <span class="refresh-spinner" style="display:none">
+          <i data-lucide="loader-2" class="h-3 w-3 animate-spin"></i>
+        </span>
+        <span class="refresh-text">Refresh</span>
+      </button>
+      <button onclick="document.getElementById('duplicate-panel').innerHTML=''" class="inline-flex items-center rounded-xl border border-transparent bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-200">Close</button>
+    </div>
+  </div>
+  {% if duplicates %}
+    <div class="space-y-3">
+      {% for primary, duplicate in duplicates %}
+        <div class="flex items-center justify-between rounded-2xl border border-slate-100 p-4">
+          <div class="text-sm">
+            <p class="font-black text-slate-700">{{ duplicate.full_name }} <span class="text-slate-400">matches</span> {{ primary.full_name }}</p>
+            <p class="text-slate-500">{{ duplicate.formatted_phone }} · {{ duplicate.email|default:"No email" }}</p>
+          </div>
+          <button hx-get="{% url 'dashboard:patient_merge' %}?primary_id={{ primary.id }}&duplicate_id={{ duplicate.id }}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="rounded-xl bg-cyan-700 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-cyan-700/20">Merge</button>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-slate-500">No duplicates found.</p>
+  {% endif %}
+</div>

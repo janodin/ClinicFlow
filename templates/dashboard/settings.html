@@ -1,0 +1,290 @@
+{% extends "dashboard/base.html" %}
+{% load dashboard_extras %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+{% active_membership_role as role %}
+<div x-data="{tab: window.location.search.includes('tab=') ? new URLSearchParams(window.location.search).get('tab') : 'general'}" class="cf-page">
+  <div class="cf-page-header">
+    <div><h1 class="ui-page-title">Settings</h1><p class="mt-2 text-[var(--cf-muted)]">Manage clinic profile, booking behavior, and hours.</p></div>
+  </div>
+
+  <div class="cf-tabs">
+    <button @click="tab='general'; history.replaceState(null,'',window.location.pathname+'?tab=general')" :class="tab==='general' ? 'cf-tab-active' : ''" class="cf-tab">
+      <i data-lucide="settings" class="h-4 w-4"></i> General
+    </button>
+    <button @click="tab='hours'; history.replaceState(null,'',window.location.pathname+'?tab=hours')" :class="tab==='hours' ? 'cf-tab-active' : ''" class="cf-tab">
+      <i data-lucide="clock" class="h-4 w-4"></i> Business Hours
+    </button>
+    <button @click="tab='blocked'; history.replaceState(null,'',window.location.pathname+'?tab=blocked')" :class="tab==='blocked' ? 'cf-tab-active' : ''" class="cf-tab">
+      <i data-lucide="ban" class="h-4 w-4"></i> Blocked Times
+    </button>
+    <button @click="tab='unavailable'; history.replaceState(null,'',window.location.pathname+'?tab=unavailable')" :class="tab==='unavailable' ? 'cf-tab-active' : ''" class="cf-tab">
+      <i data-lucide="calendar-off" class="h-4 w-4"></i> Unavailable Dates
+    </button>
+    <button @click="tab='preview'; history.replaceState(null,'',window.location.pathname+'?tab=preview')" :class="tab==='preview' ? 'cf-tab-active' : ''" class="cf-tab">
+      <i data-lucide="eye" class="h-4 w-4"></i> Slot Preview
+    </button>
+  </div>
+
+  <!-- TAB: General -->
+  <div x-show="tab==='general'">
+    <form method="post" enctype="multipart/form-data" class="cf-card grid gap-5 p-6 md:grid-cols-2">
+      {% csrf_token %}
+      {% for field in form %}
+        <div class="cf-field">
+          {% if field.field.widget.input_type != 'checkbox' %}
+            <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
+            {{ field }}
+          {% else %}
+            <label class="flex items-center gap-2 cursor-pointer">
+              {{ field }}
+              <span class="text-sm text-[var(--cf-ink)]">{{ field.label }}</span>
+            </label>
+          {% endif %}
+          {% if field.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ field.errors.0 }}</p>{% endif %}
+        </div>
+      {% endfor %}
+      <div class="md:col-span-2 border-t border-[var(--cf-line)] pt-4">
+        <button class="cf-btn cf-btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- TAB: Business Hours -->
+  <div x-show="tab==='hours'">
+    <form method="post" action="{% url 'dashboard:save_business_hours' %}" class="cf-card p-6">
+      {% csrf_token %}
+      <div class="cf-table-wrap">
+        <table class="cf-table">
+          <thead>
+            <tr><th class="p-4">Day</th><th>Open</th><th>Hours</th><th>Break</th></tr>
+          </thead>
+          <tbody class="divide-y divide-[var(--cf-line-soft)]">
+            {% for weekday in hours_weekdays %}
+              {% with h=hours_dict|get_item:weekday %}
+              <tr>
+                <td class="p-4 font-semibold">
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="is_open_{{ weekday }}" {% if h and h.is_open or not h %}checked{% endif %} class="cf-checkbox">
+                    <span class="text-[var(--cf-ink)]">
+                      {% if weekday == 0 %}Monday{% elif weekday == 1 %}Tuesday{% elif weekday == 2 %}Wednesday{% elif weekday == 3 %}Thursday{% elif weekday == 4 %}Friday{% elif weekday == 5 %}Saturday{% else %}Sunday{% endif %}
+                    </span>
+                  </label>
+                </td>
+                <td class="p-4">
+                  <input type="time" name="open_time_{{ weekday }}" value="{% if h %}{{ h.open_time|time:'H:i' }}{% else %}09:00{% endif %}" class="ui-input">
+                </td>
+                <td class="p-4">
+                  <input type="time" name="close_time_{{ weekday }}" value="{% if h %}{{ h.close_time|time:'H:i' }}{% else %}17:00{% endif %}" class="ui-input">
+                </td>
+                <td class="p-4 flex gap-2">
+                  <input type="time" name="break_start_{{ weekday }}" value="{% if h and h.break_start %}{{ h.break_start|time:'H:i' }}{% else %}12:00{% endif %}" class="ui-input">
+                  <span class="self-center text-[var(--cf-muted)]">to</span>
+                  <input type="time" name="break_end_{{ weekday }}" value="{% if h and h.break_end %}{{ h.break_end|time:'H:i' }}{% else %}13:00{% endif %}" class="ui-input">
+                </td>
+              </tr>
+              {% endwith %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-6 border-t border-[var(--cf-line)] pt-4">
+        <button class="cf-btn cf-btn-primary">Save Business Hours</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- TAB: Blocked Times -->
+  <div x-show="tab==='blocked'" x-data="{open:false, deleteOpen:false, deleteUrl:''}">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
+      <p class="text-sm text-[var(--cf-muted)]">Temporarily block specific time ranges for the clinic.</p>
+      <button @click="open=true" class="cf-btn cf-btn-primary">Add Blocked Time</button>
+    </div>
+    {% if blocked_times %}
+    <div class="cf-table-wrap">
+      <table class="cf-table">
+        <thead><tr><th class="p-4">Start</th><th class="p-4">End</th><th class="p-4">Reason</th><th class="p-4">Action</th></tr></thead>
+        <tbody class="divide-y divide-[var(--cf-line-soft)]">
+        {% for bt in blocked_times %}
+          <tr>
+            <td class="p-4 text-[var(--cf-ink)]">{{ bt.starts_at|date:"M j, Y" }}<div class="text-[var(--cf-muted)]">{{ bt.starts_at|time:"g:i A" }}</div></td>
+            <td class="p-4 text-[var(--cf-muted)]">{{ bt.ends_at|date:"M j, Y" }}<div class="text-[var(--cf-muted)]">{{ bt.ends_at|time:"g:i A" }}</div></td>
+            <td class="p-4 text-[var(--cf-muted)]">{{ bt.reason|default:"—" }}</td>
+            <td class="p-4">
+              <button @click="deleteUrl='{% url 'dashboard:delete_blocked_time' bt.id %}'; deleteOpen=true" class="cf-btn cf-btn-sm cf-btn-danger border border-transparent hover:border-[var(--cf-status-cancelled-text)]">Delete</button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="cf-empty-state">
+      <div class="cf-icon-box mb-4 p-4"><i data-lucide="ban" class="h-6 w-6"></i></div>
+      <p class="cf-section-title">No blocked times</p>
+      <p class="mt-1 text-[var(--cf-muted)]">Click "Add Blocked Time" to mark time ranges when the clinic cannot accept appointments.</p>
+    </div>
+    {% endif %}
+    <div x-show="open" class="cf-modal-backdrop" x-cloak>
+      <form method="post" action="{% url 'dashboard:create_blocked_time' %}" class="cf-modal w-full max-w-xl space-y-4 p-6">
+        {% csrf_token %}<div class="flex items-center justify-between"><h2 class="cf-section-title">Add Blocked Time</h2><button type="button" @click="open=false" class="rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)]"><i data-lucide="x" class="h-4 w-4"></i></button></div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="cf-field">
+            <label class="cf-label">Starts at</label>
+            <input type="datetime-local" name="starts_at" required class="ui-input">
+          </div>
+          <div class="cf-field">
+            <label class="cf-label">Ends at</label>
+            <input type="datetime-local" name="ends_at" required class="ui-input">
+          </div>
+          <div class="cf-field">
+            <label class="cf-label">Reason</label>
+            <input type="text" name="reason" maxlength="160" placeholder="e.g. Staff meeting" class="ui-input">
+          </div>
+        </div>
+        <button class="cf-btn cf-btn-primary w-full">Create Blocked Time</button>
+      </form>
+    </div>
+    <!-- Delete confirmation modal -->
+    <div x-show="deleteOpen" class="cf-modal-backdrop" x-cloak>
+      <form method="post" :action="deleteUrl" class="cf-modal w-full max-w-md space-y-4 p-6">
+        {% csrf_token %}
+        <div class="flex items-center justify-between">
+          <h2 class="cf-section-title">Delete Blocked Time</h2>
+          <button type="button" @click="deleteOpen=false" class="rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)]">
+            <i data-lucide="x" class="h-4 w-4"></i>
+          </button>
+        </div>
+        <p class="text-sm text-[var(--cf-muted)]">Are you sure you want to delete this blocked time? This action cannot be undone.</p>
+        <div class="flex gap-3">
+          <button type="button" @click="deleteOpen=false" class="cf-btn cf-btn-secondary flex-1">Cancel</button>
+          <button class="cf-btn cf-btn-danger flex-1">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TAB: Unavailable Dates -->
+  <div x-show="tab==='unavailable'" x-data="{open:false, deleteOpen:false, deleteUrl:''}">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
+      <p class="text-sm text-[var(--cf-muted)]">Mark holidays or days off for the clinic.</p>
+      <button @click="open=true" class="cf-btn cf-btn-primary">Add Unavailable Date</button>
+    </div>
+    {% if unavailable_dates %}
+    <div class="cf-table-wrap">
+      <table class="cf-table">
+        <thead><tr><th class="p-4">Date</th><th class="p-4">Reason</th><th class="p-4">Action</th></tr></thead>
+        <tbody class="divide-y divide-[var(--cf-line-soft)]">
+        {% for ud in unavailable_dates %}
+          <tr>
+            <td class="p-4 text-[var(--cf-ink)]">{{ ud.date|date:"l, M j, Y" }}</td>
+            <td class="p-4 text-[var(--cf-muted)]">{{ ud.reason|default:"—" }}</td>
+            <td class="p-4">
+              <button @click="deleteUrl='{% url 'dashboard:delete_unavailable_date' ud.id %}'; deleteOpen=true" class="cf-btn cf-btn-sm cf-btn-danger border border-transparent hover:border-[var(--cf-status-cancelled-text)]">Delete</button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="cf-empty-state">
+      <div class="cf-icon-box mb-4 p-4"><i data-lucide="calendar-off" class="h-6 w-6"></i></div>
+      <p class="cf-section-title">No unavailable dates</p>
+      <p class="mt-1 text-[var(--cf-muted)]">Click "Add Unavailable Date" to mark holidays or days off.</p>
+    </div>
+    {% endif %}
+    <div x-show="open" class="cf-modal-backdrop" x-cloak>
+      <form method="post" action="{% url 'dashboard:create_unavailable_date' %}" class="cf-modal w-full max-w-xl space-y-4 p-6">
+        {% csrf_token %}<div class="flex items-center justify-between"><h2 class="cf-section-title">Add Unavailable Date</h2><button type="button" @click="open=false" class="rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)]"><i data-lucide="x" class="h-4 w-4"></i></button></div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="cf-field">
+            <label class="cf-label">Date</label>
+            <input type="date" name="date" required class="ui-input">
+          </div>
+          <div class="md:col-span-2 cf-field">
+            <label class="cf-label">Reason</label>
+            <input type="text" name="reason" maxlength="160" placeholder="e.g. Holiday" class="ui-input">
+          </div>
+        </div>
+        <button class="cf-btn cf-btn-primary w-full">Save Unavailable Date</button>
+      </form>
+    </div>
+    <!-- Delete confirmation modal -->
+    <div x-show="deleteOpen" class="cf-modal-backdrop" x-cloak>
+      <form method="post" :action="deleteUrl" class="cf-modal w-full max-w-md space-y-4 p-6">
+        {% csrf_token %}
+        <div class="flex items-center justify-between">
+          <h2 class="cf-section-title">Delete Unavailable Date</h2>
+          <button type="button" @click="deleteOpen=false" class="rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)]">
+            <i data-lucide="x" class="h-4 w-4"></i>
+          </button>
+        </div>
+        <p class="text-sm text-[var(--cf-muted)]">Are you sure you want to delete this unavailable date? This action cannot be undone.</p>
+        <div class="flex gap-3">
+          <button type="button" @click="deleteOpen=false" class="cf-btn cf-btn-secondary flex-1">Cancel</button>
+          <button class="cf-btn cf-btn-danger flex-1">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TAB: Slot Preview -->
+  <div x-show="tab==='preview'">
+    <p class="mb-4 text-sm text-[var(--cf-muted)]">Preview available slots for a service on a specific date.</p>
+    <form method="post" class="cf-card p-6 mb-4">
+      {% csrf_token %}
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="cf-field">
+          <label class="cf-label">Service</label>
+          <select name="service" required class="ui-input ui-select">
+            <option value="">Select service</option>
+            {% for service in clinic.services.all %}<option value="{{ service.id }}" {% if slot_service.id == service.id %}selected{% endif %}>{{ service.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="cf-field">
+          <label class="cf-label">Date</label>
+          <input type="date" name="date" value="{{ slot_date|date:'Y-m-d' }}" required class="ui-input">
+        </div>
+      </div>
+      <div class="mt-4 border-t border-[var(--cf-line)] pt-4">
+        <button class="cf-btn cf-btn-primary">Preview Slots</button>
+      </div>
+    </form>
+    {% if slot_date %}
+    <section class="cf-card p-6">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div>
+          <h2 class="cf-section-title">Available Slots</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">{{ slot_date|date:"l, M j, Y" }} · {{ slot_service.name|default:"No service" }}</p>
+        </div>
+        {% if slot_results %}
+          <span class="cf-badge cf-badge-info">{{ slot_results|length }} slot{{ slot_results|length|pluralize }}</span>
+        {% endif %}
+      </div>
+      {% if not slot_service %}
+        <div class="cf-empty-state">
+          <div class="cf-icon-box mb-4 p-4"><i data-lucide="stethoscope" class="h-6 w-6"></i></div>
+          <p class="cf-section-title">No service selected</p>
+          <p class="mt-1 text-[var(--cf-muted)]">Select an active service to preview slots.</p>
+        </div>
+      {% elif slot_results %}
+        <div class="cf-slot-grid">
+          {% for slot in slot_results %}
+            <div class="cf-slot-button" title="{{ slot.starts_at|time:"g:i A" }} — {{ slot.ends_at|time:"g:i A" }}">
+              {{ slot.label }}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="cf-empty-state">
+          <div class="cf-icon-box mb-4 p-4"><i data-lucide="eye-off" class="h-6 w-6"></i></div>
+          <p class="cf-section-title">No available slots</p>
+          <p class="mt-1 text-[var(--cf-muted)]">Try selecting a different service or date.</p>
+        </div>
+      {% endif %}
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

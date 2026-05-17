@@ -1,0 +1,13 @@
+{% extends "emails/base_email.html" %}
+{% block email_title %}New Booking Alert{% endblock %}
+{% block content %}
+<h2>New appointment booked for {{ appointment.clinic.name }}</h2>
+
+<div class="detail-row"><span class="detail-label">Patient:</span> {{ appointment.patient.full_name }}</div>
+<div class="detail-row"><span class="detail-label">Phone:</span> {{ appointment.patient.phone }}</div>
+<div class="detail-row"><span class="detail-label">Email:</span> {{ appointment.patient.email|default:"Not provided" }}</div>
+<div class="detail-row"><span class="detail-label">Service:</span> {{ appointment.service.name }}</div>
+<div class="detail-row"><span class="detail-label">Clinic:</span> {{ clinic.name }}</div>
+<div class="detail-row"><span class="detail-label">Date and time:</span> {{ appointment.starts_at|date:"M j, Y g:i A" }}</div>
+<div class="detail-row"><span class="detail-label">Source:</span> {{ appointment.get_source_display }}</div>
+{% endblock %}

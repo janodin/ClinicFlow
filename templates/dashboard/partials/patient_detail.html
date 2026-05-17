@@ -1,0 +1,23 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ patient.full_name }}{% endblock %}
+{% block content %}
+<div x-data="{detailOpen:false, editOpen:false}">
+  <div id="patient-detail-content" class="cf-page">
+    {% include "dashboard/partials/patient_detail_content.html" %}
+  </div>
+
+  <!-- Appointment Detail Modal -->
+  <div x-show="detailOpen" class="cf-modal-backdrop" x-cloak @click.self="detailOpen=false">
+    <div class="cf-modal max-w-2xl" @click.stop>
+      <div id="detail-modal-body" class="p-6"></div>
+    </div>
+  </div>
+
+  <!-- Edit Patient Modal -->
+  <div x-show="editOpen" class="cf-modal-backdrop" x-cloak @click.self="editOpen=false">
+    <div class="cf-modal max-w-xl" @click.stop>
+      <div id="edit-modal-body" class="p-6"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,151 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Appointments{% endblock %}
+{% block content %}
+<div x-data="{open:false, detailOpen:false, patientOpen:false}" class="cf-page">
+  <div class="cf-page-header">
+    <div><h1 class="ui-page-title">Appointments</h1><p class="mt-2 text-sm text-[var(--cf-muted)]">Manage and track all clinic appointments</p></div>
+    <div class="flex gap-2">
+      <a href="{% url 'dashboard:export_csv' %}?{% if status %}status={{ status }}&{% endif %}{% if date_from %}date_from={{ date_from }}&{% endif %}{% if date_to %}date_to={{ date_to }}&{% endif %}{% if service_filter %}service={{ service_filter }}&{% endif %}{% if source_filter %}source={{ source_filter }}&{% endif %}{% if payment_filter %}payment_state={{ payment_filter }}{% endif %}"
+         class="cf-btn cf-btn-secondary">Export CSV</a>
+      <button @click="open=true" class="cf-btn cf-btn-primary">Add Appointment</button>
+    </div>
+  </div>
+
+  <form id="filter-form" class="cf-toolbar">
+    <div>
+      <label class="cf-kpi-label">From</label>
+      <input type="date" name="date_from" value="{{ date_from }}" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" class="ui-input">
+    </div>
+    <div>
+      <label class="cf-kpi-label">To</label>
+      <input type="date" name="date_to" value="{{ date_to }}" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" class="ui-input">
+    </div>
+    <div>
+      <label class="cf-kpi-label">Service</label>
+      <select name="service" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" class="ui-input ui-select">
+        <option value="">All Services</option>
+        {% for s in services %}
+          <option value="{{ s.id }}" {% if service_filter == s.id|stringformat:"s" %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="cf-kpi-label">Source</label>
+      <select name="source" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" class="ui-input ui-select">
+        <option value="">All Sources</option>
+        {% for value,label in source_choices %}
+          <option value="{{ value }}" {% if source_filter == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="cf-kpi-label">Payment</label>
+      <select name="payment_state" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" class="ui-input ui-select">
+        <option value="">All Payments</option>
+        {% for value,label in payment_choices %}
+          <option value="{{ value }}" {% if payment_filter == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  <div class="cf-toolbar">
+    <a class="cf-btn {% if not status %}cf-btn-primary{% else %}cf-btn-secondary{% endif %}" href="{% url 'dashboard:appointments' %}">All Status</a>
+    {% for value,label in status_choices %}
+      <a class="cf-btn {% if status == value %}cf-btn-primary{% else %}cf-btn-secondary{% endif %}" href="?status={{ value }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  <div id="appointments-table">
+    {% include "dashboard/partials/appointment_list.html" %}
+  </div>
+
+  <!-- Add Modal -->
+  <div x-show="open" class="cf-modal-backdrop" x-cloak @click.self="open=false">
+    <div class="cf-modal max-w-2xl">
+      <div class="flex items-center justify-between px-6 pt-6 pb-4 border-b border-[var(--cf-line-soft)]">
+        <h2 class="text-[var(--cf-section-title-size)] font-[850] text-[var(--cf-ink)]">Add Appointment</h2>
+        <button type="button" @click="open=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0">
+          <i data-lucide="x" class="h-5 w-5"></i>
+        </button>
+      </div>
+      <form method="post" action="{% url 'dashboard:create_appointment' %}" class="p-6 space-y-4">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="rounded-[var(--cf-radius-lg)] bg-[var(--cf-status-cancelled-bg)] p-3 text-sm text-[var(--cf-status-cancelled-text)]">
+            {{ form.non_field_errors.0 }}
+          </div>
+        {% endif %}
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="cf-field">
+            <div class="flex items-center justify-between">
+              <label for="{{ form.patient_name.id_for_label }}" class="cf-label">{{ form.patient_name.label }}</label>
+              <button type="button" @click="patientOpen=true" class="text-xs text-[var(--cf-brand)] hover:underline">+ Add New Patient</button>
+            </div>
+            {{ form.patient_name }}
+            {% if form.patient_name.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.patient_name.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.patient_phone.id_for_label }}" class="cf-label">{{ form.patient_phone.label }}</label>
+            {{ form.patient_phone }}
+            {% if form.patient_phone.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.patient_phone.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.patient_email.id_for_label }}" class="cf-label">{{ form.patient_email.label }}</label>
+            {{ form.patient_email }}
+            {% if form.patient_email.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.patient_email.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.service.id_for_label }}" class="cf-label">{{ form.service.label }}</label>
+            {{ form.service }}
+            {% if form.service.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.service.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.date.id_for_label }}" class="cf-label">{{ form.date.label }}</label>
+            {{ form.date }}
+            {% if form.date.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.date.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.time.id_for_label }}" class="cf-label">{{ form.time.label }}</label>
+            {{ form.time }}
+            {% if form.time.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.time.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.status.id_for_label }}" class="cf-label">{{ form.status.label }}</label>
+            {{ form.status }}
+            {% if form.status.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.status.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.payment_state.id_for_label }}" class="cf-label">{{ form.payment_state.label }}</label>
+            {{ form.payment_state }}
+            {% if form.payment_state.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.payment_state.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ form.source.id_for_label }}" class="cf-label">{{ form.source.label }}</label>
+            {{ form.source }}
+            {% if form.source.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.source.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field md:col-span-2">
+            <label for="{{ form.reason.id_for_label }}" class="cf-label">{{ form.reason.label }}</label>
+            {{ form.reason }}
+            {% if form.reason.errors %}<p class="text-xs text-[var(--cf-red)] mt-1">{{ form.reason.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+        <div class="flex gap-3 pt-4 border-t border-[var(--cf-line-soft)]">
+          <button type="submit" class="cf-btn cf-btn-primary flex-1">Create Appointment</button>
+          <button type="button" @click="open=false" class="cf-btn cf-btn-secondary flex-1">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div x-show="detailOpen" class="cf-modal-backdrop" x-cloak @click.self="detailOpen=false">
+    <div class="cf-modal max-w-2xl" @click.stop>
+      <div id="detail-modal-body" class="p-6"></div>
+    </div>
+  </div>
+
+  {% include "dashboard/partials/add_patient_modal.html" %}
+</div>
+{% endblock %}

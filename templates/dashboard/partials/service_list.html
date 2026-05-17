@@ -1,0 +1,30 @@
+<div x-show="tab==='active'" class="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+  {% for service in active_services %}
+    {% include "dashboard/partials/service_row.html" with service=service %}
+  {% empty %}
+    <div class="cf-empty-state col-span-full bg-[var(--cf-surface-muted)] rounded-[var(--cf-radius-lg)]">
+      <div class="cf-icon-box h-16 w-16">
+        <i data-lucide="stethoscope" class="h-8 w-8"></i>
+      </div>
+      <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No active services</p>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Add your first service so patients can book appointments.</p>
+      {% if can_manage %}
+        <button @click="open=true" class="cf-btn cf-btn-primary mt-4">Add Service</button>
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>
+
+<div x-show="tab==='archived'" class="grid gap-5 md:grid-cols-2 xl:grid-cols-4" x-cloak>
+  {% for service in archived_services %}
+    {% include "dashboard/partials/service_row.html" with service=service %}
+  {% empty %}
+    <div class="cf-empty-state col-span-full bg-[var(--cf-surface-muted)] rounded-[var(--cf-radius-lg)]">
+      <div class="cf-icon-box h-16 w-16 bg-[var(--cf-surface)] text-[var(--cf-muted)]">
+        <i data-lucide="archive" class="h-8 w-8"></i>
+      </div>
+      <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No archived services</p>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Archived services will appear here.</p>
+    </div>
+  {% endfor %}
+</div>

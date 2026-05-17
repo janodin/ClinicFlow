@@ -1,0 +1,381 @@
+from datetime import datetime, timedelta, timezone as dt_timezone
+from zoneinfo import ZoneInfo
+import json
+
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.http import require_POST
+
+from appointments.models import Appointment
+from clinics.models import Clinic
+from patients.models import Patient
+from scheduling.utils import generate_slots
+
+
+def _find_next_available_date(clinic, service, from_date, max_days=14):
+    if service is None:
+        return None
+    for i in range(1, max_days + 1):
+        d = from_date + timedelta(days=i)
+        slots = generate_slots(clinic, service, d)
+        if slots:
+            return d
+    return None
+
+
+def _booking_context(clinic, request):
+    services = clinic.services.filter(is_active=True, is_archived=False)
+    service_id = request.GET.get("service")
+    service = services.filter(pk=service_id).first() if service_id else services.first()
+    date_str = request.GET.get("date")
+    selected_date = timezone.localdate() + timedelta(days=1)
+    if date_str:
+        try:
+            selected_date = timezone.datetime.fromisoformat(date_str).date()
+        except ValueError:
+            pass
+    slots = []
+    if service:
+        slots = generate_slots(clinic, service, selected_date)
+    next_available_date = None
+    if not slots:
+        next_available_date = _find_next_available_date(clinic, service, selected_date)
+    dates = [timezone.localdate() + timedelta(days=i) for i in range(1, 15)]
+    return {
+        "clinic": clinic,
+        "services": services,
+        "service": service,
+        "dates": dates,
+        "selected_date": selected_date,
+        "slots": slots,
+        "next_available_date": next_available_date,
+    }
+
+
+def public_booking(request, clinic_slug):
+    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    if request.method == "POST":
+        return create_guest_booking(request, clinic)
+    return render(request, "widget/public_booking.html", _booking_context(clinic, request))
+
+
+@xframe_options_exempt
+def widget_home(request, clinic_slug):
+    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    context = _booking_context(clinic, request)
+    context["faqs"] = clinic.faqs.filter(is_active=True)
+    context["widget_source"] = request.GET.get("source", "chat_widget")
+    return render(request, "widget/widget.html", context)
+
+
+def widget_slots(request, clinic_slug):
+    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    return render(request, "widget/partials/slots.html", _booking_context(clinic, request))
+
+
+def _process_guest_booking(clinic, data, source):
+    service = get_object_or_404(clinic.services.filter(is_active=True, is_archived=False), pk=data.get("service"))
+    starts_at = datetime.fromisoformat(data["starts_at"])
+    if timezone.is_naive(starts_at):
+        starts_at = timezone.make_aware(starts_at)
+    starts_at = starts_at.astimezone(dt_timezone.utc)
+    ends_at = starts_at + timedelta(minutes=service.effective_duration())
+    available = any(
+        slot["starts_at"] == starts_at
+        for slot in generate_slots(
+            clinic,
+            service,
+            starts_at.astimezone(ZoneInfo(clinic.timezone)).date(),
+        )
+    )
+    if not available:
+        return None, "That slot is no longer available. Please choose another time."
+    patient, _ = Patient.find_or_create_for_booking(
+        clinic=clinic,
+        full_name=data.get("full_name", "").strip(),
+        phone=data.get("phone", "").strip(),
+        email=data.get("email", "").strip(),
+        notes=data.get("reason", "").strip(),
+    )
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        status=Appointment.STATUS_CONFIRMED if clinic.booking_approval_mode == Clinic.APPROVAL_AUTO else Appointment.STATUS_PENDING,
+        source=source,
+        reason=data.get("reason", ""),
+    )
+    return appointment, None
+
+
+def create_guest_booking(request, clinic):
+    source = request.POST.get("source", Appointment.SOURCE_DIRECT)
+    appointment, error = _process_guest_booking(clinic, request.POST, source)
+    if error:
+        context = _booking_context(clinic, request)
+        context["error"] = error
+        return render(request, "widget/public_booking.html", context, status=409)
+    return render(request, "widget/booking_success.html", {"clinic": clinic, "appointment": appointment})
+
+
+def appointment_ics(request, clinic_slug, appointment_id):
+    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    appointment = get_object_or_404(Appointment, clinic=clinic, pk=appointment_id)
+    start_utc = appointment.starts_at.astimezone(dt_timezone.utc)
+    end_utc = appointment.ends_at.astimezone(dt_timezone.utc)
+    start = start_utc.strftime("%Y%m%dT%H%M%SZ")
+    end = end_utc.strftime("%Y%m%dT%H%M%SZ")
+    summary = f"Appointment at {clinic.name}"
+    description = f"{appointment.service.name} at {clinic.name}"
+    ics_content = (
+        "BEGIN:VCALENDAR\r\n"
+        "VERSION:2.0\r\n"
+        "BEGIN:VEVENT\r\n"
+        f"DTSTART:{start}\r\n"
+        f"DTEND:{end}\r\n"
+        f"SUMMARY:{summary}\r\n"
+        f"DESCRIPTION:{description}\r\n"
+        "END:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    )
+    response = HttpResponse(ics_content, content_type="text/calendar")
+    response["Content-Disposition"] = f'attachment; filename="appointment-{appointment.reference_code}.ics"'
+    return response
+
+
+def embed_js(request, clinic_slug):
+    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    src = request.build_absolute_uri(reverse("widget:home", args=[clinic.slug])) + "?source=embed"
+    accent = clinic.widget_accent_color or "#0891b2"
+    body = f"""
+(function() {{
+  var accent = {json.dumps(accent)};
+  var src = {json.dumps(src)};
+  var iframe;
+  var launcher = document.createElement('button');
+  launcher.setAttribute('aria-label', 'Open booking widget');
+  launcher.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+  launcher.style.cssText = 'position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;border:none;z-index:9999;background:' + accent + ';color:white;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;transition:transform .2s;';
+  launcher.addEventListener('mouseenter', function() {{ launcher.style.transform = 'scale(1.05)'; }});
+  launcher.addEventListener('mouseleave', function() {{ launcher.style.transform = 'scale(1)'; }});
+  launcher.addEventListener('click', function() {{
+    if (!iframe) {{
+      iframe = document.createElement('iframe');
+      iframe.src = src;
+      iframe.style.cssText = 'position:fixed;bottom:24px;right:24px;width:420px;height:680px;border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);opacity:0;transform:translateY(20px);transition:opacity .3s, transform .3s;';
+      iframe.allow = 'clipboard-write';
+      document.body.appendChild(iframe);
+      requestAnimationFrame(function() {{ iframe.style.opacity = '1'; iframe.style.transform = 'translateY(0)'; }});
+    }} else {{
+      iframe.style.display = 'block';
+      requestAnimationFrame(function() {{ iframe.style.opacity = '1'; iframe.style.transform = 'translateY(0)'; }});
+    }}
+    launcher.style.display = 'none';
+  }});
+  document.body.appendChild(launcher);
+  window.addEventListener('message', function(e) {{
+    if (e.data && e.data.type === 'clinicflow-minimize') {{
+      if (iframe) {{
+        iframe.style.opacity = '0';
+        iframe.style.transform = 'translateY(20px)';
+        setTimeout(function() {{ iframe.style.display = 'none'; }}, 300);
+      }}
+      launcher.style.display = 'flex';
+    }}
+  }});
+}})();
+"""
+    return HttpResponse(body, content_type="application/javascript")
+
+
+def chat_api(request, clinic_slug):
+    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    services = list(
+        clinic.services.filter(is_active=True, is_archived=False).values(
+            "id", "name", "duration_minutes", "price", "display_price"
+        )
+    )
+    return JsonResponse({"message": clinic.widget_welcome_message, "services": services})
+
+
+@require_POST
+def chat_step(request, clinic_slug):
+    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    session_key = f"widget_chat_{clinic.id}"
+    data = request.session.get(session_key, {"state": "greeting"})
+    action = request.POST.get("action", "")
+    value = request.POST.get("value", "")
+    state = data.get("state", "greeting")
+
+    if state == "greeting":
+        if value == "start_booking" or action == "start_booking":
+            state = "select_service"
+            data["state"] = state
+            request.session[session_key] = data
+            action = ""
+            value = ""
+        elif value == "view_faqs" or action == "view_faqs":
+            faqs = clinic.faqs.filter(is_active=True)
+            message = "Here are some frequently asked questions:"
+            options = [{"label": f.question, "value": f"faq:{f.id}", "type": "faq"} for f in faqs]
+            data["state"] = state
+            request.session[session_key] = data
+            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_faq"})
+        else:
+            if action == "text_input" and value:
+                low = value.lower()
+                if low in ("faq", "help", "faqs"):
+                    faqs = clinic.faqs.filter(is_active=True)
+                    message = "Here are some frequently asked questions:"
+                    options = [{"label": f.question, "value": f"faq:{f.id}", "type": "faq"} for f in faqs]
+                    data["state"] = state
+                    request.session[session_key] = data
+                    return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_faq"})
+            message = clinic.widget_welcome_message or "Welcome! How can we help you today?"
+            options = [
+                {"label": "Book an appointment", "value": "start_booking"},
+                {"label": "View FAQs", "value": "view_faqs"},
+            ]
+            data["state"] = state
+            request.session[session_key] = data
+            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+
+    if state == "select_service":
+        if action == "select_option" and value:
+            service = clinic.services.filter(pk=value, is_active=True, is_archived=False).first()
+            if service:
+                data["service_id"] = service.id
+                state = "select_date"
+            else:
+                message = "Please select a valid service."
+                options = [{"label": s.name, "value": str(s.id)} for s in clinic.services.filter(is_active=True, is_archived=False)]
+                data["state"] = state
+                request.session[session_key] = data
+                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+        else:
+            options = [{"label": s.name, "value": str(s.id)} for s in clinic.services.filter(is_active=True, is_archived=False)]
+            message = "Which service would you like to book?"
+            data["state"] = state
+            request.session[session_key] = data
+            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+
+    if state == "select_date":
+        if action == "select_option" and value:
+            try:
+                selected_date = datetime.fromisoformat(value).date()
+            except (ValueError, TypeError):
+                selected_date = None
+            if selected_date:
+                data["date"] = value
+                state = "select_time"
+            else:
+                message = "Please select a valid date."
+                options = [{"label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "value": (timezone.localdate() + timedelta(days=i)).isoformat()} for i in range(1, 15)]
+                data["state"] = state
+                request.session[session_key] = data
+                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+        else:
+            options = [{"label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "value": (timezone.localdate() + timedelta(days=i)).isoformat()} for i in range(1, 15)]
+            message = "What date works for you?"
+            data["state"] = state
+            request.session[session_key] = data
+            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+
+    if state == "select_time":
+        service_id = data.get("service_id")
+        date_str = data.get("date")
+        service = clinic.services.filter(pk=service_id).first()
+        selected_date = datetime.fromisoformat(date_str).date()
+        slots = generate_slots(clinic, service, selected_date)
+        if action == "select_option" and value:
+            starts_at = datetime.fromisoformat(value)
+            if timezone.is_naive(starts_at):
+                starts_at = timezone.make_aware(starts_at)
+            starts_at = starts_at.astimezone(dt_timezone.utc)
+            if any(slot["starts_at"] == starts_at for slot in slots):
+                data["starts_at"] = value
+                state = "collect_info"
+            else:
+                message = "That slot is no longer available. Please choose another."
+                options = [{"label": slot["label"], "value": slot["starts_at"].isoformat()} for slot in slots]
+                data["state"] = state
+                request.session[session_key] = data
+                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+        else:
+            if slots:
+                options = [{"label": slot["label"], "value": slot["starts_at"].isoformat()} for slot in slots]
+                message = "Here are the available times:"
+                next_action = "select_option"
+                data["state"] = state
+                request.session[session_key] = data
+                return JsonResponse({"state": state, "message": message, "options": options, "next_action": next_action})
+            else:
+                options = [{"label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "value": (timezone.localdate() + timedelta(days=i)).isoformat()} for i in range(1, 15)]
+                message = "Sorry, no slots available on that date. Please choose another date."
+                state = "select_date"
+                data["state"] = state
+                request.session[session_key] = data
+                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+
+    if state == "collect_info":
+        if action == "submit_info":
+            full_name = request.POST.get("full_name", "").strip()
+            phone = request.POST.get("phone", "").strip()
+            email = request.POST.get("email", "").strip()
+            if not full_name or not phone:
+                message = "Please provide your full name and phone number."
+                data["state"] = state
+                request.session[session_key] = data
+                return JsonResponse({"state": state, "message": message, "options": [], "next_action": "submit_info"})
+            data["full_name"] = full_name
+            data["phone"] = phone
+            data["email"] = email
+            state = "confirm"
+        else:
+            message = "Please provide your details to complete the booking."
+            data["state"] = state
+            request.session[session_key] = data
+            return JsonResponse({"state": state, "message": message, "options": [], "next_action": "submit_info"})
+
+    if state == "confirm":
+        service = clinic.services.filter(pk=data.get("service_id")).first()
+        starts_at = datetime.fromisoformat(data.get("starts_at"))
+        local_start = starts_at.astimezone(ZoneInfo(clinic.timezone))
+        if action == "select_option" and value == "confirm":
+            appointment, error = _process_guest_booking(clinic, {
+                "service": data.get("service_id"),
+                "starts_at": data.get("starts_at"),
+                "full_name": data.get("full_name"),
+                "phone": data.get("phone"),
+                "email": data.get("email", ""),
+                "reason": "",
+            }, Appointment.SOURCE_CHAT_WIDGET)
+            if error:
+                message = error
+                state = "select_time"
+                data["state"] = state
+                request.session[session_key] = data
+                return JsonResponse({"state": state, "message": message, "options": [], "next_action": "select_option"})
+            state = "booked"
+            message = f"Your appointment is confirmed! Reference: {appointment.reference_code}"
+            request.session.pop(session_key, None)
+            return JsonResponse({"state": state, "message": message, "options": [{"label": "Book another", "value": "restart"}], "next_action": "select_option"})
+        else:
+            summary = f"{service.name} at {clinic.name} on {local_start.strftime('%A, %B %d at %I:%M %p')}"
+            message = f"Please confirm your appointment:\n{summary}\nPatient: {data.get('full_name')}"
+            options = [
+                {"label": "Confirm", "value": "confirm"},
+                {"label": "Cancel", "value": "cancel"},
+            ]
+            data["state"] = state
+            request.session[session_key] = data
+            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
+
+    data["state"] = "greeting"
+    request.session[session_key] = data
+    return JsonResponse({"state": "greeting", "message": clinic.widget_welcome_message, "options": [{"label": "Book an appointment", "value": "start_booking"}], "next_action": "select_option"})

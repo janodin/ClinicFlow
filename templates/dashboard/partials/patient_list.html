@@ -1,0 +1,52 @@
+{% if patients %}
+  <div class="cf-table-wrap">
+    <div class="overflow-x-auto">
+      <table class="cf-table">
+        <thead class="text-xs uppercase text-[var(--cf-faint)]">
+          <tr>
+            <th class="p-5">Patient</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>Since</th>
+            <th>Status</th>
+            <th class="pr-5 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-[var(--cf-line-soft)]">
+          {% for patient in patients %}
+          <tr id="patient-row-{{ patient.id }}">
+            <td class="p-5">
+              <a href="{% url 'dashboard:patient_detail' patient.id %}" class="flex items-center gap-3">
+                <span class="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--cf-brand-soft)] text-sm font-black text-[var(--cf-brand)]">{{ patient.full_name|first }}</span>
+                <span>
+                  <span class="block font-black text-[var(--cf-ink)]">{{ patient.full_name }}</span>
+                  <span class="text-xs text-[var(--cf-muted)]">Patient #{{ patient.id }}</span>
+                </span>
+              </a>
+            </td>
+            <td class="text-[var(--cf-muted)]">{{ patient.formatted_phone }}</td>
+            <td class="text-[var(--cf-muted)]">{{ patient.email|default:"No email" }}</td>
+            <td class="text-[var(--cf-muted)]">{{ patient.created_at|date:"M Y" }}</td>
+            <td><span class="cf-badge cf-status-confirmed">Active</span></td>
+            <td class="pr-5">
+              <div class="flex justify-end gap-2">
+                <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-btn cf-btn-sm cf-btn-secondary">View</a>
+                <button @click="editOpen=true" hx-get="{% url 'dashboard:patient_edit' patient.id %}" hx-target="#edit-modal-body" class="cf-btn cf-btn-sm cf-btn-secondary">Edit</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <section class="cf-card cf-empty-state">
+    <div class="cf-icon-box h-20 w-20">
+      <i data-lucide="users" class="h-10 w-10"></i>
+    </div>
+    <h2 class="mt-5 text-xl font-black text-[var(--cf-ink)]">No patients found</h2>
+    <p class="mt-2 max-w-sm text-sm text-[var(--cf-muted)]">Try adjusting your search or add a new patient.</p>
+    <button @click="patientOpen=true" class="cf-btn cf-btn-primary mt-6">Add Patient</button>
+  </section>
+{% endif %}

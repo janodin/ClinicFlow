@@ -1,0 +1,44 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Unavailable Dates{% endblock %}
+{% block content %}
+<div x-data="{open:false}" class="space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div><h1 class="ui-page-title">Unavailable Dates</h1><p class="mt-2 text-slate-500">Mark holidays or days off for the clinic.</p></div>
+    <button @click="open=true" class="rounded-2xl bg-cyan-700 px-5 py-3 font-black text-white shadow-lg shadow-cyan-700/20">Add Unavailable Date</button>
+  </div>
+  <section class="soft-card overflow-hidden rounded-3xl">
+    <table class="w-full text-left text-sm">
+      <thead class="border-b border-slate-100 text-xs uppercase text-slate-400"><tr><th class="p-5">Date</th><th>Reason</th><th></th></tr></thead>
+      <tbody class="divide-y divide-slate-100">
+      {% for ud in unavailable_dates %}
+        <tr class="hover:bg-cyan-50/35">
+          <td class="p-5 font-black">{{ ud.date|date:"l, M j, Y" }}</td>
+          <td>{{ ud.reason|default:"—" }}</td>
+          <td class="p-5">
+            <form method="post" action="{% url 'dashboard:delete_unavailable_date' ud.id %}" onsubmit="return confirm('Delete this unavailable date?')">{% csrf_token %}<button class="font-black text-rose-600">Delete</button></form>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3" class="p-8 text-center text-slate-500">No unavailable dates.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <div x-show="open" class="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" x-cloak>
+    <form method="post" action="{% url 'dashboard:create_unavailable_date' %}" class="soft-card w-full max-w-xl space-y-4 rounded-3xl p-6">
+      {% csrf_token %}<div class="flex items-center justify-between"><h2 class="text-2xl font-black">Add Unavailable Date</h2><button type="button" @click="open=false">×</button></div>
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-sm font-bold text-slate-600">Date</label>
+          <input type="date" name="date" required class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition">
+        </div>
+        <div class="md:col-span-2">
+          <label class="mb-1 block text-sm font-bold text-slate-600">Reason</label>
+          <input type="text" name="reason" maxlength="160" placeholder="e.g. Holiday" class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition">
+        </div>
+      </div>
+      <button class="w-full rounded-2xl bg-cyan-700 px-5 py-3 font-black text-white">Save Unavailable Date</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

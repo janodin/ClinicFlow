@@ -1,0 +1,42 @@
+{% if patients or appointments or services %}
+  <div class="max-h-80 overflow-y-auto py-2">
+    {% if patients %}
+      <div class="px-4 py-1.5 text-xs font-black uppercase tracking-wider text-slate-400">Patients</div>
+      {% for patient in patients %}
+        <a href="{% url 'dashboard:patient_detail' patient.id %}" class="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-cyan-50">
+          <i data-lucide="user" class="h-4 w-4 text-slate-400"></i>
+          <div>
+            <div class="font-semibold text-slate-700">{{ patient.full_name }}</div>
+            <div class="text-xs text-slate-400">{{ patient.phone }}</div>
+          </div>
+        </a>
+      {% endfor %}
+    {% endif %}
+    {% if services %}
+      <div class="px-4 py-1.5 text-xs font-black uppercase tracking-wider text-slate-400">Services</div>
+      {% for service in services %}
+        <div class="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-cyan-50">
+          <i data-lucide="stethoscope" class="h-4 w-4 text-slate-400"></i>
+          <div>
+            <div class="font-semibold text-slate-700">{{ service.name }}</div>
+            <div class="text-xs text-slate-400">{{ service.duration_minutes }} min{% if service.price %} · ₱{{ service.price }}{% endif %}</div>
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+    {% if appointments %}
+      <div class="px-4 py-1.5 text-xs font-black uppercase tracking-wider text-slate-400">Appointments</div>
+      {% for appointment in appointments %}
+        <a href="{% url 'dashboard:appointments' %}" class="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-cyan-50">
+          <i data-lucide="calendar" class="h-4 w-4 text-slate-400"></i>
+          <div>
+            <div class="font-semibold text-slate-700">{{ appointment.patient.full_name }} — {{ appointment.service.name }}</div>
+            <div class="text-xs text-slate-400">{{ appointment.starts_at|date:"M j, g:i A" }} · {{ appointment.service.name }}</div>
+          </div>
+        </a>
+      {% endfor %}
+    {% endif %}
+  </div>
+{% else %}
+  <div class="px-4 py-6 text-center text-sm text-slate-400">No results found.</div>
+{% endif %}

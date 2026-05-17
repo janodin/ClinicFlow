@@ -1,0 +1,10 @@
+New appointment booked for {{ appointment.clinic.name }}.
+
+Patient: {{ appointment.patient.full_name }}
+Phone: {{ appointment.patient.phone }}
+Email: {{ appointment.patient.email|default:"Not provided" }}
+
+Service: {{ appointment.service.name }}
+Clinic: {{ clinic.name }}
+Date and time: {{ appointment.starts_at|date:"M j, Y g:i A" }}
+Source: {{ appointment.get_source_display }}

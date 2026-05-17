@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Booking Confirmed{% endblock %}
+{% block body %}
+<main class="grid min-h-screen place-items-center p-5">
+  <section class="cf-card w-full max-w-md p-8 text-center">
+    {% if clinic.logo %}
+      <img src="{{ clinic.logo.url }}" alt="{{ clinic.name }}" class="mx-auto h-20 w-20 rounded-full object-cover">
+    {% else %}
+      <div class="mx-auto grid h-20 w-20 place-items-center rounded-full text-white" style="background-color: {{ clinic.widget_accent_color }}">
+        <i data-lucide="check" class="h-10 w-10"></i>
+      </div>
+    {% endif %}
+    <h1 class="mt-6 text-2xl font-black text-[var(--cf-ink)]">Booking Confirmed!</h1>
+    <p class="mt-2 text-[var(--cf-muted)]">Your appointment has been successfully booked.</p>
+
+    <div class="mt-4 rounded-2xl p-4 text-white" style="background-color: {{ clinic.widget_accent_color }}">
+      <p class="text-sm font-medium opacity-90">Reference Code</p>
+      <p class="text-2xl font-black tracking-wider" data-testid="reference-code">{{ appointment.reference_code }}</p>
+    </div>
+
+    <div class="mt-6 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-5 text-left text-sm">
+      <div class="flex justify-between py-2"><span class="text-[var(--cf-muted)]">Service</span><strong class="text-[var(--cf-ink)]">{{ appointment.service.name }}</strong></div>
+      <div class="flex justify-between py-2"><span class="text-[var(--cf-muted)]">Clinic</span><strong class="text-[var(--cf-ink)]">{{ clinic.name }}</strong></div>
+      <div class="flex justify-between py-2"><span class="text-[var(--cf-muted)]">Date</span><strong class="text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y" }}</strong></div>
+      <div class="flex justify-between py-2"><span class="text-[var(--cf-muted)]">Time</span><strong class="text-[var(--cf-ink)]">{{ appointment.starts_at|time:"g:i A" }}</strong></div>
+      <div class="flex justify-between py-2"><span class="text-[var(--cf-muted)]">Patient</span><strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></div>
+    </div>
+
+    <a href="{% url 'widget:appointment_ics' clinic.slug appointment.id %}" class="cf-btn cf-btn-secondary mt-4">
+      <i data-lucide="calendar-plus" class="h-4 w-4"></i> Add to Calendar
+    </a>
+
+    <a href="{% url 'public_booking:book' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full" style="background-color: {{ clinic.widget_accent_color }}">Book Another Appointment</a>
+  </section>
+</main>
+{% endblock %}

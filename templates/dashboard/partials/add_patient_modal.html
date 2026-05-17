@@ -1,0 +1,13 @@
+<div x-show="patientOpen" class="cf-modal-backdrop" x-cloak @click.self="patientOpen=false">
+  <form method="post" action="{% url 'dashboard:create_patient' %}" class="cf-modal max-w-xl space-y-4 p-6">
+    {% csrf_token %}
+    <div class="flex items-center justify-between">
+      <h2 class="text-xl font-black text-[var(--cf-ink)]">Add New Patient</h2>
+      <button type="button" @click="patientOpen=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0">
+        <i data-lucide="x" class="h-5 w-5"></i>
+      </button>
+    </div>
+    {{ patient_form.as_p }}
+    <button class="cf-btn cf-btn-primary w-full">Add Patient</button>
+  </form>
+</div>

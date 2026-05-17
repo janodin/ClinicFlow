@@ -1,0 +1,21 @@
+<tr id="patient-row-{{ patient.id }}">
+  <td class="p-5">
+    <a href="{% url 'dashboard:patient_detail' patient.id %}" class="flex items-center gap-3">
+      <span class="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--cf-brand-soft)] text-sm font-black text-[var(--cf-brand)]">{{ patient.full_name|first }}</span>
+      <span>
+        <span class="block font-black text-[var(--cf-ink)]">{{ patient.full_name }}</span>
+        <span class="text-xs text-slate-400">Patient #{{ patient.id }}</span>
+      </span>
+    </a>
+  </td>
+  <td>{{ patient.formatted_phone }}</td>
+  <td>{{ patient.email|default:"No email" }}</td>
+  <td>{{ patient.created_at|date:"M Y" }}</td>
+  <td><span class="cf-badge cf-status-confirmed">Active</span></td>
+  <td class="pr-5">
+    <div class="flex justify-end gap-2">
+      <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-btn cf-btn-secondary !min-h-0 px-3 py-2 text-xs">View</a>
+      <button @click="editOpen=true" hx-get="{% url 'dashboard:patient_edit' patient.id %}" hx-target="#edit-modal-body" class="cf-btn cf-btn-secondary !min-h-0 px-3 py-2 text-xs">Edit</button>
+    </div>
+  </td>
+</tr>

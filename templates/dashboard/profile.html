@@ -1,0 +1,25 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Profile{% endblock %}
+{% block content %}
+<section class="soft-card overflow-hidden rounded-3xl">
+  <div class="bg-cyan-700 p-8 text-white"><h1 class="text-2xl font-black">{{ request.user.display_name }}</h1><p>{{ request.user.email }} · {{ clinic.name }}</p></div>
+  <div class="grid gap-5 p-8 md:grid-cols-2">
+    <div>
+      <label class="mb-1 block text-sm font-bold text-slate-600">Full Name</label>
+      <input disabled value="{{ request.user.display_name }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-bold text-slate-600">Email Address</label>
+      <input disabled value="{{ request.user.email }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-bold text-slate-600">Clinic Name</label>
+      <input disabled value="{{ clinic.name }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
+    </div>
+    <div>
+      <label class="mb-1 block text-sm font-bold text-slate-600">Timezone</label>
+      <input disabled value="{{ clinic.timezone }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
+    </div>
+  </div>
+</section>
+{% endblock %}

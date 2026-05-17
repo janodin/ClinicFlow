@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block body %}
+<div class="cf-auth-panel flex min-h-screen items-center justify-center px-4 py-8">
+  <div class="w-full max-w-md">
+    <!-- Branding -->
+    <div class="mb-8 text-center">
+      <div class="inline-flex items-center gap-3 text-xl font-black text-white">
+        <span class="grid h-10 w-10 place-items-center rounded-2xl bg-white/15">
+          <i data-lucide="activity" class="h-5 w-5"></i>
+        </span>
+        ClinicFlow
+      </div>
+      <h1 class="mt-6 text-3xl font-black leading-tight text-white">Clinic booking, kept tidy.</h1>
+      <p class="mt-3 text-base leading-7 text-white/70">Handle bookings, staff-created appointments, patient records, reminders, and embeddable widgets from one quiet dashboard.</p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="cf-card bg-[var(--cf-bg)] p-8">
+      <h2 class="text-xl font-black text-[var(--cf-ink)]">Welcome back</h2>
+      <p class="mt-1.5 text-sm text-[var(--cf-muted)]">Sign in to your clinic dashboard</p>
+
+      <form method="post" class="mt-6 space-y-4">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="rounded-[var(--cf-radius-md)] bg-[var(--cf-status-cancelled-bg)] p-3 text-sm text-[var(--cf-status-cancelled-text)]">
+            {{ form.non_field_errors.0 }}
+          </div>
+        {% endif %}
+        <div>
+          <label for="{{ form.username.id_for_label }}" class="cf-label">{{ form.username.label }}</label>
+          {{ form.username }}
+        </div>
+        <div>
+          <label for="{{ form.password.id_for_label }}" class="cf-label">{{ form.password.label }}</label>
+          {{ form.password }}
+        </div>
+        <button class="cf-btn cf-btn-primary w-full">Sign In</button>
+        <p class="text-center text-sm text-[var(--cf-muted)]">
+          Don't have an account?
+          <a class="font-bold text-[var(--cf-brand)] hover:text-[var(--cf-brand-strong)] transition-colors" href="{% url 'accounts:signup' %}">Start free trial</a>
+        </p>
+      </form>
+    </div>
+
+    <p class="mt-6 text-center text-xs text-white/50">Appointment-first clinic SaaS</p>
+  </div>
+</div>
+{% endblock %}
