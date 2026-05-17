@@ -24,9 +24,6 @@
     <button @click="tab='preview'; history.replaceState(null,'',window.location.pathname+'?tab=preview')" :class="tab==='preview' ? 'cf-tab-active' : ''" class="cf-tab">
       <i data-lucide="eye" class="h-4 w-4"></i> Slot Preview
     </button>
-    <a href="{% url 'dashboard:messenger_settings' %}" class="cf-tab">
-      <i data-lucide="message-circle" class="h-4 w-4"></i> Messenger
-    </a>
   </div>
 
   <!-- TAB: General -->
