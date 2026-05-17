@@ -47,3 +47,42 @@ def test_messenger_session_reset():
     session.reset()
     assert session.state == MessengerSession.STATE_GREETING
     assert session.data == {}
+
+
+import hmac
+import hashlib
+from unittest.mock import patch
+from messenger.messenger_api import send_messages, verify_signature
+
+
+class TestVerifySignature:
+    def test_valid_signature(self):
+        secret = "mysecret"
+        payload = b'{"test":"data"}'
+        expected = "sha256=" + hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+        assert verify_signature(payload, expected, secret) is True
+
+    def test_invalid_signature(self):
+        assert verify_signature(b'{}', "sha256=bad", "secret") is False
+
+    def test_missing_prefix(self):
+        assert verify_signature(b'{}', "bad", "secret") is False
+
+
+class TestSendMessages:
+    @pytest.mark.django_db
+    @patch("messenger.messenger_api.requests.post")
+    def test_send_text_message(self, mock_post):
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"recipient_id": "123"}
+        from accounts.models import User
+        from clinics.models import Clinic, ClinicGroup
+        from messenger.models import MessengerConnection
+        user = User.objects.create_user(username="owner_api", email="owner_api@test.com", password="pass")
+        group = ClinicGroup.objects.create(name="GroupAPI", owner=user)
+        clinic = Clinic.objects.create(group=group, name="ClinicAPI")
+        conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE1", page_access_token="TOKEN")
+        send_messages(conn, "PSID1", [{"type": "text", "text": "Hello"}])
+        mock_post.assert_called_once()
+        args, kwargs = mock_post.call_args
+        assert kwargs["json"]["message"]["text"] == "Hello"

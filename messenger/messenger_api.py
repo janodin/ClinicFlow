@@ -1,0 +1,69 @@
+import hmac
+import hashlib
+import logging
+
+import requests
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+META_API_URL = "https://graph.facebook.com/v18.0"
+
+
+def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
+    if not signature.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def _send_message(connection, psid, payload):
+    url = f"{META_API_URL}/me/messages"
+    params = {"access_token": connection.page_access_token}
+    body = {"recipient": {"id": psid}, "message": payload}
+    try:
+        resp = requests.post(url, params=params, json=body, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        logger.error("Failed to send Messenger message: %s", exc)
+        return None
+
+
+def send_messages(connection, psid, actions):
+    for action in actions:
+        msg_type = action.get("type")
+        if msg_type == "text":
+            payload = {"text": action["text"]}
+            _send_message(connection, psid, payload)
+        elif msg_type == "quick_replies":
+            payload = {
+                "text": action["text"],
+                "quick_replies": [
+                    {
+                        "content_type": "text",
+                        "title": opt["title"],
+                        "payload": opt["payload"],
+                    }
+                    for opt in action["options"]
+                ],
+            }
+            _send_message(connection, psid, payload)
+        elif msg_type == "template":
+            payload = {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "button",
+                        "text": action["text"],
+                        "buttons": [
+                            {
+                                "type": "postback",
+                                "title": btn["title"],
+                                "payload": btn["payload"],
+                            }
+                            for btn in action.get("buttons", [])
+                        ],
+                    },
+                }
+            }
+            _send_message(connection, psid, payload)
