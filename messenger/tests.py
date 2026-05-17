@@ -107,3 +107,32 @@ class TestSendMessages:
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
         assert kwargs["json"]["message"]["text"] == "Hello"
+
+
+from datetime import date, timedelta
+from django.utils import timezone
+from appointments.models import Appointment
+from services.models import Service
+from messenger.bot_engine import handle_message, _parse_name_phone
+
+
+@pytest.mark.django_db
+def test_handle_message_greeting_to_select_service():
+    user = User.objects.create_user(username="owner_be", email="owner_be@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBE", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBE")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P", page_access_token="T")
+    Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    session = MessengerSession.objects.create(connection=conn, psid="S")
+    actions = handle_message(session, "Book an appointment", "")
+    assert any("Which service" in a.get("text", "") for a in actions)
+    assert session.state == MessengerSession.STATE_SELECT_SERVICE
+
+
+@pytest.mark.django_db
+def test_parse_name_phone_valid():
+    assert _parse_name_phone("John Doe\n09171234567") == ("John Doe", "09171234567")
+
+
+def test_parse_name_phone_invalid():
+    assert _parse_name_phone("only name") == (None, None)
