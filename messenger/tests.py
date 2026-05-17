@@ -2,7 +2,28 @@ import pytest
 from django.db import IntegrityError
 from accounts.models import User
 from clinics.models import Clinic, ClinicGroup
+from clinics.models import ClinicFAQ
+from messenger.faq_matcher import match_faq
 from messenger.models import MessengerConnection, MessengerSession
+
+
+@pytest.mark.django_db
+def test_match_faq_by_keyword():
+    user = User.objects.create_user(username="owner_faq", email="owner_faq@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupFAQ", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicFAQ")
+    faq = ClinicFAQ.objects.create(clinic=clinic, question="What are your hours?", answer="8am to 5pm")
+    result = match_faq(clinic, "What are your hours")
+    assert result == faq
+
+
+@pytest.mark.django_db
+def test_match_faq_no_match():
+    user = User.objects.create_user(username="owner_faq2", email="owner_faq2@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupFAQ2", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicFAQ2")
+    result = match_faq(clinic, "random unrelated text")
+    assert result is None
 
 
 @pytest.mark.django_db
