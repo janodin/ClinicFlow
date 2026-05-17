@@ -193,6 +193,7 @@ def test_webhook_post_valid_message():
             }]
         }]
     }).encode()
+    # Note: Meta webhook payload uses {"message": {"text": "..."}} structure
 
     import hmac, hashlib
     signature = "sha256=" + hmac.new("test_secret".encode(), payload, hashlib.sha256).hexdigest()
@@ -237,3 +238,52 @@ def test_reminder_command_sends_message(mock_send):
     MessengerSession.objects.create(connection=conn, psid="PSID1")
     call_command("send_messenger_reminders")
     mock_send.assert_called_once()
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_full_booking_flow_via_webhook():
+    client = Client()
+    user = User.objects.create_user(username="owner_flow", email="owner_flow@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupFlow", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicFlow", timezone="Asia/Manila", booking_approval_mode=Clinic.APPROVAL_AUTO)
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE1", page_access_token="TOKEN")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+
+    def send_message(text="", payload=""):
+        msg = {"message": {"text": text}}
+        if payload:
+            msg = {"postback": {"payload": payload}}
+        body = json.dumps({
+            "object": "page",
+            "entry": [{
+                "id": "PAGE1",
+                "time": 123,
+                "messaging": [{
+                    "sender": {"id": "PSID1"},
+                    "recipient": {"id": "PAGE1"},
+                    **msg,
+                }]
+            }]
+        }).encode()
+        sig = "sha256=" + hmac.new("test_secret".encode(), body, hashlib.sha256).hexdigest()
+        return client.post(reverse("messenger:webhook"), data=body, content_type="application/json", HTTP_X_HUB_SIGNATURE_256=sig)
+
+    with patch("messenger.views.send_messages") as mock_send:
+        # Greeting -> select service
+        resp = send_message(text="Book an appointment")
+        assert resp.status_code == 200
+        session = MessengerSession.objects.get(connection=conn, psid="PSID1")
+        assert session.state == MessengerSession.STATE_SELECT_SERVICE
+
+        # Select service -> select date
+        resp = send_message(payload=str(service.id))
+        assert resp.status_code == 200
+        session.refresh_from_db()
+        assert session.state == MessengerSession.STATE_SELECT_DATE
+
+        # Select date -> select time
+        resp = send_message(payload=(timezone.localdate() + timedelta(days=1)).isoformat())
+        assert resp.status_code == 200
+        session.refresh_from_db()
+        assert session.state == MessengerSession.STATE_SELECT_TIME
