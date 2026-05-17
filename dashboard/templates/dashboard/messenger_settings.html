@@ -9,6 +9,39 @@
     </div>
   </div>
 
+  <!-- Configuration Warning -->
+  {% if not is_configured %}
+  <section class="cf-card p-6 border-l-4 border-l-[var(--cf-amber)]">
+    <div class="flex items-start gap-3">
+      <div class="cf-icon-box p-3 mt-1">
+        <i data-lucide="alert-triangle" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h2 class="cf-section-title">Messenger Not Configured</h2>
+        <p class="mt-2 text-sm text-[var(--cf-muted)]">
+          To enable Facebook Messenger booking, you need to set the following environment variables in your
+          <code class="cf-mono">.env</code> file:
+        </p>
+        <ul class="mt-3 grid gap-2 text-sm text-[var(--cf-muted)]">
+          <li class="flex items-center gap-2">
+            <code class="cf-mono rounded-md bg-[var(--cf-surface-muted)] px-2 py-1 text-xs text-[var(--cf-ink)]">MESSENGER_APP_ID</code>
+            <span>Your Meta App ID from <a href="https://developers.facebook.com/" target="_blank" class="text-[var(--cf-brand)] hover:underline">developers.facebook.com</a></span>
+          </li>
+          <li class="flex items-center gap-2">
+            <code class="cf-mono rounded-md bg-[var(--cf-surface-muted)] px-2 py-1 text-xs text-[var(--cf-ink)]">MESSENGER_APP_SECRET</code>
+            <span>Your Meta App Secret</span>
+          </li>
+          <li class="flex items-center gap-2">
+            <code class="cf-mono rounded-md bg-[var(--cf-surface-muted)] px-2 py-1 text-xs text-[var(--cf-ink)]">MESSENGER_VERIFY_TOKEN</code>
+            <span>A random secret string for webhook verification</span>
+          </li>
+        </ul>
+        <p class="mt-3 text-sm text-[var(--cf-muted)]">Restart the server after updating your <code class="cf-mono">.env</code> file.</p>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
   <!-- Connection Status Card -->
   <section class="cf-card p-6">
     <div class="flex items-center gap-3 mb-4">
@@ -42,9 +75,15 @@
           <i data-lucide="x-circle" class="h-3 w-3"></i> Not Connected
         </span>
       </div>
-      <a href="{{ connect_url }}" class="cf-btn cf-btn-primary">
-        <i data-lucide="link" class="h-4 w-4"></i> Connect Facebook Page
-      </a>
+      {% if is_configured %}
+        <a href="{{ connect_url }}" class="cf-btn cf-btn-primary">
+          <i data-lucide="link" class="h-4 w-4"></i> Connect Facebook Page
+        </a>
+      {% else %}
+        <button class="cf-btn cf-btn-primary" disabled title="Configure environment variables first">
+          <i data-lucide="link" class="h-4 w-4"></i> Connect Facebook Page
+        </button>
+      {% endif %}
     {% endif %}
   </section>
 
