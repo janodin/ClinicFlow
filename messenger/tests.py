@@ -207,3 +207,33 @@ def test_webhook_post_valid_message():
     assert resp.status_code == 200
     session = MessengerSession.objects.get(connection=conn, psid="PSID1")
     assert session.state == MessengerSession.STATE_SELECT_SERVICE
+
+
+from datetime import timedelta
+from django.utils import timezone
+from django.core.management import call_command
+from unittest.mock import patch
+from patients.models import Patient
+
+
+@pytest.mark.django_db
+@patch("messenger.management.commands.send_messenger_reminders.send_messages")
+def test_reminder_command_sends_message(mock_send):
+    user = User.objects.create_user(username="owner_rem", email="owner_rem@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupREM", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicREM", timezone="Asia/Manila")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="John", phone="09171234567")
+    appt = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.now() + timedelta(hours=24),
+        ends_at=timezone.now() + timedelta(hours=24, minutes=30),
+        source=Appointment.SOURCE_MESSENGER,
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    MessengerSession.objects.create(connection=conn, psid="PSID1")
+    call_command("send_messenger_reminders")
+    mock_send.assert_called_once()
