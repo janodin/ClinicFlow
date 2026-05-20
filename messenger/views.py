@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 
+import requests
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
@@ -9,6 +10,29 @@ from django.views.decorators.http import require_http_methods
 
 from .bot_engine import handle_message
 from .models import MessengerConnection, MessengerSession
+
+
+def _send_facebook_reply(page_token, psid, actions):
+    """Send reply actions back to Facebook using Graph API."""
+    if not actions or not page_token:
+        return
+    url = "https://graph.facebook.com/v18.0/me/messages"
+    for action in actions:
+        msg_payload = {"recipient": {"id": psid}}
+        if action["type"] == "text":
+            msg_payload["message"] = {"text": action["text"]}
+        elif action["type"] == "quick_replies":
+            quick_replies = [
+                {"content_type": "text", "title": opt["title"], "payload": opt["payload"]}
+                for opt in action.get("options", [])
+            ]
+            msg_payload["message"] = {"text": action["text"], "quick_replies": quick_replies}
+        else:
+            continue
+        try:
+            requests.post(url, params={"access_token": page_token}, json=msg_payload, timeout=10)
+        except Exception:
+            pass
 
 
 @csrf_exempt
@@ -106,6 +130,7 @@ def webhook(request):
                 if session.last_activity_at < timeout:
                     session.reset()
 
-                handle_message(session, text, payload_str)
+                actions = handle_message(session, text, payload_str)
+                _send_facebook_reply(connection.page_access_token, sender_id, actions)
 
         return HttpResponse(status=200)
