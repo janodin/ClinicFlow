@@ -6,7 +6,7 @@ from messenger.models import MessengerConnection
 class MessengerConnectionForm(forms.ModelForm):
     class Meta:
         model = MessengerConnection
-        fields = ["page_id", "page_access_token", "webhook_secret"]
+        fields = ["page_id", "page_access_token"]
         widgets = {
             "page_id": forms.TextInput(attrs={
                 "class": "ui-input",
@@ -17,14 +17,8 @@ class MessengerConnectionForm(forms.ModelForm):
                 "placeholder": "Paste your Page Access Token",
                 "type": "password",
             }),
-            "webhook_secret": forms.TextInput(attrs={
-                "class": "ui-input",
-                "placeholder": "Shared secret for n8n webhook",
-                "type": "password",
-            }),
         }
         labels = {
             "page_id": "Facebook Page ID",
             "page_access_token": "Page Access Token",
-            "webhook_secret": "Webhook Secret",
         }

@@ -53,12 +53,15 @@
         {% endif %}
       </div>
       <div class="cf-field md:col-span-2">
-        <label class="cf-label" for="{{ form.webhook_secret.id_for_label }}">{{ form.webhook_secret.label }}</label>
-        {{ form.webhook_secret }}
-        {% if form.webhook_secret.errors %}
-          <p class="text-sm text-red-600 mt-1">{{ form.webhook_secret.errors.0 }}</p>
-        {% endif %}
-        <p class="mt-1 text-xs text-[var(--cf-muted)]">This secret is shared between Django and n8n to verify webhook requests.</p>
+        <label class="cf-label">Webhook Secret (Global)</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="cf-mono rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0 truncate">{{ n8n_webhook_secret }}</div>
+          <button @click="navigator.clipboard.writeText('{{ n8n_webhook_secret|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+            <i data-lucide="copy" class="h-4 w-4"></i>
+            <span class="copy-label">Copy</span>
+          </button>
+        </div>
+        <p class="mt-1 text-xs text-[var(--cf-muted)]">This is the global secret shared between Django and n8n. Configure it in your <code>.env</code> file as <code>N8N_WEBHOOK_SECRET</code>.</p>
       </div>
       <div class="md:col-span-2 flex flex-wrap gap-3">
         <button type="submit" class="cf-btn cf-btn-primary">
