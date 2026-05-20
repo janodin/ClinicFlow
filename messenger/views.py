@@ -14,7 +14,7 @@ from .models import MessengerConnection, MessengerSession
 @csrf_exempt
 @require_http_methods(["POST"])
 def n8n_webhook(request):
-    """Receive webhook calls from n8n and return reply actions."""
+    """Receive webhook calls from n8n and return reply actions + page token."""
     # Verify shared secret
     expected_secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
     provided_secret = request.headers.get("X-N8N-Webhook-Secret", "")
@@ -32,14 +32,14 @@ def n8n_webhook(request):
     postback = data.get("postback", "")
 
     if not page_id or not psid:
-        return JsonResponse({"replies": []}, status=200)
+        return JsonResponse({"replies": [], "page_token": ""}, status=200)
 
     try:
         connection = MessengerConnection.objects.select_related("clinic").get(
             page_id=page_id, is_active=True
         )
     except MessengerConnection.DoesNotExist:
-        return JsonResponse({"replies": []}, status=200)
+        return JsonResponse({"replies": [], "page_token": ""}, status=200)
 
     session, _ = MessengerSession.objects.get_or_create(
         connection=connection, psid=psid,
@@ -52,7 +52,10 @@ def n8n_webhook(request):
         session.reset()
 
     actions = handle_message(session, text, postback)
-    return JsonResponse({"replies": actions or []}, status=200)
+    return JsonResponse({
+        "replies": actions or [],
+        "page_token": connection.page_access_token,
+    }, status=200)
 
 
 @csrf_exempt
