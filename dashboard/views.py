@@ -1240,10 +1240,7 @@ def messenger_settings(request):
             connection.is_active = True
             connection.save()
 
-            # Automatically subscribe page to Facebook app webhook
-            _subscribe_facebook_page(request, connection)
-
-            messages.success(request, "Messenger settings saved.")
+            messages.success(request, "Messenger settings saved. Remember to configure the webhook in your Meta Developer Dashboard.")
             return redirect("dashboard:messenger_settings")
     else:
         form = MessengerConnectionForm(instance=connection)
@@ -1255,33 +1252,6 @@ def messenger_settings(request):
         "form": form,
         "n8n_webhook_url": n8n_webhook_url,
     })
-
-
-def _subscribe_facebook_page(request, connection):
-    """Subscribe a Facebook Page to the app webhook automatically."""
-    import requests
-    page_id = connection.page_id
-    page_token = connection.page_access_token
-    if not page_id or not page_token:
-        messages.warning(request, "Page ID or Access Token missing. Facebook subscription skipped.")
-        return
-
-    subscribe_url = f"https://graph.facebook.com/v18.0/{page_id}/subscribed_apps"
-    params = {
-        "access_token": page_token,
-        "subscribed_fields": "messages,messaging_postbacks",
-    }
-    try:
-        resp = requests.post(subscribe_url, params=params, timeout=10)
-        data = resp.json()
-        if resp.status_code == 200 and data.get("success"):
-            messages.success(request, "Facebook Page subscribed to webhook successfully.")
-        else:
-            error_msg = data.get("error", {}).get("message", "Unknown error")
-            messages.warning(request, f"Facebook subscription failed: {error_msg}")
-    except Exception as e:
-        messages.warning(request, f"Could not subscribe Facebook Page: {str(e)}")
-
 
 @login_required
 @require_POST
