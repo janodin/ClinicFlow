@@ -33,6 +33,10 @@ if os.getenv("DEBUG", "1") == "1":
     _allowed_hosts.append(".ngrok.io")
 ALLOWED_HOSTS = _allowed_hosts
 
+# Trust X-Forwarded-Proto from ngrok so build_absolute_uri returns https://
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
 
 # Application definition
 
@@ -175,6 +179,9 @@ MESSENGER_VERIFY_TOKEN = _messenger_verify_token
 MESSENGER_APP_SECRET = os.getenv("MESSENGER_APP_SECRET", "")
 MESSENGER_APP_ID = os.getenv("MESSENGER_APP_ID", "")
 MESSENGER_SESSION_TIMEOUT_MINUTES = int(os.getenv("MESSENGER_SESSION_TIMEOUT_MINUTES", "30"))
+
+# n8n integration webhook secret (shared between Django and n8n)
+N8N_WEBHOOK_SECRET = os.getenv("N8N_WEBHOOK_SECRET", "")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

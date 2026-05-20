@@ -5,7 +5,7 @@
   <div class="cf-page-header">
     <div>
       <h1 class="ui-page-title">Messenger Settings</h1>
-      <p class="mt-2 text-[var(--cf-muted)]">Connect your clinic's Facebook Page to let patients book appointments via Messenger.</p>
+      <p class="mt-2 text-[var(--cf-muted)]">Connect your clinic's Facebook Page via n8n to let patients book appointments via Messenger.</p>
     </div>
   </div>
 
@@ -17,70 +17,85 @@
       </div>
       <div>
         <h2 class="cf-section-title">Facebook Page Connection</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Link your clinic's Facebook Page to enable booking via Messenger.</p>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Enter your Facebook Page details for the n8n workflow.</p>
       </div>
     </div>
 
     {% if connection and connection.is_active %}
-      <!-- Connected State -->
       <div class="flex flex-wrap items-center gap-3 mb-5">
         <span class="cf-badge cf-status-confirmed">
-          <i data-lucide="check-circle-2" class="h-3 w-3"></i> Connected
+          <i data-lucide="check-circle-2" class="h-3 w-3"></i> Active
         </span>
         <span class="text-sm text-[var(--cf-muted)]">Page ID: <code class="cf-mono text-[var(--cf-blue)]">{{ connection.page_id }}</code></span>
       </div>
-      <form action="{% url 'dashboard:messenger_disconnect' %}" method="post">
-        {% csrf_token %}
-        <button type="submit" class="cf-btn cf-btn-danger">
-          <i data-lucide="unlink" class="h-4 w-4"></i> Disconnect Facebook Page
-        </button>
-      </form>
     {% else %}
-      <!-- Disconnected State -->
       <div class="flex flex-wrap items-center gap-3 mb-5">
         <span class="cf-badge cf-status-cancelled">
-          <i data-lucide="x-circle" class="h-3 w-3"></i> Not Connected
+          <i data-lucide="x-circle" class="h-3 w-3"></i> Not Configured
         </span>
       </div>
-      <a href="{{ connect_url }}" class="cf-btn cf-btn-primary">
-        <i data-lucide="link" class="h-4 w-4"></i> Connect Facebook Page
-      </a>
     {% endif %}
+
+    <form method="post" action="{% url 'dashboard:messenger_settings' %}" class="grid gap-5 md:grid-cols-2">
+      {% csrf_token %}
+      <div class="cf-field">
+        <label class="cf-label" for="{{ form.page_id.id_for_label }}">{{ form.page_id.label }}</label>
+        {{ form.page_id }}
+        {% if form.page_id.errors %}
+          <p class="text-sm text-red-600 mt-1">{{ form.page_id.errors.0 }}</p>
+        {% endif %}
+      </div>
+      <div class="cf-field">
+        <label class="cf-label" for="{{ form.page_access_token.id_for_label }}">{{ form.page_access_token.label }}</label>
+        {{ form.page_access_token }}
+        {% if form.page_access_token.errors %}
+          <p class="text-sm text-red-600 mt-1">{{ form.page_access_token.errors.0 }}</p>
+        {% endif %}
+      </div>
+      <div class="cf-field md:col-span-2">
+        <label class="cf-label" for="{{ form.webhook_secret.id_for_label }}">{{ form.webhook_secret.label }}</label>
+        {{ form.webhook_secret }}
+        {% if form.webhook_secret.errors %}
+          <p class="text-sm text-red-600 mt-1">{{ form.webhook_secret.errors.0 }}</p>
+        {% endif %}
+        <p class="mt-1 text-xs text-[var(--cf-muted)]">This secret is shared between Django and n8n to verify webhook requests.</p>
+      </div>
+      <div class="md:col-span-2 flex flex-wrap gap-3">
+        <button type="submit" class="cf-btn cf-btn-primary">
+          <i data-lucide="save" class="h-4 w-4"></i> Save Settings
+        </button>
+        {% if connection and connection.is_active %}
+          <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" class="inline">
+            {% csrf_token %}
+            <button type="submit" class="cf-btn cf-btn-danger">
+              <i data-lucide="unlink" class="h-4 w-4"></i> Disconnect
+            </button>
+          </form>
+        {% endif %}
+      </div>
+    </form>
   </section>
 
-  <!-- Webhook Setup Card -->
+  <!-- n8n Webhook Setup Card -->
   <section class="cf-card p-6">
     <div class="flex items-center gap-3 mb-4">
       <div class="cf-icon-box p-3">
         <i data-lucide="webhook" class="h-5 w-5"></i>
       </div>
       <div>
-        <h2 class="cf-section-title">Webhook Setup</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Use these values in your Meta Developer dashboard to receive messages.</p>
+        <h2 class="cf-section-title">n8n Webhook</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Use this URL in your n8n HTTP Request node to send messages to Django.</p>
       </div>
     </div>
 
-    <div class="grid gap-5 md:grid-cols-2">
-      <div class="cf-field">
-        <label class="cf-label">Webhook URL</label>
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="cf-mono rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0 truncate">{{ webhook_url }}</div>
-          <button @click="navigator.clipboard.writeText('{{ webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
-            <i data-lucide="copy" class="h-4 w-4"></i>
-            <span class="copy-label">Copy</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="cf-field">
-        <label class="cf-label">Verify Token</label>
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="cf-mono rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0 truncate">{{ verify_token }}</div>
-          <button @click="navigator.clipboard.writeText('{{ verify_token|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
-            <i data-lucide="copy" class="h-4 w-4"></i>
-            <span class="copy-label">Copy</span>
-          </button>
-        </div>
+    <div class="cf-field">
+      <label class="cf-label">Django Webhook URL</label>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="cf-mono rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0 truncate">{{ n8n_webhook_url }}</div>
+        <button @click="navigator.clipboard.writeText('{{ n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+          <i data-lucide="copy" class="h-4 w-4"></i>
+          <span class="copy-label">Copy</span>
+        </button>
       </div>
     </div>
   </section>
@@ -93,21 +108,25 @@
       </div>
       <div>
         <h2 class="cf-section-title">Setup Instructions</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Follow these steps to activate Messenger booking.</p>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Follow these steps to activate Messenger booking via n8n.</p>
       </div>
     </div>
 
     <ol class="grid gap-4 text-sm text-[var(--cf-muted)]">
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">1</span>
-        <span>Click <strong class="text-[var(--cf-ink)]">Connect Facebook Page</strong> above and authorize your clinic's Facebook Page.</span>
+        <span>Go to your <a href="https://developers.facebook.com/" target="_blank" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a> and get your <strong class="text-[var(--cf-ink)]">Page ID</strong> and <strong class="text-[var(--cf-ink)]">Page Access Token</strong>.</span>
       </li>
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">2</span>
-        <span>In your <a href="https://developers.facebook.com/" target="_blank" class="text-[var(--cf-brand)] hover:underline">Meta Developer dashboard</a>, subscribe the Page webhook using the <strong class="text-[var(--cf-ink)]">Webhook URL</strong> and <strong class="text-[var(--cf-ink)]">Verify Token</strong> shown above.</span>
+        <span>Enter the Page ID, Access Token, and a Webhook Secret above, then click <strong class="text-[var(--cf-ink)]">Save Settings</strong>.</span>
       </li>
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">3</span>
+        <span>In n8n, create a Facebook Messenger workflow using the <strong class="text-[var(--cf-ink)]">Django Webhook URL</strong> above as the target for the HTTP Request node. Include the webhook secret in the <code class="cf-mono">X-N8N-Webhook-Secret</code> header.</span>
+      </li>
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">4</span>
         <span>Patients can now message your Facebook Page to book appointments. The bot will guide them through service selection, date, time, and confirmation.</span>
       </li>
     </ol>

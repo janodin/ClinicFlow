@@ -1228,87 +1228,29 @@ def messenger_settings(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_settings(membership):
         raise PermissionDenied
+    from messenger.forms import MessengerConnectionForm
+    from messenger.models import MessengerConnection
+
     connection = getattr(clinic, "messenger_connection", None)
-    webhook_url = request.build_absolute_uri(reverse("messenger:webhook"))
-    verify_token = django_settings.MESSENGER_VERIFY_TOKEN
-    connect_url = (
-        f"https://www.facebook.com/v18.0/dialog/oauth"
-        f"?client_id={django_settings.MESSENGER_APP_ID}"
-        f"&redirect_uri={request.build_absolute_uri(reverse('dashboard:messenger_callback'))}"
-        f"&scope=pages_messaging,pages_read_engagement"
-    )
+    if request.method == "POST":
+        form = MessengerConnectionForm(request.POST, instance=connection)
+        if form.is_valid():
+            connection = form.save(commit=False)
+            connection.clinic = clinic
+            connection.is_active = True
+            connection.save()
+            messages.success(request, "Messenger settings saved.")
+            return redirect("dashboard:messenger_settings")
+    else:
+        form = MessengerConnectionForm(instance=connection)
+
+    n8n_webhook_url = request.build_absolute_uri(reverse("messenger:n8n_webhook"))
     return render(request, "dashboard/messenger_settings.html", {
         "clinic": clinic,
         "connection": connection,
-        "webhook_url": webhook_url,
-        "verify_token": verify_token,
-        "connect_url": connect_url,
+        "form": form,
+        "n8n_webhook_url": n8n_webhook_url,
     })
-
-
-@login_required
-def messenger_callback(request):
-    code = request.GET.get("code")
-    if not code:
-        messages.error(request, "Facebook authorization failed.")
-        return redirect("dashboard:home")
-
-    token_url = "https://graph.facebook.com/v18.0/oauth/access_token"
-    params = {
-        "client_id": django_settings.MESSENGER_APP_ID,
-        "client_secret": django_settings.MESSENGER_APP_SECRET,
-        "redirect_uri": request.build_absolute_uri(reverse("dashboard:messenger_callback")),
-        "code": code,
-    }
-    try:
-        import requests
-        resp = requests.get(token_url, params=params, timeout=10)
-        resp.raise_for_status()
-        token_data = resp.json()
-        user_token = token_data.get("access_token")
-    except (Exception):
-        messages.error(request, "Failed to exchange token with Facebook.")
-        return redirect("dashboard:home")
-
-    if not user_token:
-        messages.error(request, "No access token received from Facebook.")
-        return redirect("dashboard:home")
-
-    pages_url = "https://graph.facebook.com/v18.0/me/accounts"
-    try:
-        import requests
-        resp = requests.get(pages_url, params={"access_token": user_token}, timeout=10)
-        resp.raise_for_status()
-        pages_data = resp.json()
-    except Exception:
-        messages.error(request, "Failed to retrieve Facebook pages.")
-        return redirect("dashboard:home")
-
-    pages = pages_data.get("data", [])
-    if not pages:
-        messages.error(request, "No Facebook pages found for your account.")
-        return redirect("dashboard:home")
-
-    page = pages[0]
-    page_id = page.get("id")
-    page_token = page.get("access_token")
-    page_name = page.get("name", "Unknown")
-
-    clinic = Clinic.objects.filter(group__owner=request.user).first()
-    if not clinic:
-        messages.error(request, "No clinic found to connect.")
-        return redirect("dashboard:home")
-
-    connection, created = MessengerConnection.objects.update_or_create(
-        clinic=clinic,
-        defaults={
-            "page_id": page_id,
-            "page_access_token": page_token,
-            "is_active": True,
-        }
-    )
-    messages.success(request, f"Connected to Facebook Page: {page_name}")
-    return redirect("dashboard:messenger_settings")
 
 
 @login_required
@@ -1321,9 +1263,8 @@ def messenger_disconnect(request):
     connection = getattr(clinic, "messenger_connection", None)
     if connection:
         connection.is_active = False
-        connection.page_access_token = ""
-        connection.save(update_fields=["is_active", "page_access_token"])
-        messages.success(request, "Facebook Page disconnected.")
+        connection.save(update_fields=["is_active"])
+        messages.success(request, "Messenger disconnected.")
     else:
         messages.info(request, "No connection found.")
     return redirect("dashboard:messenger_settings")

@@ -48,7 +48,6 @@ urlpatterns = [
     path("settings/unavailable/<int:pk>/delete/", views.delete_unavailable_date, name="delete_unavailable_date"),
     path("settings/slot-preview/", views.slot_preview, name="slot_preview"),
     path("settings/messenger/", views.messenger_settings, name="messenger_settings"),
-    path("messenger/callback/", views.messenger_callback, name="messenger_callback"),
     path("settings/messenger/disconnect/", views.messenger_disconnect, name="messenger_disconnect"),
     path("billing/", views.billing, name="billing"),
     path("search/", views.search, name="search"),

@@ -5,8 +5,9 @@ from clinics.models import Clinic, TimeStampedModel
 
 class MessengerConnection(TimeStampedModel):
     clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="messenger_connection")
-    page_id = models.CharField(max_length=64)
-    page_access_token = models.CharField(max_length=512)
+    page_id = models.CharField(max_length=64, blank=True, default="")
+    page_access_token = models.CharField(max_length=512, blank=True, default="")
+    webhook_secret = models.CharField(max_length=256, blank=True, default="", help_text="Shared secret for n8n webhook authentication")
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
