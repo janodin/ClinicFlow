@@ -19,6 +19,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from .views_utility import privacy_policy
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -27,6 +28,7 @@ urlpatterns = [
     path("clinic/", include("widget.public_urls")),
     path("widget/", include("widget.urls")),
     path("messenger/", include("messenger.urls")),
+    path("privacy-policy/", privacy_policy, name="privacy_policy"),
 ]
 
 if settings.DEBUG:
