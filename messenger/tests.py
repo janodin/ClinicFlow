@@ -109,7 +109,7 @@ class TestSendMessages:
         assert kwargs["json"]["message"]["text"] == "Hello"
 
 
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from django.utils import timezone
 from appointments.models import Appointment
 from services.models import Service
@@ -215,6 +215,398 @@ from django.utils import timezone
 from django.core.management import call_command
 from unittest.mock import patch
 from patients.models import Patient
+from scheduling.models import ClinicBusinessHour
+
+
+def _create_messenger_clinic(username="owner_ai", page_id="PAGEAI"):
+    user = User.objects.create_user(username=username, email=f"{username}@test.com", password="pass")
+    group = ClinicGroup.objects.create(name=f"Group {username}", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name=f"Clinic {username}",
+        slug=f"clinic-{username}",
+        address="123 Main St",
+        phone="09171234567",
+        email=f"{username}@clinic.test",
+        timezone="Asia/Manila",
+        booking_approval_mode=Clinic.APPROVAL_AUTO,
+    )
+    connection = MessengerConnection.objects.create(
+        clinic=clinic,
+        page_id=page_id,
+        page_access_token=f"TOKEN-{page_id}",
+    )
+    return clinic, connection
+
+
+@pytest.mark.django_db
+def test_messenger_ai_settings_defaults_and_unique_connection():
+    from messenger.models import MessengerAISettings
+
+    clinic, connection = _create_messenger_clinic("owner_ai_settings", "PAGEAI1")
+
+    settings = MessengerAISettings.objects.create(connection=connection)
+
+    assert settings.connection == connection
+    assert settings.is_ai_enabled is True
+    assert settings.instructions == ""
+    assert settings.fallback_message == ""
+    assert str(settings) == f"MessengerAISettings({clinic.name})"
+
+    with pytest.raises(IntegrityError):
+        MessengerAISettings.objects.create(connection=connection)
+
+
+@pytest.mark.django_db
+def test_build_ai_context_returns_only_page_clinic_data():
+    from messenger.ai_tools import build_ai_context
+    from messenger.models import MessengerAISettings
+
+    clinic, connection = _create_messenger_clinic("owner_ai_context", "PAGEAI2")
+    other_clinic, _ = _create_messenger_clinic("owner_ai_other", "PAGEOTHER")
+    Service.objects.create(
+        clinic=clinic,
+        name="Dental Cleaning",
+        description="Routine cleaning",
+        duration_minutes=30,
+        price="1000.00",
+        display_price=True,
+    )
+    Service.objects.create(clinic=other_clinic, name="Other Service", duration_minutes=30, price=0)
+    ClinicFAQ.objects.create(clinic=clinic, question="Where are you located?", answer="123 Main St")
+    ClinicFAQ.objects.create(clinic=other_clinic, question="Other FAQ", answer="Other answer")
+    MessengerAISettings.objects.create(connection=connection, instructions="Use a friendly clinic tone.")
+
+    result = build_ai_context("PAGEAI2")
+
+    assert result["found"] is True
+    assert result["clinic"]["id"] == clinic.id
+    assert result["clinic"]["name"] == clinic.name
+    assert result["clinic"]["address"] == "123 Main St"
+    assert result["page_token"] == "TOKEN-PAGEAI2"
+    assert result["ai"]["is_ai_enabled"] is True
+    assert result["ai"]["instructions"] == "Use a friendly clinic tone."
+    assert [service["name"] for service in result["services"]] == ["Dental Cleaning"]
+    assert [faq["question"] for faq in result["faqs"]] == ["Where are you located?"]
+
+
+@pytest.mark.django_db
+def test_match_services_returns_active_matches_for_page_clinic_only():
+    from messenger.ai_tools import match_services
+
+    clinic, _ = _create_messenger_clinic("owner_ai_services", "PAGEAI3")
+    other_clinic, _ = _create_messenger_clinic("owner_ai_services_other", "PAGEOTHER3")
+    Service.objects.create(clinic=clinic, name="Dental Cleaning", description="Teeth cleaning", duration_minutes=30, price="1000.00")
+    Service.objects.create(clinic=clinic, name="Consultation", description="General consult", duration_minutes=30, price="500.00")
+    Service.objects.create(clinic=other_clinic, name="Cleaning Other", duration_minutes=30, price=0)
+
+    result = match_services("PAGEAI3", "cleaning")
+
+    assert result["found"] is True
+    assert [match["name"] for match in result["matches"]] == ["Dental Cleaning"]
+
+
+@pytest.mark.django_db
+def test_check_availability_returns_requested_slot_and_alternatives():
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_availability", "PAGEAI4")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))
+
+    open_result = check_availability("PAGEAI4", service.id, preferred_date=target_date.isoformat())
+    requested_slot = open_result["alternatives"][0]["starts_at"]
+
+    available_result = check_availability("PAGEAI4", service.id, preferred_starts_at=requested_slot)
+    assert available_result["available"] is True
+    assert available_result["selected_slot"]["starts_at"] == requested_slot
+
+    patient = Patient.objects.create(clinic=clinic, full_name="Existing Patient", phone="09999999999")
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.datetime.fromisoformat(requested_slot),
+        ends_at=timezone.datetime.fromisoformat(requested_slot) + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    unavailable_result = check_availability("PAGEAI4", service.id, preferred_starts_at=requested_slot)
+    assert unavailable_result["available"] is False
+    assert unavailable_result["alternatives"]
+    assert requested_slot not in [slot["starts_at"] for slot in unavailable_result["alternatives"]]
+
+
+@pytest.mark.django_db
+def test_book_confirmed_appointment_requires_confirmation_and_creates_booking():
+    from messenger.ai_tools import book_confirmed_appointment, check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_booking", "PAGEAI5")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = check_availability("PAGEAI5", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+
+    blocked = book_confirmed_appointment(
+        "PAGEAI5",
+        service.id,
+        slot["starts_at"],
+        "Maria Santos",
+        "09175551234",
+        confirmed=False,
+    )
+    assert blocked["created"] is False
+    assert blocked["error"] == "Appointment creation requires explicit user confirmation."
+
+    result = book_confirmed_appointment(
+        "PAGEAI5",
+        service.id,
+        slot["starts_at"],
+        "Maria Santos",
+        "09175551234",
+        confirmed=True,
+    )
+    assert result["created"] is True
+    assert result["appointment"]["service"] == "Consultation"
+    assert result["appointment"]["status"] == Appointment.STATUS_CONFIRMED
+    appointment = Appointment.objects.get(reference_code=result["appointment"]["reference_code"])
+    assert appointment.source == Appointment.SOURCE_MESSENGER
+    assert appointment.patient.phone == "09175551234"
+
+
+@pytest.mark.django_db
+def test_book_confirmed_appointment_rejects_truthy_string_confirmation():
+    from messenger.ai_tools import book_confirmed_appointment, check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_string_confirm", "PAGEAI10")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = check_availability("PAGEAI10", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+
+    result = book_confirmed_appointment(
+        "PAGEAI10",
+        service.id,
+        slot["starts_at"],
+        "Maria Santos",
+        "09175551234",
+        confirmed="false",
+    )
+
+    assert result["created"] is False
+    assert Appointment.objects.filter(clinic=clinic).count() == 0
+
+
+@pytest.mark.django_db
+def test_ai_tools_return_disabled_when_ai_settings_disabled():
+    from messenger.ai_tools import book_confirmed_appointment, build_ai_context, check_availability, match_services
+    from messenger.models import MessengerAISettings
+
+    clinic, connection = _create_messenger_clinic("owner_ai_disabled", "PAGEAI11")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    MessengerAISettings.objects.create(
+        connection=connection,
+        is_ai_enabled=False,
+        fallback_message="Please call the clinic.",
+    )
+
+    context = build_ai_context("PAGEAI11")
+    services = match_services("PAGEAI11", "consultation")
+    availability = check_availability("PAGEAI11", service.id, preferred_date=(timezone.localdate() + timedelta(days=1)).isoformat())
+    booking = book_confirmed_appointment("PAGEAI11", service.id, timezone.now().isoformat(), "Name", "0917", confirmed=True)
+
+    assert context["ai"]["is_ai_enabled"] is False
+    assert services["disabled"] is True
+    assert availability["disabled"] is True
+    assert booking["created"] is False
+    assert booking["disabled"] is True
+    assert booking["fallback_message"] == "Please call the clinic."
+
+
+@pytest.mark.django_db
+def test_check_availability_returns_error_for_invalid_datetime_input():
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_bad_date", "PAGEAI12")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+
+    result = check_availability("PAGEAI12", service.id, preferred_starts_at="not-a-date")
+
+    assert result["available"] is False
+    assert result["error"] == "Invalid date or time."
+
+
+@pytest.mark.django_db
+def test_ai_booking_reuses_patient_phone_and_prevents_double_booking():
+    from messenger.ai_tools import book_confirmed_appointment, check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_patient_match", "PAGEAI13")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Existing Name", phone="09175550000")
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = check_availability("PAGEAI13", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+
+    first = book_confirmed_appointment(
+        "PAGEAI13",
+        service.id,
+        slot["starts_at"],
+        "Updated Name",
+        "09175550000",
+        confirmed=True,
+    )
+    second = book_confirmed_appointment(
+        "PAGEAI13",
+        service.id,
+        slot["starts_at"],
+        "Another Name",
+        "09175551111",
+        confirmed=True,
+    )
+
+    assert first["created"] is True
+    assert Appointment.objects.get(reference_code=first["appointment"]["reference_code"]).patient == patient
+    assert second["created"] is False
+    assert second["error"] == "That slot is no longer available. Please choose another time."
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_context_endpoint_requires_secret_and_returns_context():
+    clinic, _ = _create_messenger_clinic("owner_ai_endpoint", "PAGEAI6")
+    client = Client()
+    url = reverse("messenger:ai_context")
+
+    unauthorized = client.post(url, data=json.dumps({"page_id": "PAGEAI6"}), content_type="application/json")
+    assert unauthorized.status_code == 401
+
+    response = client.post(
+        url,
+        data=json.dumps({"page_id": "PAGEAI6"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+    assert response.status_code == 200
+    assert response.json()["clinic"]["id"] == clinic.id
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="")
+def test_ai_context_endpoint_fails_closed_when_secret_unset():
+    _create_messenger_clinic("owner_ai_no_secret", "PAGEAI14")
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_context"),
+        data=json.dumps({"page_id": "PAGEAI14"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_services_endpoint_returns_matches():
+    clinic, _ = _create_messenger_clinic("owner_ai_services_endpoint", "PAGEAI8")
+    Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_services"),
+        data=json.dumps({"page_id": "PAGEAI8", "query": "cleaning"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["matches"]] == ["Dental Cleaning"]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_services_endpoint_returns_400_for_invalid_query_type():
+    _create_messenger_clinic("owner_ai_bad_query", "PAGEAI15")
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_services"),
+        data=json.dumps({"page_id": "PAGEAI15", "query": {"bad": "type"}}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid request data"
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_availability_endpoint_returns_alternatives():
+    clinic, _ = _create_messenger_clinic("owner_ai_availability_endpoint", "PAGEAI9")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_availability"),
+        data=json.dumps({"page_id": "PAGEAI9", "service_id": service.id, "preferred_date": target_date.isoformat()}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["found"] is True
+    assert response.json()["alternatives"]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_availability_endpoint_returns_400_for_invalid_service_id_type():
+    _create_messenger_clinic("owner_ai_bad_service", "PAGEAI16")
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_availability"),
+        data=json.dumps({"page_id": "PAGEAI16", "service_id": {"bad": "type"}}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid request data"
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_booking_endpoint_creates_only_after_confirmation():
+    clinic, _ = _create_messenger_clinic("owner_ai_book_endpoint", "PAGEAI7")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    from messenger.ai_tools import check_availability
+    slot = check_availability("PAGEAI7", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_book"),
+        data=json.dumps({
+            "page_id": "PAGEAI7",
+            "service_id": service.id,
+            "starts_at": slot["starts_at"],
+            "full_name": "Juan Dela Cruz",
+            "phone": "09170000000",
+            "confirmed": True,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created"] is True
+    assert Appointment.objects.filter(clinic=clinic, source=Appointment.SOURCE_MESSENGER).count() == 1
 
 
 @pytest.mark.django_db
@@ -269,7 +661,7 @@ def test_full_booking_flow_via_webhook():
         sig = "sha256=" + hmac.new("test_secret".encode(), body, hashlib.sha256).hexdigest()
         return client.post(reverse("messenger:webhook"), data=body, content_type="application/json", HTTP_X_HUB_SIGNATURE_256=sig)
 
-    with patch("messenger.views.send_messages") as mock_send:
+    with patch("messenger.views._send_facebook_reply") as mock_send:
         # Greeting -> select service
         resp = send_message(text="Book an appointment")
         assert resp.status_code == 200

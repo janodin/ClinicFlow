@@ -13,6 +13,24 @@ class MessengerConnection(TimeStampedModel):
         return f"MessengerConnection({self.clinic.name} -> {self.page_id})"
 
 
+class MessengerAISettings(TimeStampedModel):
+    connection = models.OneToOneField(
+        MessengerConnection,
+        on_delete=models.CASCADE,
+        related_name="ai_settings",
+    )
+    is_ai_enabled = models.BooleanField(default=True)
+    instructions = models.TextField(blank=True, default="")
+    fallback_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        verbose_name = "Messenger AI Settings"
+        verbose_name_plural = "Messenger AI Settings"
+
+    def __str__(self):
+        return f"MessengerAISettings({self.connection.clinic.name})"
+
+
 class MessengerSession(TimeStampedModel):
     STATE_GREETING = "greeting"
     STATE_SELECT_SERVICE = "select_service"

@@ -8,8 +8,78 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from .ai_tools import build_ai_context, book_confirmed_appointment, check_availability, match_services
 from .bot_engine import handle_message
 from .models import MessengerConnection, MessengerSession
+
+
+def _verify_n8n_secret(request):
+    expected_secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
+    provided_secret = request.headers.get("X-N8N-Webhook-Secret", "")
+    return not expected_secret or provided_secret == expected_secret
+
+
+def _verify_ai_tool_secret(request):
+    expected_secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
+    provided_secret = request.headers.get("X-N8N-Webhook-Secret", "")
+    return bool(expected_secret) and provided_secret == expected_secret
+
+
+def _json_body(request):
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def _ai_tool_response(request, handler):
+    if not _verify_ai_tool_secret(request):
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    try:
+        return JsonResponse(handler(data), status=200)
+    except (AttributeError, TypeError, ValueError):
+        return JsonResponse({"error": "Invalid request data"}, status=400)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ai_context(request):
+    return _ai_tool_response(request, lambda data: build_ai_context(data.get("page_id", "")))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ai_services(request):
+    return _ai_tool_response(request, lambda data: match_services(data.get("page_id", ""), data.get("query", "")))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ai_availability(request):
+    return _ai_tool_response(request, lambda data: check_availability(
+        data.get("page_id", ""),
+        data.get("service_id"),
+        data.get("preferred_starts_at"),
+        data.get("preferred_date"),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ai_book(request):
+    return _ai_tool_response(request, lambda data: book_confirmed_appointment(
+        data.get("page_id", ""),
+        data.get("service_id"),
+        data.get("starts_at"),
+        data.get("full_name", ""),
+        data.get("phone", ""),
+        data.get("confirmed", False),
+        data.get("email", ""),
+        data.get("reason", ""),
+    ))
 
 
 def _send_facebook_reply(page_token, psid, actions):
@@ -40,14 +110,11 @@ def _send_facebook_reply(page_token, psid, actions):
 def n8n_webhook(request):
     """Receive webhook calls from n8n and return reply actions + page token."""
     # Verify shared secret
-    expected_secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
-    provided_secret = request.headers.get("X-N8N-Webhook-Secret", "")
-    if expected_secret and provided_secret != expected_secret:
+    if not _verify_n8n_secret(request):
         return JsonResponse({"error": "Unauthorized"}, status=401)
 
-    try:
-        data = json.loads(request.body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    data = _json_body(request)
+    if data is None:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
     page_id = data.get("page_id", "")
