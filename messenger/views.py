@@ -76,10 +76,19 @@ def ai_book(request):
         data.get("starts_at"),
         data.get("full_name", ""),
         data.get("phone", ""),
-        data.get("confirmed", False),
+        _normalize_confirmed(data.get("confirmed", False)),
         data.get("email", ""),
         data.get("reason", ""),
     ))
+
+
+def _normalize_confirmed(value):
+    """Convert n8n string 'true' to Python bool True; reject all other values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
 
 
 def _send_facebook_reply(page_token, psid, actions):

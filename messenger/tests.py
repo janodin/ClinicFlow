@@ -399,6 +399,45 @@ def test_book_confirmed_appointment_rejects_truthy_string_confirmation():
 
 
 @pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_book_endpoint_accepts_string_true_confirmation():
+    """n8n sends confirmed as JSON string 'true'; Django view must normalize it."""
+    from django.test import Client
+    from django.urls import reverse
+    import json
+    from appointments.models import Appointment
+    from scheduling.models import ClinicBusinessHour
+
+    clinic, _ = _create_messenger_clinic("owner_ai_string_true", "PAGEAI12")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+
+    from messenger.ai_tools import check_availability
+    slot = check_availability("PAGEAI12", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+
+    client = Client()
+    response = client.post(
+        reverse("messenger:ai_book"),
+        data=json.dumps({
+            "page_id": "PAGEAI12",
+            "service_id": service.id,
+            "starts_at": slot["starts_at"],
+            "full_name": "Jana Patu",
+            "phone": "09358438344",
+            "confirmed": "true",  # n8n sends string, not boolean
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["created"] is True, f"Expected booking to succeed but got: {result}"
+    assert Appointment.objects.filter(clinic=clinic, source=Appointment.SOURCE_MESSENGER).count() == 1
+
+
+@pytest.mark.django_db
 def test_ai_tools_return_disabled_when_ai_settings_disabled():
     from messenger.ai_tools import book_confirmed_appointment, build_ai_context, check_availability, match_services
     from messenger.models import MessengerAISettings
