@@ -25,7 +25,6 @@ from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots
 from patients.forms import PatientForm
 from patients.models import Patient
 from services.forms import ServiceForm
-from messenger.models import MessengerConnection
 
 
 def _clinic_or_redirect(request):
@@ -1228,28 +1227,46 @@ def messenger_settings(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_settings(membership):
         raise PermissionDenied
-    from messenger.forms import MessengerConnectionForm
-    from messenger.models import MessengerConnection
+    from messenger.forms import MessengerAISettingsForm, MessengerConnectionForm
+    from messenger.models import MessengerAISettings
 
     connection = getattr(clinic, "messenger_connection", None)
-    if request.method == "POST":
+    ai_settings = getattr(connection, "ai_settings", None) if connection else None
+    post_form = request.POST.get("_form")
+
+    if request.method == "POST" and post_form in {None, "", "connection_settings"}:
         form = MessengerConnectionForm(request.POST, instance=connection)
+        ai_form = MessengerAISettingsForm(instance=ai_settings) if connection else None
         if form.is_valid():
             connection = form.save(commit=False)
             connection.clinic = clinic
             connection.is_active = True
             connection.save()
+            MessengerAISettings.objects.get_or_create(connection=connection)
 
             messages.success(request, "Messenger settings saved. Remember to configure the webhook in your Meta Developer Dashboard.")
             return redirect("dashboard:messenger_settings")
+    elif request.method == "POST" and request.POST.get("_form") == "ai_settings":
+        form = MessengerConnectionForm(instance=connection)
+        if not connection:
+            messages.error(request, "Save Facebook Page settings before configuring Messenger AI.")
+            return redirect("dashboard:messenger_settings")
+        ai_settings, _ = MessengerAISettings.objects.get_or_create(connection=connection)
+        ai_form = MessengerAISettingsForm(request.POST, instance=ai_settings)
+        if ai_form.is_valid():
+            ai_form.save()
+            messages.success(request, "Messenger AI prompt settings saved.")
+            return redirect("dashboard:messenger_settings")
     else:
         form = MessengerConnectionForm(instance=connection)
+        ai_form = MessengerAISettingsForm(instance=ai_settings) if connection else None
 
     n8n_webhook_url = request.build_absolute_uri(reverse("messenger:n8n_webhook"))
     return render(request, "dashboard/messenger_settings.html", {
         "clinic": clinic,
         "connection": connection,
         "form": form,
+        "ai_form": ai_form,
         "n8n_webhook_url": n8n_webhook_url,
     })
 

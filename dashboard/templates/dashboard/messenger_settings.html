@@ -38,6 +38,7 @@
 
     <form method="post" action="{% url 'dashboard:messenger_settings' %}" class="grid gap-5 md:grid-cols-2">
       {% csrf_token %}
+      <input type="hidden" name="_form" value="connection_settings">
       <div class="cf-field">
         <label class="cf-label" for="{{ form.page_id.id_for_label }}">{{ form.page_id.label }}</label>
         {{ form.page_id }}
@@ -52,20 +53,79 @@
           <p class="text-sm text-red-600 mt-1">{{ form.page_access_token.errors.0 }}</p>
         {% endif %}
       </div>
-      <div class="md:col-span-2 flex flex-wrap gap-3">
+      <div class="md:col-span-2">
         <button type="submit" class="cf-btn cf-btn-primary">
           <i data-lucide="save" class="h-4 w-4"></i> Save Settings
         </button>
-        {% if connection and connection.is_active %}
-          <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" class="inline">
-            {% csrf_token %}
-            <button type="submit" class="cf-btn cf-btn-danger">
-              <i data-lucide="unlink" class="h-4 w-4"></i> Disconnect
-            </button>
-          </form>
-        {% endif %}
       </div>
     </form>
+
+    {% if connection and connection.is_active %}
+      <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" class="mt-3">
+        {% csrf_token %}
+        <button type="submit" class="cf-btn cf-btn-danger">
+          <i data-lucide="unlink" class="h-4 w-4"></i> Disconnect
+        </button>
+      </form>
+    {% endif %}
+  </section>
+
+  <!-- Messenger AI Prompt Card -->
+  <section class="cf-card p-6">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="cf-icon-box p-3">
+        <i data-lucide="bot" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h2 class="cf-section-title">Messenger AI Prompt</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Control the instructions used by Minimax or any model connected in your n8n workflow.</p>
+      </div>
+    </div>
+
+    {% if connection and ai_form %}
+      <form method="post" action="{% url 'dashboard:messenger_settings' %}" class="grid gap-5">
+        {% csrf_token %}
+        <input type="hidden" name="_form" value="ai_settings">
+
+        <div>
+          <label class="flex items-center gap-2 cursor-pointer">
+            {{ ai_form.is_ai_enabled }}
+            <span class="text-sm font-semibold text-[var(--cf-ink)]">{{ ai_form.is_ai_enabled.label }}</span>
+          </label>
+          {% if ai_form.is_ai_enabled.errors %}
+            <p class="text-sm text-red-600 mt-1">{{ ai_form.is_ai_enabled.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <div class="cf-field">
+          <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
+          {{ ai_form.instructions }}
+          <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the Messenger AI how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from ClinicFlow.</p>
+          {% if ai_form.instructions.errors %}
+            <p class="text-sm text-red-600 mt-1">{{ ai_form.instructions.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <div class="cf-field">
+          <label class="cf-label" for="{{ ai_form.fallback_message.id_for_label }}">{{ ai_form.fallback_message.label }}</label>
+          {{ ai_form.fallback_message }}
+          <p class="mt-1 text-xs text-[var(--cf-muted)]">Shown when AI replies are disabled or the AI cannot safely respond.</p>
+          {% if ai_form.fallback_message.errors %}
+            <p class="text-sm text-red-600 mt-1">{{ ai_form.fallback_message.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <div class="pt-2">
+          <button type="submit" class="cf-btn cf-btn-primary">
+            <i data-lucide="save" class="h-4 w-4"></i> Save AI Prompt
+          </button>
+        </div>
+      </form>
+    {% else %}
+      <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-sm text-[var(--cf-muted)]">
+        Save Facebook Page settings first before configuring the Messenger AI prompt.
+      </div>
+    {% endif %}
   </section>
 
   <!-- n8n Webhook Setup Card -->
@@ -81,7 +141,7 @@
     </div>
 
     <div class="cf-field">
-      <label class="cf-label">Django Webhook URL</label>
+      <p class="cf-label">Django Webhook URL</p>
       <div class="flex flex-wrap items-center gap-2">
         <div class="cf-mono rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0 truncate">{{ n8n_webhook_url }}</div>
         <button @click="navigator.clipboard.writeText('{{ n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
@@ -107,7 +167,7 @@
     <ol class="grid gap-4 text-sm text-[var(--cf-muted)]">
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">1</span>
-        <span>Go to your <a href="https://developers.facebook.com/" target="_blank" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a> and get your <strong class="text-[var(--cf-ink)]">Page ID</strong> and <strong class="text-[var(--cf-ink)]">Page Access Token</strong>.</span>
+        <span>Go to your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a> and get your <strong class="text-[var(--cf-ink)]">Page ID</strong> and <strong class="text-[var(--cf-ink)]">Page Access Token</strong>.</span>
       </li>
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">2</span>
@@ -115,7 +175,7 @@
       </li>
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">3</span>
-        <span>In your <a href="https://developers.facebook.com/" target="_blank" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a>, go to your App → Messenger → Webhooks. Set the webhook URL to your n8n instance and subscribe to <strong class="text-[var(--cf-ink)]">messages</strong> and <strong class="text-[var(--cf-ink)]">messaging_postbacks</strong>.</span>
+        <span>In your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a>, go to your App → Messenger → Webhooks. Set the webhook URL to your n8n instance and subscribe to <strong class="text-[var(--cf-ink)]">messages</strong> and <strong class="text-[var(--cf-ink)]">messaging_postbacks</strong>.</span>
       </li>
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">4</span>
