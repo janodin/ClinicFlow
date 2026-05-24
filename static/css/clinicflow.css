@@ -40,26 +40,6 @@
   --cf-widget-height: 650px;
 }
 
-html.light {
-  color-scheme: dark;
-  --cf-bg: #0f1720;
-  --cf-bg-strong: #0a1017;
-  --cf-surface: #151d27;
-  --cf-surface-muted: #1c2631;
-  --cf-surface-tint: #12251f;
-  --cf-line: #2a3644;
-  --cf-line-soft: #212d3a;
-  --cf-ink: #f8f3ec;
-  --cf-muted: #c5beb4;
-  --cf-faint: #918a80;
-  --cf-brand: #76d2aa;
-  --cf-brand-strong: #a8ebcc;
-  --cf-brand-soft: rgba(118, 210, 170, .14);
-  --cf-focus: rgba(118, 210, 170, .24);
-  --cf-shadow-card: 0 18px 54px rgba(0, 0, 0, .28);
-  --cf-shadow-raised: 0 28px 90px rgba(0, 0, 0, .5);
-}
-
 * { box-sizing: border-box; }
 html {
   min-height: 100%;

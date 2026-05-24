@@ -60,7 +60,7 @@ class ServiceTests(TestCase):
         self.assertNotIn(self.service, self.clinic.services.filter(is_archived=False))
         self.assertIn(self.service, self.clinic.services.filter(is_archived=True))
 
-    def test_archived_service_not_in_public_booking(self):
+    def test_archived_service_not_in_widget_context(self):
         self.service.is_archived = True
         self.service.save()
         from widget.views import _booking_context

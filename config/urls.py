@@ -25,7 +25,6 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("", include("dashboard.urls")),
     path("accounts/", include("accounts.urls")),
-    path("clinic/", include("widget.public_urls")),
     path("widget/", include("widget.urls")),
     path("messenger/", include("messenger.urls")),
     path("privacy-policy/", privacy_policy, name="privacy_policy"),

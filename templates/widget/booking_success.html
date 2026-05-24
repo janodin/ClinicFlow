@@ -26,11 +26,7 @@
       <div class="flex justify-between py-2"><span class="text-[var(--cf-muted)]">Patient</span><strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></div>
     </div>
 
-    <a href="{% url 'widget:appointment_ics' clinic.slug appointment.id %}" class="cf-btn cf-btn-secondary mt-4">
-      <i data-lucide="calendar-plus" class="h-4 w-4"></i> Add to Calendar
-    </a>
-
-    <a href="{% url 'public_booking:book' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full" style="background-color: {{ clinic.widget_accent_color }}">Book Another Appointment</a>
+    <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full" style="background-color: {{ clinic.widget_accent_color }}">Book Another Appointment</a>
   </section>
 </main>
 {% endblock %}

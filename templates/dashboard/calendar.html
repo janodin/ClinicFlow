@@ -4,39 +4,6 @@
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <style>
   .fc-event { cursor: pointer; }
-  /* FullCalendar dark mode overrides */
-  html.light .fc-theme-standard .fc-scrollgrid,
-  html.light .fc-theme-standard td,
-  html.light .fc-theme-standard th {
-    border-color: var(--cf-line);
-  }
-  html.light .fc-col-header-cell,
-  html.light .fc-daygrid-day {
-    background: var(--cf-surface);
-  }
-  html.light .fc-day-today {
-    background: var(--cf-brand-soft) !important;
-  }
-  html.light .fc-button-primary {
-    background: var(--cf-brand-strong);
-    border-color: var(--cf-brand-strong);
-  }
-  html.light .fc-button-primary:not(:disabled).fc-button-active,
-  html.light .fc-button-primary:not(:disabled):active {
-    background: var(--cf-brand);
-    border-color: var(--cf-brand);
-  }
-  html.light .fc-button-primary:disabled {
-    background: var(--cf-muted);
-    border-color: var(--cf-muted);
-  }
-  html.light .fc-toolbar-title {
-    color: var(--cf-ink);
-  }
-  html.light .fc-timegrid-slot-label,
-  html.light .fc-col-header-cell-cushion {
-    color: var(--cf-muted);
-  }
 </style>
 {% endblock %}
 {% block content %}

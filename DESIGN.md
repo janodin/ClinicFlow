@@ -181,7 +181,6 @@ The palette is rooted in soft clinical surfaces, deep green-teal actions, and mu
 - **Muted (#5F6870):** Secondary body copy, metadata, table cells, and helper text.
 - **Line (#D5E3EB):** Borders and table wrappers. Prefer subtle borders over heavy shadows.
 - **Status Colors:** Pending uses amber, confirmed uses blue, completed uses teal-green, cancelled uses rose, and no-show uses muted grey.
-- **Dark Mode:** Existing dark tokens invert the surface system while preserving teal as the recognizable accent. In the current implementation, the dark palette is toggled through `html.light`; preserve that behavior until it is intentionally renamed.
 
 Use clinic-specific accent colors only where the clinic owns the surface, especially the embeddable widget header, widget CTAs, and public booking confirmation reference card. Do not let per-clinic accent colors rewrite the dashboard system globally.
 

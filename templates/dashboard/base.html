@@ -2,7 +2,7 @@
 {% load dashboard_extras %}
 {% block body %}
 {% active_membership_role as role %}
-<div x-data="{ sidebarOpen: false, toasts: [], theme: localStorage.getItem('cf-theme') || 'light', toggleTheme() { this.theme = this.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('cf-theme', this.theme); document.documentElement.classList.toggle('light', this.theme === 'dark'); } }" x-init="document.documentElement.classList.toggle('light', theme === 'dark')" @toast-message.window="toasts.push({message: $event.detail.message, type: $event.detail.type || 'success'}); setTimeout(() => toasts.shift(), 4000)" class="cf-app-shell flex min-h-screen">
+<div x-data="{ sidebarOpen: false, toasts: [] }" @toast-message.window="toasts.push({message: $event.detail.message, type: $event.detail.type || 'success'}); setTimeout(() => toasts.shift(), 4000)" class="cf-app-shell flex min-h-screen">
   <!-- Mobile overlay -->
   <div x-show="sidebarOpen" @click="sidebarOpen = false" class="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm transition-opacity lg:hidden" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"></div>
 
@@ -32,10 +32,6 @@
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:messenger_settings" icon="message-circle" label="Messenger" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:billing" icon="credit-card" label="Billing" %}
     </nav>
-    <div class="mt-4 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface)] p-3 text-sm">
-      <div class="flex items-center gap-2 font-black text-[var(--cf-brand)]"><span class="cf-pulse"></span> Booking Active</div>
-      <p class="mt-1 text-xs leading-5 text-[var(--cf-muted)]">Patients can book appointments through your clinic link.</p>
-    </div>
   </aside>
 
   <main class="cf-dashboard-main flex-1 pt-16 lg:pl-[17rem]">
@@ -56,11 +52,6 @@
         </div>
       </div>
       <div class="flex items-center gap-2 md:gap-3">
-        <button type="button" @click="toggleTheme()" class="cf-btn cf-btn-secondary !min-h-9 px-3" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
-          <i data-lucide="sun-moon" class="h-4 w-4"></i>
-          <span class="hidden md:inline" x-text="theme === 'dark' ? 'Light' : 'Dark'">Dark</span>
-        </button>
-        <a class="cf-btn cf-btn-primary hidden sm:inline-flex" href="{% url 'public_booking:book' clinic.slug %}" target="_blank"><i data-lucide="external-link" class="h-4 w-4"></i>Booking Link</a>
         <div x-data="{ dropdownOpen: false }" class="relative">
           <button @click="dropdownOpen = !dropdownOpen" @click.away="dropdownOpen = false" class="grid h-9 w-9 place-items-center rounded-full bg-[var(--cf-brand-strong)] text-xs font-black text-white cursor-pointer">{{ request.user.first_name|first|default:"U" }}{{ request.user.last_name|first }}</button>
           <div x-show="dropdownOpen" x-cloak x-transition class="cf-menu-panel absolute right-0 top-full z-50 mt-2 w-48">

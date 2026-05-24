@@ -55,11 +55,20 @@ def _booking_context(clinic, request):
     }
 
 
-def public_booking(request, clinic_slug):
+@xframe_options_exempt
+def widget_book(request, clinic_slug):
     clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
     if request.method == "POST":
-        return create_guest_booking(request, clinic)
-    return render(request, "widget/public_booking.html", _booking_context(clinic, request))
+        source = request.POST.get("source", Appointment.SOURCE_CHAT_WIDGET)
+        appointment, error = _process_guest_booking(clinic, request.POST, source)
+        if request.headers.get("HX-Request"):
+            if error:
+                return render(request, "widget/partials/booking_error.html", {"clinic": clinic, "error": error}, status=409)
+            return render(request, "widget/partials/booking_success.html", {"clinic": clinic, "appointment": appointment})
+        if error:
+            return redirect("widget:home", clinic_slug=clinic.slug)
+        return render(request, "widget/booking_success.html", {"clinic": clinic, "appointment": appointment})
+    return redirect("widget:home", clinic_slug=clinic.slug)
 
 
 @xframe_options_exempt
@@ -111,41 +120,6 @@ def _process_guest_booking(clinic, data, source):
         reason=data.get("reason", ""),
     )
     return appointment, None
-
-
-def create_guest_booking(request, clinic):
-    source = request.POST.get("source", Appointment.SOURCE_DIRECT)
-    appointment, error = _process_guest_booking(clinic, request.POST, source)
-    if error:
-        context = _booking_context(clinic, request)
-        context["error"] = error
-        return render(request, "widget/public_booking.html", context, status=409)
-    return render(request, "widget/booking_success.html", {"clinic": clinic, "appointment": appointment})
-
-
-def appointment_ics(request, clinic_slug, appointment_id):
-    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
-    appointment = get_object_or_404(Appointment, clinic=clinic, pk=appointment_id)
-    start_utc = appointment.starts_at.astimezone(dt_timezone.utc)
-    end_utc = appointment.ends_at.astimezone(dt_timezone.utc)
-    start = start_utc.strftime("%Y%m%dT%H%M%SZ")
-    end = end_utc.strftime("%Y%m%dT%H%M%SZ")
-    summary = f"Appointment at {clinic.name}"
-    description = f"{appointment.service.name} at {clinic.name}"
-    ics_content = (
-        "BEGIN:VCALENDAR\r\n"
-        "VERSION:2.0\r\n"
-        "BEGIN:VEVENT\r\n"
-        f"DTSTART:{start}\r\n"
-        f"DTEND:{end}\r\n"
-        f"SUMMARY:{summary}\r\n"
-        f"DESCRIPTION:{description}\r\n"
-        "END:VEVENT\r\n"
-        "END:VCALENDAR\r\n"
-    )
-    response = HttpResponse(ics_content, content_type="text/calendar")
-    response["Content-Disposition"] = f'attachment; filename="appointment-{appointment.reference_code}.ics"'
-    return response
 
 
 def embed_js(request, clinic_slug):

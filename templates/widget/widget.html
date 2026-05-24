@@ -16,7 +16,6 @@
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <a href="{% url 'public_booking:book' clinic.slug %}" target="_blank"><i data-lucide="maximize-2" class="h-5 w-5"></i></a>
         <button @click="minimize()" aria-label="Minimize"><i data-lucide="minus" class="h-5 w-5"></i></button>
       </div>
     </header>
@@ -98,16 +97,18 @@
             <button @click="back()" class="rounded-xl p-2 hover:bg-slate-50"><i data-lucide="arrow-left" class="h-4 w-4"></i></button>
             <h3 class="font-black text-lg">Your Details</h3>
           </div>
-          <form method="post" action="{% url 'public_booking:book' clinic.slug %}" target="_top" class="space-y-3">
-            {% csrf_token %}
-            <input type="hidden" name="source" value="{{ widget_source }}">
-            <input type="hidden" name="service" :value="selectedService">
-            <input type="hidden" name="starts_at" :value="slot">
-            <div><label class="text-xs font-bold text-slate-500 uppercase">Full Name</label><input name="full_name" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
-            <div><label class="text-xs font-bold text-slate-500 uppercase">Phone</label><input name="phone" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
-            <div><label class="text-xs font-bold text-slate-500 uppercase">Email</label><input name="email" type="email" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
-            <button type="submit" class="cf-btn w-full text-white" :style="'background-color:' + accentColor">Confirm Appointment</button>
-          </form>
+          <div id="booking-form-container">
+            <form hx-post="{% url 'widget:book' clinic.slug %}" hx-target="#booking-form-container" hx-swap="innerHTML" class="space-y-3">
+              {% csrf_token %}
+              <input type="hidden" name="source" value="{{ widget_source }}">
+              <input type="hidden" name="service" :value="selectedService">
+              <input type="hidden" name="starts_at" :value="slot">
+              <div><label class="text-xs font-bold text-slate-500 uppercase">Full Name</label><input name="full_name" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
+              <div><label class="text-xs font-bold text-slate-500 uppercase">Phone</label><input name="phone" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
+              <div><label class="text-xs font-bold text-slate-500 uppercase">Email</label><input name="email" type="email" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
+              <button type="submit" class="cf-btn w-full text-white" :style="'background-color:' + accentColor">Confirm Appointment</button>
+            </form>
+          </div>
         </div>
       </div>
 
@@ -227,9 +228,8 @@
       minimize() {
         if (window.parent !== window) {
           window.parent.postMessage({type: 'clinicflow-minimize'}, '*');
-        } else {
-          this.mode = 'home';
         }
+        this.mode = 'home';
       },
       startChat() {
         this.mode = 'chat';
@@ -305,5 +305,16 @@
       }
     }
   }
+</script>
+<script>
+  document.body.addEventListener('htmx:beforeSwap', function(evt) {
+    if (evt.detail.xhr.status >= 400) {
+      evt.detail.shouldSwap = true;
+      evt.detail.isError = false;
+    }
+  });
+  document.body.addEventListener('htmx:afterSwap', function(evt) {
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  });
 </script>
 {% endblock %}

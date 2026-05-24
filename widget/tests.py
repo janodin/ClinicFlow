@@ -69,14 +69,18 @@ class WidgetTests(TestCase):
     def test_booking_via_widget_sets_chat_widget_source(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
         slot = generate_slots(self.clinic, self.service, tomorrow)[0]
-        resp = self.client.post(reverse("public_booking:book", args=[self.clinic.slug]), {
-            "service": self.service.id,
-            "starts_at": slot["starts_at"].isoformat(),
-            "full_name": "John Doe",
-            "phone": "09123456789",
-            "email": "john@example.com",
-            "source": "chat_widget",
-        })
+        resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "John Doe",
+                "phone": "09123456789",
+                "email": "john@example.com",
+                "source": "chat_widget",
+            },
+            HTTP_HX_REQUEST="true",
+        )
         self.assertEqual(resp.status_code, 200)
         appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="John Doe")
         self.assertEqual(appt.source, Appointment.SOURCE_CHAT_WIDGET)
@@ -84,14 +88,18 @@ class WidgetTests(TestCase):
     def test_booking_via_embed_sets_embed_source(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
         slot = generate_slots(self.clinic, self.service, tomorrow)[0]
-        resp = self.client.post(reverse("public_booking:book", args=[self.clinic.slug]), {
-            "service": self.service.id,
-            "starts_at": slot["starts_at"].isoformat(),
-            "full_name": "Jane Doe",
-            "phone": "09987654321",
-            "email": "jane@example.com",
-            "source": "embed",
-        })
+        resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Jane Doe",
+                "phone": "09987654321",
+                "email": "jane@example.com",
+                "source": "embed",
+            },
+            HTTP_HX_REQUEST="true",
+        )
         self.assertEqual(resp.status_code, 200)
         appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Jane Doe")
         self.assertEqual(appt.source, Appointment.SOURCE_EMBED)

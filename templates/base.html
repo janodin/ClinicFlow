@@ -10,12 +10,7 @@
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="{% static 'css/clinicflow.css' %}">
-  <script>
-    (function() {
-      var theme = localStorage.getItem('cf-theme') || 'light';
-      document.documentElement.classList.toggle('light', theme === 'dark');
-    })();
-  </script>
+
   {% block extra_head %}{% endblock %}
 </head>
 <body class="min-h-screen text-[var(--cf-ink)] antialiased">
