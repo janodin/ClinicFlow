@@ -86,6 +86,7 @@
       <form method="post" action="{% url 'dashboard:messenger_settings' %}" class="grid gap-5">
         {% csrf_token %}
         <input type="hidden" name="_form" value="ai_settings">
+        <textarea id="default-ai-prompt-value" class="hidden" aria-hidden="true">{{ default_ai_prompt }}</textarea>
 
         <div>
           <label class="flex items-center gap-2 cursor-pointer">
@@ -98,7 +99,16 @@
         </div>
 
         <div class="cf-field">
-          <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
+          <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
+            <button
+              type="button"
+              class="cf-btn cf-btn-secondary cf-btn-sm"
+              @click="const field = document.getElementById('{{ ai_form.instructions.id_for_label }}'); const source = document.getElementById('default-ai-prompt-value'); if (field && source) { field.value = source.value; field.focus(); }"
+            >
+              <i data-lucide="rotate-ccw" class="h-4 w-4"></i> Restore default prompt
+            </button>
+          </div>
           {{ ai_form.instructions }}
           <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the Messenger AI how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from ClinicFlow.</p>
           {% if ai_form.instructions.errors %}

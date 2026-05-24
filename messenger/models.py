@@ -1,6 +1,7 @@
 from django.db import models
 
 from clinics.models import Clinic, TimeStampedModel
+from .defaults import DEFAULT_MESSENGER_AI_PROMPT
 
 
 class MessengerConnection(TimeStampedModel):
@@ -20,7 +21,7 @@ class MessengerAISettings(TimeStampedModel):
         related_name="ai_settings",
     )
     is_ai_enabled = models.BooleanField(default=True)
-    instructions = models.TextField(blank=True, default="")
+    instructions = models.TextField(blank=True, default=DEFAULT_MESSENGER_AI_PROMPT)
     fallback_message = models.TextField(blank=True, default="")
 
     class Meta:

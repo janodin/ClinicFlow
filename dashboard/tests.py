@@ -198,6 +198,7 @@ def test_calendar_reschedule_accepts_utc_iso_string(calendar_setup, client):
 
 @pytest.mark.django_db
 def test_messenger_settings_page_shows_ai_prompt_form(clinic_setup, client):
+    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
     from messenger.models import MessengerAISettings, MessengerConnection
 
     clinic, service, user = clinic_setup
@@ -221,12 +222,15 @@ def test_messenger_settings_page_shows_ai_prompt_form(clinic_setup, client):
     assert b'name="is_ai_enabled"' in response.content
     assert b'name="instructions"' in response.content
     assert b'name="fallback_message"' in response.content
+    assert b"Restore default prompt" in response.content
+    assert DEFAULT_MESSENGER_AI_PROMPT.splitlines()[0].encode() in response.content
     assert b"Use a warm clinic tone." in response.content
     assert b"Please call the clinic." in response.content
 
 
 @pytest.mark.django_db
 def test_messenger_settings_page_shows_empty_ai_prompt_form_without_settings(clinic_setup, client):
+    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
     from messenger.models import MessengerAISettings, MessengerConnection
 
     clinic, service, user = clinic_setup
@@ -242,6 +246,7 @@ def test_messenger_settings_page_shows_empty_ai_prompt_form_without_settings(cli
     assert response.status_code == 200
     assert b"Messenger AI Prompt" in response.content
     assert b'name="instructions"' in response.content
+    assert DEFAULT_MESSENGER_AI_PROMPT.splitlines()[0].encode() in response.content
     assert not MessengerAISettings.objects.filter(connection=connection).exists()
 
 

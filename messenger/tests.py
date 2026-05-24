@@ -241,6 +241,7 @@ def _create_messenger_clinic(username="owner_ai", page_id="PAGEAI"):
 
 @pytest.mark.django_db
 def test_messenger_ai_settings_defaults_and_unique_connection():
+    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
     from messenger.models import MessengerAISettings
 
     clinic, connection = _create_messenger_clinic("owner_ai_settings", "PAGEAI1")
@@ -249,12 +250,25 @@ def test_messenger_ai_settings_defaults_and_unique_connection():
 
     assert settings.connection == connection
     assert settings.is_ai_enabled is True
-    assert settings.instructions == ""
+    assert settings.instructions == DEFAULT_MESSENGER_AI_PROMPT
     assert settings.fallback_message == ""
     assert str(settings) == f"MessengerAISettings({clinic.name})"
 
     with pytest.raises(IntegrityError):
         MessengerAISettings.objects.create(connection=connection)
+
+
+@pytest.mark.django_db
+def test_build_ai_context_uses_default_prompt_when_settings_missing():
+    from messenger.ai_tools import build_ai_context
+    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+
+    _clinic, _connection = _create_messenger_clinic("owner_ai_default_context", "PAGEAI_DEFAULT")
+
+    result = build_ai_context("PAGEAI_DEFAULT")
+
+    assert result["found"] is True
+    assert result["ai"]["instructions"] == DEFAULT_MESSENGER_AI_PROMPT
 
 
 @pytest.mark.django_db
@@ -286,6 +300,9 @@ def test_build_ai_context_returns_only_page_clinic_data():
     assert result["page_token"] == "TOKEN-PAGEAI2"
     assert result["ai"]["is_ai_enabled"] is True
     assert result["ai"]["instructions"] == "Use a friendly clinic tone."
+    assert result["current_time"]["timezone"] == "Asia/Manila"
+    assert result["current_time"]["today"]
+    assert result["current_time"]["now"]
     assert [service["name"] for service in result["services"]] == ["Dental Cleaning"]
     assert [faq["question"] for faq in result["faqs"]] == ["Where are you located?"]
 
@@ -598,6 +615,7 @@ def test_ai_availability_endpoint_returns_alternatives():
 
     assert response.status_code == 200
     assert response.json()["found"] is True
+    assert response.json()["available"] is True
     assert response.json()["alternatives"]
 
 

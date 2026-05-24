@@ -1227,6 +1227,7 @@ def messenger_settings(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_settings(membership):
         raise PermissionDenied
+    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
     from messenger.forms import MessengerAISettingsForm, MessengerConnectionForm
     from messenger.models import MessengerAISettings
 
@@ -1259,7 +1260,7 @@ def messenger_settings(request):
             return redirect("dashboard:messenger_settings")
     else:
         form = MessengerConnectionForm(instance=connection)
-        ai_form = MessengerAISettingsForm(instance=ai_settings) if connection else None
+        ai_form = MessengerAISettingsForm(instance=ai_settings) if ai_settings else (MessengerAISettingsForm() if connection else None)
 
     n8n_webhook_url = request.build_absolute_uri(reverse("messenger:n8n_webhook"))
     return render(request, "dashboard/messenger_settings.html", {
@@ -1267,6 +1268,7 @@ def messenger_settings(request):
         "connection": connection,
         "form": form,
         "ai_form": ai_form,
+        "default_ai_prompt": DEFAULT_MESSENGER_AI_PROMPT,
         "n8n_webhook_url": n8n_webhook_url,
     })
 

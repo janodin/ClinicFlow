@@ -8,6 +8,7 @@ from appointments.models import Appointment
 from scheduling.utils import generate_slots
 from widget.views import _process_guest_booking
 
+from .defaults import DEFAULT_MESSENGER_AI_PROMPT
 from .models import MessengerConnection
 
 
@@ -73,11 +74,17 @@ def build_ai_context(page_id):
     ai_settings = getattr(connection, "ai_settings", None)
     services = clinic.services.filter(is_active=True, is_archived=False).order_by("name")
     faqs = clinic.faqs.filter(is_active=True).order_by("question")
+    clinic_now = timezone.now().astimezone(ZoneInfo(clinic.timezone))
     return {
         "found": True,
         "page_id": connection.page_id,
         "page_token": connection.page_access_token,
         "page_token_available": bool(connection.page_access_token),
+        "current_time": {
+            "timezone": clinic.timezone,
+            "now": clinic_now.isoformat(),
+            "today": clinic_now.date().isoformat(),
+        },
         "clinic": {
             "id": clinic.id,
             "name": clinic.name,
@@ -88,7 +95,7 @@ def build_ai_context(page_id):
         },
         "ai": {
             "is_ai_enabled": True if ai_settings is None else ai_settings.is_ai_enabled,
-            "instructions": "" if ai_settings is None else ai_settings.instructions,
+            "instructions": DEFAULT_MESSENGER_AI_PROMPT if ai_settings is None else (ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT),
             "fallback_message": "" if ai_settings is None else ai_settings.fallback_message,
         },
         "services": [_service_payload(service) for service in services],
@@ -159,7 +166,7 @@ def check_availability(page_id, service_id, preferred_starts_at=None, preferred_
 
     return {
         "found": True,
-        "available": selected is not None,
+        "available": selected is not None or (requested_start is None and bool(alternatives)),
         "selected_slot": _slot_payload(clinic, selected) if selected else None,
         "alternatives": [_slot_payload(clinic, slot) for slot in alternatives[:3]],
     }
