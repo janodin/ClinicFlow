@@ -94,11 +94,13 @@ class WidgetTests(TestCase):
         self.client.post(url, {"action": "select_option", "value": "start_booking"})
         resp = self.client.post(url, {"action": "select_option", "value": str(self.service.id)})
         self.assertEqual(resp.json()["state"], "select_date")
+        self.assertEqual(resp.json()["message"], "What date works for you?")
 
         tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
         resp = self.client.post(url, {"action": "select_option", "value": tomorrow})
         data = resp.json()
         self.assertEqual(data["state"], "select_time")
+        self.assertEqual(data["message"], "Here are the available times:")
         self.assertTrue(data["options"])
 
         slot_value = data["options"][0]["value"]

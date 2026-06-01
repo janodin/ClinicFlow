@@ -369,6 +369,8 @@ def chat_step(request, clinic_slug):
             if service:
                 data["service_id"] = service.id
                 state = "select_date"
+                action = ""
+                value = ""
             else:
                 message = "Please select a valid service."
                 options = [{"label": s.name, "value": str(s.id)} for s in clinic.services.filter(is_active=True, is_archived=False)]
@@ -391,6 +393,8 @@ def chat_step(request, clinic_slug):
             if selected_date:
                 data["date"] = value
                 state = "select_time"
+                action = ""
+                value = ""
             else:
                 message = "Please select a valid date."
                 options = [{"label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "value": (timezone.localdate() + timedelta(days=i)).isoformat()} for i in range(1, 15)]
