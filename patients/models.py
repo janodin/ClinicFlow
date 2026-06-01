@@ -36,18 +36,6 @@ class Patient(TimeStampedModel):
         normalized = normalize_phone(phone)
         patient = cls.objects.filter(clinic=clinic, normalized_phone=normalized).order_by("created_at").first()
         if patient:
-            changed = False
-            if email and not patient.email:
-                patient.email = email
-                changed = True
-            if full_name and patient.full_name != full_name and len(full_name) > len(patient.full_name):
-                patient.full_name = full_name
-                changed = True
-            if notes and not patient.notes:
-                patient.notes = notes
-                changed = True
-            if changed:
-                patient.save()
             return patient, False
         return cls.objects.create(clinic=clinic, full_name=full_name, phone=phone, email=email, notes=notes), True
 

@@ -6,9 +6,20 @@ from .defaults import DEFAULT_MESSENGER_AI_PROMPT
 
 class MessengerConnection(TimeStampedModel):
     clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="messenger_connection")
+    app_id = models.CharField(max_length=64, blank=True, default="")
+    app_secret = models.CharField(max_length=256, blank=True, default="")
     page_id = models.CharField(max_length=64, blank=True, default="")
     page_access_token = models.CharField(max_length=512, blank=True, default="")
     is_active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["page_id"],
+                condition=~models.Q(page_id=""),
+                name="unique_messenger_connection_page_id",
+            ),
+        ]
 
     def __str__(self):
         return f"MessengerConnection({self.clinic.name} -> {self.page_id})"

@@ -15,9 +15,6 @@
     <button @click="tab='hours'; history.replaceState(null,'',window.location.pathname+'?tab=hours')" :class="tab==='hours' ? 'cf-tab-active' : ''" class="cf-tab">
       <i data-lucide="clock" class="h-4 w-4"></i> Business Hours
     </button>
-    <button @click="tab='blocked'; history.replaceState(null,'',window.location.pathname+'?tab=blocked')" :class="tab==='blocked' ? 'cf-tab-active' : ''" class="cf-tab">
-      <i data-lucide="ban" class="h-4 w-4"></i> Blocked Times
-    </button>
     <button @click="tab='unavailable'; history.replaceState(null,'',window.location.pathname+'?tab=unavailable')" :class="tab==='unavailable' ? 'cf-tab-active' : ''" class="cf-tab">
       <i data-lucide="calendar-off" class="h-4 w-4"></i> Unavailable Dates
     </button>
@@ -92,76 +89,6 @@
         <button class="cf-btn cf-btn-primary">Save Business Hours</button>
       </div>
     </form>
-  </div>
-
-  <!-- TAB: Blocked Times -->
-  <div x-show="tab==='blocked'" x-data="{open:false, deleteOpen:false, deleteUrl:''}">
-    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
-      <p class="text-sm text-[var(--cf-muted)]">Temporarily block specific time ranges for the clinic.</p>
-      <button @click="open=true" class="cf-btn cf-btn-primary">Add Blocked Time</button>
-    </div>
-    {% if blocked_times %}
-    <div class="cf-table-wrap">
-      <table class="cf-table">
-        <thead><tr><th class="p-4">Start</th><th class="p-4">End</th><th class="p-4">Reason</th><th class="p-4">Action</th></tr></thead>
-        <tbody class="divide-y divide-[var(--cf-line-soft)]">
-        {% for bt in blocked_times %}
-          <tr>
-            <td class="p-4 text-[var(--cf-ink)]">{{ bt.starts_at|date:"M j, Y" }}<div class="text-[var(--cf-muted)]">{{ bt.starts_at|time:"g:i A" }}</div></td>
-            <td class="p-4 text-[var(--cf-muted)]">{{ bt.ends_at|date:"M j, Y" }}<div class="text-[var(--cf-muted)]">{{ bt.ends_at|time:"g:i A" }}</div></td>
-            <td class="p-4 text-[var(--cf-muted)]">{{ bt.reason|default:"—" }}</td>
-            <td class="p-4">
-              <button @click="deleteUrl='{% url 'dashboard:delete_blocked_time' bt.id %}'; deleteOpen=true" class="cf-btn cf-btn-sm cf-btn-danger border border-transparent hover:border-[var(--cf-status-cancelled-text)]">Delete</button>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="cf-empty-state">
-      <div class="cf-icon-box mb-4 p-4"><i data-lucide="ban" class="h-6 w-6"></i></div>
-      <p class="cf-section-title">No blocked times</p>
-      <p class="mt-1 text-[var(--cf-muted)]">Click "Add Blocked Time" to mark time ranges when the clinic cannot accept appointments.</p>
-    </div>
-    {% endif %}
-    <div x-show="open" class="cf-modal-backdrop" x-cloak>
-      <form method="post" action="{% url 'dashboard:create_blocked_time' %}" class="cf-modal w-full max-w-xl space-y-4 p-6">
-        {% csrf_token %}<div class="flex items-center justify-between"><h2 class="cf-section-title">Add Blocked Time</h2><button type="button" @click="open=false" class="rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)]"><i data-lucide="x" class="h-4 w-4"></i></button></div>
-        <div class="grid gap-4 md:grid-cols-2">
-          <div class="cf-field">
-            <label class="cf-label">Starts at</label>
-            <input type="datetime-local" name="starts_at" required class="ui-input">
-          </div>
-          <div class="cf-field">
-            <label class="cf-label">Ends at</label>
-            <input type="datetime-local" name="ends_at" required class="ui-input">
-          </div>
-          <div class="cf-field">
-            <label class="cf-label">Reason</label>
-            <input type="text" name="reason" maxlength="160" placeholder="e.g. Staff meeting" class="ui-input">
-          </div>
-        </div>
-        <button class="cf-btn cf-btn-primary w-full">Create Blocked Time</button>
-      </form>
-    </div>
-    <!-- Delete confirmation modal -->
-    <div x-show="deleteOpen" class="cf-modal-backdrop" x-cloak>
-      <form method="post" :action="deleteUrl" class="cf-modal w-full max-w-md space-y-4 p-6">
-        {% csrf_token %}
-        <div class="flex items-center justify-between">
-          <h2 class="cf-section-title">Delete Blocked Time</h2>
-          <button type="button" @click="deleteOpen=false" class="rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)]">
-            <i data-lucide="x" class="h-4 w-4"></i>
-          </button>
-        </div>
-        <p class="text-sm text-[var(--cf-muted)]">Are you sure you want to delete this blocked time? This action cannot be undone.</p>
-        <div class="flex gap-3">
-          <button type="button" @click="deleteOpen=false" class="cf-btn cf-btn-secondary flex-1">Cancel</button>
-          <button class="cf-btn cf-btn-danger flex-1">Delete</button>
-        </div>
-      </form>
-    </div>
   </div>
 
   <!-- TAB: Unavailable Dates -->

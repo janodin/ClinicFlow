@@ -1,11 +1,11 @@
 <div class="text-center">
-  <div class="mx-auto grid h-16 w-16 place-items-center rounded-full text-white" style="background-color: {{ clinic.widget_accent_color }}">
+  <div class="mx-auto grid h-16 w-16 place-items-center rounded-full text-white" style="background-color: {{ clinic.safe_widget_accent_color }}">
     <i data-lucide="check" class="h-8 w-8"></i>
   </div>
   <h2 class="mt-4 text-xl font-black">Booking Confirmed!</h2>
   <p class="mt-2 text-sm text-slate-500">Your appointment has been successfully booked.</p>
 
-  <div class="mt-4 rounded-2xl p-4 text-white" style="background-color: {{ clinic.widget_accent_color }}">
+  <div class="mt-4 rounded-2xl p-4 text-white" style="background-color: {{ clinic.safe_widget_accent_color }}">
     <p class="text-xs font-medium opacity-90">Reference Code</p>
     <p class="text-lg font-black tracking-wider" data-testid="reference-code">{{ appointment.reference_code }}</p>
   </div>
@@ -18,5 +18,5 @@
     <div class="flex justify-between py-1"><span class="text-slate-500">Patient</span><strong class="text-slate-800">{{ appointment.patient.full_name }}</strong></div>
   </div>
 
-  <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn w-full text-white mt-4 inline-block" style="background-color: {{ clinic.widget_accent_color }}">Book Another Appointment</a>
+  <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn w-full text-white mt-4 inline-block" style="background-color: {{ clinic.safe_widget_accent_color }}">Book Another Appointment</a>
 </div>

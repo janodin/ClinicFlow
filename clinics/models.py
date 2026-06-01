@@ -1,6 +1,19 @@
+import re
+
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
 from django.utils.text import slugify
+
+from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+
+
+DEFAULT_WIDGET_ACCENT_COLOR = "#0891b2"
+HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+hex_color_validator = RegexValidator(
+    regex=HEX_COLOR_RE.pattern,
+    message="Enter a valid hex color such as #0891b2.",
+)
 
 
 class TimeStampedModel(models.Model):
@@ -61,7 +74,7 @@ class Clinic(TimeStampedModel):
     timezone = models.CharField(max_length=64, default="Asia/Manila")
     default_appointment_duration = models.PositiveIntegerField(default=30)
     booking_approval_mode = models.CharField(max_length=32, choices=APPROVAL_CHOICES, default=APPROVAL_AUTO)
-    widget_accent_color = models.CharField(max_length=16, default="#0891b2")
+    widget_accent_color = models.CharField(max_length=7, default=DEFAULT_WIDGET_ACCENT_COLOR, validators=[hex_color_validator])
     widget_welcome_message = models.TextField(default="Welcome! How can we help you book an appointment today?")
     widget_behavior_instructions = models.TextField(default="Guide patients through booking smoothly. Always suggest the nearest available slot.")
     show_reason_field = models.BooleanField(default=True)
@@ -74,6 +87,40 @@ class Clinic(TimeStampedModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def safe_widget_accent_color(self):
+        value = self.widget_accent_color or DEFAULT_WIDGET_ACCENT_COLOR
+        return value if HEX_COLOR_RE.fullmatch(value) else DEFAULT_WIDGET_ACCENT_COLOR
+
+
+class ClinicAISettingsManager(models.Manager):
+    def create_from_messenger_settings(self, messenger_ai_settings):
+        settings, _created = self.update_or_create(
+            clinic=messenger_ai_settings.connection.clinic,
+            defaults={
+                "is_ai_enabled": messenger_ai_settings.is_ai_enabled,
+                "instructions": messenger_ai_settings.instructions,
+                "fallback_message": messenger_ai_settings.fallback_message,
+            },
+        )
+        return settings
+
+
+class ClinicAISettings(TimeStampedModel):
+    clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="ai_settings")
+    is_ai_enabled = models.BooleanField(default=True)
+    instructions = models.TextField(blank=True, default=DEFAULT_MESSENGER_AI_PROMPT)
+    fallback_message = models.TextField(blank=True, default="")
+
+    objects = ClinicAISettingsManager()
+
+    class Meta:
+        verbose_name = "Clinic AI Settings"
+        verbose_name_plural = "Clinic AI Settings"
+
+    def __str__(self):
+        return f"ClinicAISettings({self.clinic.name})"
 
 
 class ClinicMembership(TimeStampedModel):

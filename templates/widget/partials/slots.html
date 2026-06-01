@@ -23,7 +23,7 @@
                 data-testid="next-available-date"
                 @click="date = '{{ next_available_date|date:'Y-m-d' }}'; loadSlots()"
                 class="font-bold underline"
-                style="color: {{ clinic.widget_accent_color }}">
+                style="color: {{ clinic.safe_widget_accent_color }}">
           {{ next_available_date|date:"l, M j" }}
         </button>
       </p>

@@ -37,6 +37,38 @@ def test_messenger_connection_one_per_clinic():
 
 
 @pytest.mark.django_db
+def test_messenger_connection_page_id_unique_when_configured():
+    user = User.objects.create_user(username="owner_page_unique", email="owner_page_unique@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupPageUnique", owner=user)
+    clinic_a = Clinic.objects.create(group=group, name="ClinicPageUniqueA", slug="clinic-page-unique-a")
+    clinic_b = Clinic.objects.create(group=group, name="ClinicPageUniqueB", slug="clinic-page-unique-b")
+    MessengerConnection.objects.create(clinic=clinic_a, page_id="PAGE-UNIQUE", page_access_token="abc")
+
+    with pytest.raises(IntegrityError):
+        MessengerConnection.objects.create(clinic=clinic_b, page_id="PAGE-UNIQUE", page_access_token="def")
+
+
+@pytest.mark.django_db
+def test_messenger_connection_admin_form_does_not_render_saved_secrets():
+    from messenger.admin import MessengerConnectionAdminForm
+
+    user = User.objects.create_user(username="owner_admin_secret", email="owner_admin_secret@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupAdminSecret", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicAdminSecret")
+    connection = MessengerConnection.objects.create(
+        clinic=clinic,
+        app_secret="ADMIN-APP-SECRET",
+        page_id="PAGE-ADMIN-SECRET",
+        page_access_token="ADMIN-PAGE-TOKEN",
+    )
+
+    html = MessengerConnectionAdminForm(instance=connection).as_p()
+
+    assert "ADMIN-APP-SECRET" not in html
+    assert "ADMIN-PAGE-TOKEN" not in html
+
+
+@pytest.mark.django_db
 def test_messenger_session_unique_per_psid_and_connection():
     user = User.objects.create_user(username="owner2", email="owner@test.com", password="pass")
     group = ClinicGroup.objects.create(name="Group", owner=user)
@@ -72,6 +104,7 @@ def test_messenger_session_reset():
 
 import hmac
 import hashlib
+import requests
 from unittest.mock import patch
 from messenger.messenger_api import send_messages, verify_signature
 
@@ -88,6 +121,15 @@ class TestVerifySignature:
 
     def test_missing_prefix(self):
         assert verify_signature(b'{}', "bad", "secret") is False
+
+    def test_missing_payload(self):
+        assert verify_signature(b"", "sha256=bad", "secret") is False
+
+    def test_missing_signature(self):
+        assert verify_signature(b"{}", "", "secret") is False
+
+    def test_missing_secret(self):
+        assert verify_signature(b"{}", "sha256=bad", "") is False
 
 
 class TestSendMessages:
@@ -107,6 +149,21 @@ class TestSendMessages:
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
         assert kwargs["json"]["message"]["text"] == "Hello"
+
+    @pytest.mark.django_db
+    @patch("messenger.messenger_api.requests.post")
+    def test_send_messages_does_not_log_page_access_token_on_failure(self, mock_post, caplog):
+        user = User.objects.create_user(username="owner_api_log", email="owner_api_log@test.com", password="pass")
+        group = ClinicGroup.objects.create(name="GroupAPILog", owner=user)
+        clinic = Clinic.objects.create(group=group, name="ClinicAPILog")
+        conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE-LOG", page_access_token="SECRET-TOKEN")
+        mock_post.return_value.raise_for_status.side_effect = requests.HTTPError(
+            "500 Server Error for url: https://graph.facebook.com/v18.0/me/messages?access_token=SECRET-TOKEN"
+        )
+
+        send_messages(conn, "PSID1", [{"type": "text", "text": "Hello"}])
+
+        assert "SECRET-TOKEN" not in caplog.text
 
 
 from datetime import date, time, timedelta
@@ -172,13 +229,32 @@ def test_webhook_get_invalid_token():
 
 
 @pytest.mark.django_db
+@override_settings(MESSENGER_VERIFY_TOKEN="")
+def test_webhook_get_fails_closed_when_verify_token_unset():
+    client = Client()
+    url = reverse("messenger:webhook")
+    response = client.get(url, {
+        "hub.mode": "subscribe",
+        "hub.verify_token": "",
+        "hub.challenge": "CHALLENGE123",
+    })
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
 @override_settings(MESSENGER_APP_SECRET="test_secret")
 def test_webhook_post_valid_message():
     client = Client()
     user = User.objects.create_user(username="owner_wh", email="owner_wh@test.com", password="pass")
     group = ClinicGroup.objects.create(name="GroupWH", owner=user)
     clinic = Clinic.objects.create(group=group, name="ClinicWH")
-    conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE1", page_access_token="TOKEN")
+    conn = MessengerConnection.objects.create(
+        clinic=clinic,
+        app_secret="test_secret",
+        page_id="PAGE1",
+        page_access_token="TOKEN",
+    )
     Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
 
     payload = json.dumps({
@@ -208,6 +284,312 @@ def test_webhook_post_valid_message():
     assert resp.status_code == 200
     session = MessengerSession.objects.get(connection=conn, psid="PSID1")
     assert session.state == MessengerSession.STATE_SELECT_SERVICE
+
+
+@pytest.mark.django_db
+def test_webhook_post_uses_connection_app_secret():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh_app", email="owner_wh_app@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWHApp", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicWHApp")
+    conn = MessengerConnection.objects.create(
+        clinic=clinic,
+        app_secret="clinic-app-secret",
+        page_id="PAGE-APP-SECRET",
+        page_access_token="TOKEN",
+    )
+    Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-APP-SECRET",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE-APP-SECRET"},
+                "message": {"text": "Book an appointment"},
+            }]
+        }]
+    }).encode()
+    signature = "sha256=" + hmac.new("clinic-app-secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    resp = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert resp.status_code == 200
+    assert MessengerSession.objects.get(connection=conn, psid="PSID1").state == MessengerSession.STATE_SELECT_SERVICE
+
+
+@pytest.mark.django_db
+def test_webhook_post_rejects_signature_from_other_clinic_app_secret():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh_cross", email="owner_wh_cross@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWHCross", owner=user)
+    clinic_a = Clinic.objects.create(group=group, name="ClinicWHCrossA", slug="clinic-wh-cross-a")
+    clinic_b = Clinic.objects.create(group=group, name="ClinicWHCrossB", slug="clinic-wh-cross-b")
+    MessengerConnection.objects.create(
+        clinic=clinic_a,
+        app_secret="clinic-a-secret",
+        page_id="PAGE-CROSS-A",
+        page_access_token="TOKEN-A",
+    )
+    MessengerConnection.objects.create(
+        clinic=clinic_b,
+        app_secret="clinic-b-secret",
+        page_id="PAGE-CROSS-B",
+        page_access_token="TOKEN-B",
+    )
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-CROSS-A",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE-CROSS-A"},
+                "message": {"text": "Book an appointment"},
+            }]
+        }]
+    }).encode()
+    signature = "sha256=" + hmac.new("clinic-b-secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    resp = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert resp.status_code == 403
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+def test_webhook_post_ignores_messages_for_unverified_page_in_signed_payload():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh_mixed", email="owner_wh_mixed@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWHMixed", owner=user)
+    clinic_a = Clinic.objects.create(group=group, name="ClinicWHMixedA", slug="clinic-wh-mixed-a")
+    clinic_b = Clinic.objects.create(group=group, name="ClinicWHMixedB", slug="clinic-wh-mixed-b")
+    conn_a = MessengerConnection.objects.create(
+        clinic=clinic_a,
+        app_secret="clinic-a-secret",
+        page_id="PAGE-MIXED-A",
+        page_access_token="TOKEN-A",
+    )
+    conn_b = MessengerConnection.objects.create(
+        clinic=clinic_b,
+        app_secret="clinic-b-secret",
+        page_id="PAGE-MIXED-B",
+        page_access_token="TOKEN-B",
+    )
+    Service.objects.create(clinic=clinic_a, name="Clinic A Service", duration_minutes=30, price=0)
+    Service.objects.create(clinic=clinic_b, name="Clinic B Service", duration_minutes=30, price=0)
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-MIXED-A",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID-B"},
+                "recipient": {"id": "PAGE-MIXED-B"},
+                "message": {"text": "Book an appointment"},
+            }]
+        }]
+    }).encode()
+    signature = "sha256=" + hmac.new("clinic-a-secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    resp = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert resp.status_code == 403
+    assert not MessengerSession.objects.filter(connection=conn_a).exists()
+    assert not MessengerSession.objects.filter(connection=conn_b).exists()
+
+
+@pytest.mark.django_db
+def test_webhook_post_rejects_malformed_json_without_signature_before_parsing():
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:webhook"),
+        data=b"{not-json",
+        content_type="application/json",
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_webhook_post_does_not_process_recipient_for_different_verified_secret():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh_mixed", email="owner_wh_mixed@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWHMixed", owner=user)
+    clinic_a = Clinic.objects.create(group=group, name="ClinicWHMixedA", slug="clinic-wh-mixed-a")
+    clinic_b = Clinic.objects.create(group=group, name="ClinicWHMixedB", slug="clinic-wh-mixed-b")
+    MessengerConnection.objects.create(
+        clinic=clinic_a,
+        app_secret="clinic-a-secret",
+        page_id="PAGE-MIXED-A",
+        page_access_token="TOKEN-A",
+    )
+    connection_b = MessengerConnection.objects.create(
+        clinic=clinic_b,
+        app_secret="clinic-b-secret",
+        page_id="PAGE-MIXED-B",
+        page_access_token="TOKEN-B",
+    )
+    Service.objects.create(clinic=clinic_b, name="Cleaning", duration_minutes=30, price=0)
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-MIXED-A",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID-MIXED"},
+                "recipient": {"id": "PAGE-MIXED-B"},
+                "message": {"text": "Book an appointment"},
+            }]
+        }]
+    }).encode()
+    signature = "sha256=" + hmac.new("clinic-a-secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    response = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert response.status_code == 403
+    assert not MessengerSession.objects.filter(connection=connection_b, psid="PSID-MIXED").exists()
+
+
+@pytest.mark.django_db
+def test_webhook_post_rejects_shared_secret_entry_recipient_mismatch():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh_shared", email="owner_wh_shared@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWHShared", owner=user)
+    clinic_a = Clinic.objects.create(group=group, name="ClinicWHSharedA", slug="clinic-wh-shared-a")
+    clinic_b = Clinic.objects.create(group=group, name="ClinicWHSharedB", slug="clinic-wh-shared-b")
+    MessengerConnection.objects.create(clinic=clinic_a, app_secret="shared-secret", page_id="PAGE-SHARED-A", page_access_token="TOKEN-A")
+    MessengerConnection.objects.create(clinic=clinic_b, app_secret="shared-secret", page_id="PAGE-SHARED-B", page_access_token="TOKEN-B")
+    Service.objects.create(clinic=clinic_b, name="Cleaning", duration_minutes=30, price=0)
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-SHARED-A",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE-SHARED-B"},
+                "message": {"text": "Book an appointment"},
+            }],
+        }],
+    }).encode()
+    signature = "sha256=" + hmac.new("shared-secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    response = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert response.status_code == 403
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+def test_webhook_post_rejects_missing_recipient_id():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh_missing_recipient", email="owner_wh_missing_recipient@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWHMissingRecipient", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicWHMissingRecipient")
+    MessengerConnection.objects.create(
+        clinic=clinic,
+        app_secret="clinic-app-secret",
+        page_id="PAGE-MISSING-RECIPIENT",
+        page_access_token="TOKEN",
+    )
+    Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-MISSING-RECIPIENT",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "message": {"text": "Book an appointment"},
+            }],
+        }],
+    }).encode()
+    signature = "sha256=" + hmac.new("clinic-app-secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    response = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert response.status_code == 403
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_webhook_post_rejects_missing_signature():
+    client = Client()
+    payload = json.dumps({"object": "page", "entry": []}).encode()
+
+    resp = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_webhook_post_rejects_invalid_signature():
+    client = Client()
+    payload = json.dumps({"object": "page", "entry": []}).encode()
+
+    resp = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256="sha256=bad",
+    )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="")
+def test_webhook_post_rejects_when_app_secret_unset():
+    client = Client()
+    payload = json.dumps({"object": "page", "entry": []}).encode()
+
+    resp = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 403
 
 
 from datetime import timedelta
@@ -259,6 +641,45 @@ def test_messenger_ai_settings_defaults_and_unique_connection():
 
 
 @pytest.mark.django_db
+def test_clinic_ai_settings_defaults_and_unique_clinic():
+    from clinics.models import ClinicAISettings
+    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+
+    clinic, connection = _create_messenger_clinic("owner_clinic_ai_defaults", "PAGE-CLINIC-AI")
+    settings = ClinicAISettings.objects.create(clinic=clinic)
+
+    assert settings.clinic == clinic
+    assert settings.is_ai_enabled is True
+    assert settings.instructions == DEFAULT_MESSENGER_AI_PROMPT
+    assert settings.fallback_message == ""
+    assert str(settings) == f"ClinicAISettings({clinic.name})"
+
+    with pytest.raises(IntegrityError):
+        ClinicAISettings.objects.create(clinic=clinic)
+
+
+@pytest.mark.django_db
+def test_clinic_ai_settings_manager_copies_messenger_values():
+    from clinics.models import ClinicAISettings
+    from messenger.models import MessengerAISettings
+
+    clinic, connection = _create_messenger_clinic("owner_clinic_ai_copy", "PAGE-CLINIC-COPY")
+    MessengerAISettings.objects.create(
+        connection=connection,
+        is_ai_enabled=False,
+        instructions="Copied shared instructions.",
+        fallback_message="Copied fallback.",
+    )
+
+    settings = ClinicAISettings.objects.create_from_messenger_settings(connection.ai_settings)
+
+    assert settings.clinic == clinic
+    assert settings.is_ai_enabled is False
+    assert settings.instructions == "Copied shared instructions."
+    assert settings.fallback_message == "Copied fallback."
+
+
+@pytest.mark.django_db
 def test_build_ai_context_uses_default_prompt_when_settings_missing():
     from messenger.ai_tools import build_ai_context
     from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
@@ -272,9 +693,49 @@ def test_build_ai_context_uses_default_prompt_when_settings_missing():
 
 
 @pytest.mark.django_db
+def test_build_widget_ai_context_uses_shared_clinic_settings():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_widget_ai_context
+
+    clinic, connection = _create_messenger_clinic("owner_widget_context", "PAGE-WIDGET-CONTEXT")
+    Service.objects.create(clinic=clinic, name="Checkup", duration_minutes=30, price=500)
+    ClinicFAQ.objects.create(clinic=clinic, question="Hours?", answer="9 AM to 5 PM")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=False,
+        instructions="Shared instructions.",
+        fallback_message="Shared fallback.",
+    )
+
+    context = build_widget_ai_context(clinic.slug)
+
+    assert context["found"] is True
+    assert context["clinic"]["id"] == clinic.id
+    assert context["ai"]["is_ai_enabled"] is False
+    assert context["ai"]["instructions"] == "Shared instructions."
+    assert context["ai"]["fallback_message"] == "Shared fallback."
+    assert context["services"][0]["name"] == "Checkup"
+    assert context["faqs"][0]["question"] == "Hours?"
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret")
+def test_widget_ai_context_endpoint_requires_secret(client):
+    clinic, connection = _create_messenger_clinic("owner_widget_secret", "PAGE-WIDGET-SECRET")
+
+    response = client.post(
+        reverse("messenger:widget_ai_context"),
+        data=json.dumps({"clinic_slug": clinic.slug}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
 def test_build_ai_context_returns_only_page_clinic_data():
+    from clinics.models import ClinicAISettings
     from messenger.ai_tools import build_ai_context
-    from messenger.models import MessengerAISettings
 
     clinic, connection = _create_messenger_clinic("owner_ai_context", "PAGEAI2")
     other_clinic, _ = _create_messenger_clinic("owner_ai_other", "PAGEOTHER")
@@ -289,7 +750,7 @@ def test_build_ai_context_returns_only_page_clinic_data():
     Service.objects.create(clinic=other_clinic, name="Other Service", duration_minutes=30, price=0)
     ClinicFAQ.objects.create(clinic=clinic, question="Where are you located?", answer="123 Main St")
     ClinicFAQ.objects.create(clinic=other_clinic, question="Other FAQ", answer="Other answer")
-    MessengerAISettings.objects.create(connection=connection, instructions="Use a friendly clinic tone.")
+    ClinicAISettings.objects.create(clinic=clinic, instructions="Use a friendly clinic tone.")
 
     result = build_ai_context("PAGEAI2")
 
@@ -456,13 +917,13 @@ def test_ai_book_endpoint_accepts_string_true_confirmation():
 
 @pytest.mark.django_db
 def test_ai_tools_return_disabled_when_ai_settings_disabled():
+    from clinics.models import ClinicAISettings
     from messenger.ai_tools import book_confirmed_appointment, build_ai_context, check_availability, match_services
-    from messenger.models import MessengerAISettings
 
     clinic, connection = _create_messenger_clinic("owner_ai_disabled", "PAGEAI11")
     service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
-    MessengerAISettings.objects.create(
-        connection=connection,
+    ClinicAISettings.objects.create(
+        clinic=clinic,
         is_ai_enabled=False,
         fallback_message="Please call the clinic.",
     )
@@ -523,8 +984,34 @@ def test_ai_booking_reuses_patient_phone_and_prevents_double_booking():
 
     assert first["created"] is True
     assert Appointment.objects.get(reference_code=first["appointment"]["reference_code"]).patient == patient
+    patient.refresh_from_db()
+    assert patient.full_name == "Existing Name"
     assert second["created"] is False
     assert second["error"] == "That slot is no longer available. Please choose another time."
+
+
+@pytest.mark.django_db
+def test_widget_ai_booking_uses_chat_widget_source():
+    from messenger.ai_tools import book_widget_confirmed_appointment, check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_widget_ai_source", "PAGEAI-WIDGET-SOURCE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = check_availability("PAGEAI-WIDGET-SOURCE", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+
+    result = book_widget_confirmed_appointment(
+        clinic.slug,
+        service.id,
+        slot["starts_at"],
+        "Widget AI Patient",
+        "09170001111",
+        confirmed=True,
+    )
+
+    assert result["created"] is True
+    appointment = Appointment.objects.get(reference_code=result["appointment"]["reference_code"])
+    assert appointment.source == Appointment.SOURCE_CHAT_WIDGET
 
 
 @pytest.mark.django_db
@@ -560,6 +1047,292 @@ def test_ai_context_endpoint_fails_closed_when_secret_unset():
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="")
+def test_n8n_webhook_fails_closed_when_secret_unset():
+    _clinic, _connection = _create_messenger_clinic("owner_n8n_no_secret", "PAGE-N8N-NO-SECRET")
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-NO-SECRET", "psid": "PSID1", "text": "Hello"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_rejects_invalid_secret():
+    _clinic, _connection = _create_messenger_clinic("owner_n8n_bad_secret", "PAGE-N8N-BAD-SECRET")
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-BAD-SECRET", "psid": "PSID1", "text": "Hello"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="wrong",
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_accepts_valid_secret():
+    clinic, _connection = _create_messenger_clinic("owner_n8n_good_secret", "PAGE-N8N-GOOD-SECRET")
+    Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-GOOD-SECRET", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert "replies" in response.json()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_ignores_inactive_clinic_connection():
+    clinic, _connection = _create_messenger_clinic("owner_n8n_inactive_clinic", "PAGE-N8N-INACTIVE")
+    clinic.is_active = False
+    clinic.save(update_fields=["is_active"])
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-INACTIVE", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"replies": [], "page_token": ""}
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_endpoint_accepts_valid_per_clinic_secret():
+    _clinic, _connection = _create_messenger_clinic("owner_meta_verify", "PAGE-META-VERIFY")
+    _connection.app_secret = "meta-app-secret"
+    _connection.save(update_fields=["app_secret"])
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [{"id": "PAGE-META-VERIFY", "messaging": []}],
+    })
+    signature = "sha256=" + hmac.new("meta-app-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({
+            "page_id": "PAGE-META-VERIFY",
+            "raw_body": raw_body,
+            "signature": signature,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": True}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_endpoint_rejects_invalid_signature():
+    _clinic, _connection = _create_messenger_clinic("owner_meta_verify_bad", "PAGE-META-BAD")
+    _connection.app_secret = "meta-app-secret"
+    _connection.save(update_fields=["app_secret"])
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({
+            "page_id": "PAGE-META-BAD",
+            "raw_body": json.dumps({"object": "page", "entry": [{"id": "PAGE-META-BAD"}]}),
+            "signature": "sha256=bad",
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": False}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_rejects_invalid_signature_before_raw_body_shape():
+    _clinic, connection = _create_messenger_clinic("owner_meta_malformed", "PAGE-META-MALFORMED")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    client = Client()
+
+    with patch("messenger.views.json.loads", wraps=json.loads) as mock_loads:
+        response = client.post(
+            reverse("messenger:meta_signature_verify"),
+            data=json.dumps({
+                "page_id": "PAGE-META-MALFORMED",
+                "raw_body": "not-json",
+                "signature": "sha256=bad",
+            }),
+            content_type="application/json",
+            HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": False}
+    assert "not-json" not in [call.args[0] for call in mock_loads.call_args_list]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_rejects_signed_cross_page_payload():
+    _clinic, connection = _create_messenger_clinic("owner_meta_cross_page", "PAGE-META-A")
+    connection.app_secret = "shared-meta-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [
+            {"id": "PAGE-META-A", "messaging": []},
+            {"id": "PAGE-META-B", "messaging": [{"recipient": {"id": "PAGE-META-B"}}]},
+        ],
+    })
+    signature = "sha256=" + hmac.new("shared-meta-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({
+            "page_id": "PAGE-META-A",
+            "raw_body": raw_body,
+            "signature": signature,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": False}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_rejects_missing_recipient_id_in_message():
+    _clinic, connection = _create_messenger_clinic("owner_meta_missing_recipient", "PAGE-META-MISSING-RECIPIENT")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-META-MISSING-RECIPIENT",
+            "messaging": [{"sender": {"id": "PSID1"}, "message": {"text": "Hi"}}],
+        }],
+    })
+    signature = "sha256=" + hmac.new("meta-app-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({
+            "page_id": "PAGE-META-MISSING-RECIPIENT",
+            "raw_body": raw_body,
+            "signature": signature,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": False}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_rejects_non_object_request_body():
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps([]),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Invalid request data"}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_endpoint_returns_false_for_authorized_bad_input():
+    client = Client()
+
+    invalid_json = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data="not json",
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+    invalid_types = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({"page_id": "PAGE", "raw_body": {"bad": "type"}, "signature": "sha256=bad"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+    invalid_shape = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps(["not", "an", "object"]),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert invalid_json.status_code == 200
+    assert invalid_json.json() == {"verified": False}
+    assert invalid_types.status_code == 200
+    assert invalid_types.json() == {"verified": False}
+    assert invalid_shape.status_code == 400
+    assert invalid_shape.json() == {"error": "Invalid request data"}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_endpoint_returns_false_for_malformed_signed_raw_body():
+    _clinic, connection = _create_messenger_clinic("owner_meta_bad_raw_shape", "PAGE-META-BAD-RAW")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-META-BAD-RAW",
+            "messaging": [{"recipient": "bad-type"}],
+        }],
+    })
+    signature = "sha256=" + hmac.new("meta-app-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({
+            "page_id": "PAGE-META-BAD-RAW",
+            "raw_body": raw_body,
+            "signature": signature,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": False}
 
 
 @pytest.mark.django_db
@@ -696,7 +1469,12 @@ def test_full_booking_flow_via_webhook():
     user = User.objects.create_user(username="owner_flow", email="owner_flow@test.com", password="pass")
     group = ClinicGroup.objects.create(name="GroupFlow", owner=user)
     clinic = Clinic.objects.create(group=group, name="ClinicFlow", timezone="Asia/Manila", booking_approval_mode=Clinic.APPROVAL_AUTO)
-    conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE1", page_access_token="TOKEN")
+    conn = MessengerConnection.objects.create(
+        clinic=clinic,
+        app_secret="test_secret",
+        page_id="PAGE1",
+        page_access_token="TOKEN",
+    )
     service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
 
     def send_message(text="", payload=""):

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone
 
 from appointments.models import Appointment
-from scheduling.models import BlockedTime, ClinicBusinessHour, UnavailableDate
+from scheduling.models import ClinicBusinessHour, UnavailableDate
 
 
 def _localize(clinic, date_value, time_value):
@@ -35,12 +35,6 @@ def slot_is_available(clinic, starts_at, ends_at):
         )
         .exclude(status=Appointment.STATUS_CANCELLED)
         .exists()
-        or BlockedTime.objects.filter(
-            clinic=clinic,
-            starts_at__lt=ends_at,
-            ends_at__gt=starts_at,
-        )
-        .exists()
     )
 
 
@@ -54,25 +48,24 @@ def slot_is_available_for_appointment(clinic, starts_at, ends_at, exclude_appoin
         qs = qs.exclude(pk=exclude_appointment.pk)
     if qs.exists():
         return False
-    blocked_qs = BlockedTime.objects.filter(
-        clinic=clinic,
-        starts_at__lt=ends_at,
-        ends_at__gt=starts_at,
-    )
-    if blocked_qs.exists():
-        return False
     return True
 
 
 def validate_slot(clinic, starts_at, ends_at, exclude_appointment=None):
     from django.core.exceptions import ValidationError
-    window = get_working_window(clinic, starts_at.date())
+    tz = ZoneInfo(clinic.timezone)
+    local_start = starts_at.astimezone(tz)
+    local_end = ends_at.astimezone(tz)
+    date_value = local_start.date()
+    if _date_is_unavailable(clinic, date_value):
+        raise ValidationError("Clinic is not available on this day.")
+    window = get_working_window(clinic, date_value)
     if not window:
         raise ValidationError("Clinic is not open on this day.")
     open_time, close_time, break_start, break_end = window
-    if starts_at.time() < open_time or ends_at.time() > close_time:
+    if local_start.time() < open_time or local_end.time() > close_time:
         raise ValidationError("Selected time is outside working hours.")
-    if _inside_break(starts_at.time(), ends_at.time(), break_start, break_end):
+    if _inside_break(local_start.time(), local_end.time(), break_start, break_end):
         raise ValidationError("Selected time overlaps with a scheduled break.")
     if not slot_is_available_for_appointment(clinic, starts_at, ends_at, exclude_appointment):
         raise ValidationError("This slot is not available.")

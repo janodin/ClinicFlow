@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -9,7 +9,8 @@ from appointments.forms import AppointmentStatusForm, StaffAppointmentForm
 from appointments.models import Appointment
 from clinics.models import Clinic, ClinicGroup
 from patients.models import Patient
-from scheduling.utils import generate_slots
+from scheduling.models import UnavailableDate
+from scheduling.utils import generate_slots, validate_slot
 
 
 @pytest.mark.django_db
@@ -110,3 +111,50 @@ def test_staff_form_validates_slot_availability(clinic_setup):
         "source": Appointment.SOURCE_STAFF,
     })
     assert not form.is_valid()
+
+
+@pytest.mark.django_db
+def test_staff_form_rejects_unavailable_date(clinic_setup):
+    clinic, service = clinic_setup
+    target_date = timezone.localdate() + timedelta(days=1)
+    UnavailableDate.objects.create(clinic=clinic, date=target_date, reason="Holiday")
+
+    form = StaffAppointmentForm(clinic, data={
+        "patient_name": "New",
+        "patient_phone": "1234",
+        "service": service.id,
+        "date": target_date.isoformat(),
+        "time": "09:00",
+        "status": Appointment.STATUS_PENDING,
+        "payment_state": Appointment.PAYMENT_UNPAID,
+        "source": Appointment.SOURCE_STAFF,
+    })
+
+    assert not form.is_valid()
+    assert "not available" in form.errors.as_text().lower()
+
+
+@pytest.mark.django_db
+def test_validate_slot_rejects_unavailable_date(clinic_setup):
+    clinic, service = clinic_setup
+    target_date = timezone.localdate() + timedelta(days=1)
+    UnavailableDate.objects.create(clinic=clinic, date=target_date, reason="Holiday")
+    starts_at = timezone.make_aware(datetime.combine(target_date, time(9)), ZoneInfo(clinic.timezone))
+    ends_at = starts_at + timedelta(minutes=service.effective_duration())
+
+    with pytest.raises(ValidationError, match="not available"):
+        validate_slot(clinic, starts_at, ends_at)
+
+
+@pytest.mark.django_db
+def test_validate_slot_checks_unavailable_date_in_clinic_timezone(clinic_setup):
+    clinic, service = clinic_setup
+    target_date = timezone.localdate() + timedelta(days=1)
+    clinic.business_hours.update(open_time=time(0), close_time=time(1))
+    UnavailableDate.objects.create(clinic=clinic, date=target_date, reason="Holiday")
+    local_start = timezone.make_aware(datetime.combine(target_date, time(0, 30)), ZoneInfo(clinic.timezone))
+    starts_at = local_start.astimezone(ZoneInfo("UTC"))
+    ends_at = starts_at + timedelta(minutes=service.effective_duration())
+
+    with pytest.raises(ValidationError, match="not available"):
+        validate_slot(clinic, starts_at, ends_at)

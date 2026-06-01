@@ -10,6 +10,8 @@ META_API_URL = "https://graph.facebook.com/v18.0"
 
 
 def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
+    if not payload or not signature or not secret:
+        return False
     if not signature.startswith("sha256="):
         return False
     expected = "sha256=" + hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
@@ -24,8 +26,8 @@ def _send_message(connection, psid, payload):
         resp = requests.post(url, params=params, json=body, timeout=10)
         resp.raise_for_status()
         return resp.json()
-    except requests.RequestException as exc:
-        logger.error("Failed to send Messenger message: %s", exc)
+    except requests.RequestException:
+        logger.error("Failed to send Messenger message")
         return None
 
 

@@ -2,6 +2,10 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 import json
 
+import requests
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -10,9 +14,14 @@ from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.http import require_POST
 
 from appointments.models import Appointment
-from clinics.models import Clinic
-from patients.models import Patient
+from clinics.models import Clinic, ClinicAISettings
+from patients.models import Patient, normalize_phone
 from scheduling.utils import generate_slots
+from widget.ai_client import AssistantUnavailable, call_assistant_webhook, fallback_message_for
+
+
+MIN_BOOKING_PHONE_DIGITS = 7
+SLOT_CONFLICT_MESSAGE = "That slot is no longer available. Please choose another time."
 
 
 def _find_next_available_date(clinic, service, from_date, max_days=14):
@@ -59,8 +68,7 @@ def _booking_context(clinic, request):
 def widget_book(request, clinic_slug):
     clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
     if request.method == "POST":
-        source = request.POST.get("source", Appointment.SOURCE_CHAT_WIDGET)
-        appointment, error = _process_guest_booking(clinic, request.POST, source)
+        appointment, error = _process_guest_booking(clinic, request.POST, _public_booking_source(request))
         if request.headers.get("HX-Request"):
             if error:
                 return render(request, "widget/partials/booking_error.html", {"clinic": clinic, "error": error}, status=409)
@@ -76,7 +84,7 @@ def widget_home(request, clinic_slug):
     clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
     context = _booking_context(clinic, request)
     context["faqs"] = clinic.faqs.filter(is_active=True)
-    context["widget_source"] = request.GET.get("source", "chat_widget")
+    context["widget_source"] = _public_booking_source(request)
     return render(request, "widget/widget.html", context)
 
 
@@ -85,47 +93,84 @@ def widget_slots(request, clinic_slug):
     return render(request, "widget/partials/slots.html", _booking_context(clinic, request))
 
 
+def _public_booking_source(request):
+    if request.GET.get("source") == Appointment.SOURCE_EMBED:
+        return Appointment.SOURCE_EMBED
+    return Appointment.SOURCE_CHAT_WIDGET
+
+
+def _validate_guest_identity(full_name, phone, email):
+    if not full_name or not phone:
+        return "Please provide your full name and phone number."
+    if len(normalize_phone(phone)) < MIN_BOOKING_PHONE_DIGITS:
+        return "Please enter a valid phone number."
+    if email:
+        try:
+            validate_email(email)
+        except ValidationError:
+            return "Please enter a valid email address."
+    return ""
+
+
 def _process_guest_booking(clinic, data, source):
-    service = get_object_or_404(clinic.services.filter(is_active=True, is_archived=False), pk=data.get("service"))
-    starts_at = datetime.fromisoformat(data["starts_at"])
+    full_name = data.get("full_name", "").strip()
+    phone = data.get("phone", "").strip()
+    email = data.get("email", "").strip()
+    reason = data.get("reason", "").strip()
+    error = _validate_guest_identity(full_name, phone, email)
+    if error:
+        return None, error
+
+    try:
+        starts_at = datetime.fromisoformat(data.get("starts_at", ""))
+    except (TypeError, ValueError):
+        return None, "Please choose a valid appointment time."
     if timezone.is_naive(starts_at):
         starts_at = timezone.make_aware(starts_at)
     starts_at = starts_at.astimezone(dt_timezone.utc)
-    ends_at = starts_at + timedelta(minutes=service.effective_duration())
-    available = any(
-        slot["starts_at"] == starts_at
-        for slot in generate_slots(
-            clinic,
-            service,
-            starts_at.astimezone(ZoneInfo(clinic.timezone)).date(),
+
+    with transaction.atomic():
+        locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+        service = locked_clinic.services.filter(is_active=True, is_archived=False, pk=data.get("service")).first()
+        if service is None:
+            return None, "Please choose a valid service."
+
+        ends_at = starts_at + timedelta(minutes=service.effective_duration())
+        local_date = starts_at.astimezone(ZoneInfo(locked_clinic.timezone)).date()
+        available = any(
+            slot["starts_at"] == starts_at
+            for slot in generate_slots(locked_clinic, service, local_date)
         )
-    )
-    if not available:
-        return None, "That slot is no longer available. Please choose another time."
-    patient, _ = Patient.find_or_create_for_booking(
-        clinic=clinic,
-        full_name=data.get("full_name", "").strip(),
-        phone=data.get("phone", "").strip(),
-        email=data.get("email", "").strip(),
-        notes=data.get("reason", "").strip(),
-    )
-    appointment = Appointment.objects.create(
-        clinic=clinic,
-        patient=patient,
-        service=service,
-        starts_at=starts_at,
-        ends_at=ends_at,
-        status=Appointment.STATUS_CONFIRMED if clinic.booking_approval_mode == Clinic.APPROVAL_AUTO else Appointment.STATUS_PENDING,
-        source=source,
-        reason=data.get("reason", ""),
-    )
+        if not available:
+            return None, SLOT_CONFLICT_MESSAGE
+
+        patient, _ = Patient.find_or_create_for_booking(
+            clinic=locked_clinic,
+            full_name=full_name,
+            phone=phone,
+            email=email,
+            notes=reason,
+        )
+        try:
+            appointment = Appointment.objects.create(
+                clinic=locked_clinic,
+                patient=patient,
+                service=service,
+                starts_at=starts_at,
+                ends_at=ends_at,
+                status=Appointment.STATUS_CONFIRMED if locked_clinic.booking_approval_mode == Clinic.APPROVAL_AUTO else Appointment.STATUS_PENDING,
+                source=source,
+                reason=reason,
+            )
+        except ValidationError:
+            return None, SLOT_CONFLICT_MESSAGE
     return appointment, None
 
 
 def embed_js(request, clinic_slug):
     clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
     src = request.build_absolute_uri(reverse("widget:home", args=[clinic.slug])) + "?source=embed"
-    accent = clinic.widget_accent_color or "#0891b2"
+    accent = clinic.safe_widget_accent_color
     body = f"""
 (function() {{
   var accent = {json.dumps(accent)};
@@ -177,6 +222,14 @@ def chat_api(request, clinic_slug):
     return JsonResponse({"message": clinic.widget_welcome_message, "services": services})
 
 
+def _widget_chat_history(request, clinic):
+    return request.session.get(f"widget_chat_history_{clinic.id}", [])
+
+
+def _save_widget_chat_history(request, clinic, history):
+    request.session[f"widget_chat_history_{clinic.id}"] = history[-10:]
+
+
 @require_POST
 def chat_step(request, clinic_slug):
     clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
@@ -185,6 +238,37 @@ def chat_step(request, clinic_slug):
     action = request.POST.get("action", "")
     value = request.POST.get("value", "")
     state = data.get("state", "greeting")
+
+    if action == "text_input" and value and state == "greeting":
+        ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
+        if not ai_settings.is_ai_enabled:
+            message = fallback_message_for(ai_settings)
+            return JsonResponse({
+                "state": state,
+                "message": message,
+                "options": [{"label": "Book an appointment", "value": "start_booking"}],
+                "next_action": "select_option",
+            })
+
+        history = _widget_chat_history(request, clinic)
+        if not request.session.session_key:
+            request.session.create()
+        try:
+            reply = call_assistant_webhook(clinic, value, history, request.session.session_key)
+        except (AssistantUnavailable, requests.RequestException, ValueError):
+            reply = fallback_message_for(ai_settings)
+
+        history.extend([
+            {"role": "user", "content": value},
+            {"role": "assistant", "content": reply},
+        ])
+        _save_widget_chat_history(request, clinic, history)
+        return JsonResponse({
+            "state": state,
+            "message": reply,
+            "options": [{"label": "Book an appointment", "value": "start_booking"}],
+            "next_action": "select_option",
+        })
 
     if state == "greeting":
         if value == "start_booking" or action == "start_booking":
@@ -301,8 +385,8 @@ def chat_step(request, clinic_slug):
             full_name = request.POST.get("full_name", "").strip()
             phone = request.POST.get("phone", "").strip()
             email = request.POST.get("email", "").strip()
-            if not full_name or not phone:
-                message = "Please provide your full name and phone number."
+            message = _validate_guest_identity(full_name, phone, email)
+            if message:
                 data["state"] = state
                 request.session[session_key] = data
                 return JsonResponse({"state": state, "message": message, "options": [], "next_action": "submit_info"})
@@ -331,10 +415,16 @@ def chat_step(request, clinic_slug):
             }, Appointment.SOURCE_CHAT_WIDGET)
             if error:
                 message = error
-                state = "select_time"
+                identity_error = _validate_guest_identity(
+                    data.get("full_name", ""),
+                    data.get("phone", ""),
+                    data.get("email", ""),
+                )
+                state = "collect_info" if identity_error else "select_time"
                 data["state"] = state
                 request.session[session_key] = data
-                return JsonResponse({"state": state, "message": message, "options": [], "next_action": "select_option"})
+                next_action = "submit_info" if identity_error else "select_option"
+                return JsonResponse({"state": state, "message": message, "options": [], "next_action": next_action})
             state = "booked"
             message = f"Your appointment is confirmed! Reference: {appointment.reference_code}"
             request.session.pop(session_key, None)

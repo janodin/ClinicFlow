@@ -76,10 +76,10 @@
 
 - [ ] Add clinic business hours UI
 - [ ] Add break time editing UI
-- [ ] Add blocked dates/times UI
+- [ ] Add unavailable dates UI
 - [ ] Add holiday/unavailable day support
 - [ ] Add slot preview tool for staff
-- [ ] Add tests for business hours, breaks, blocked times, and unavailable dates
+- [ ] Add tests for business hours, breaks, and unavailable dates
 
 ## Public Booking Flow
 

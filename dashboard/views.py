@@ -20,7 +20,7 @@ from clinics.forms import ClinicFAQForm, ClinicSettingsForm, WidgetSettingsForm
 from clinics.models import ClinicMembership
 from clinics.tenant import current_clinic, get_active_membership, user_can_manage_daily_ops, user_can_manage_settings
 from django.utils.dateparse import parse_date, parse_datetime
-from scheduling.models import BlockedTime, ClinicBusinessHour, UnavailableDate
+from scheduling.models import ClinicBusinessHour, UnavailableDate
 from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots, get_working_window, validate_slot
 from patients.forms import PatientForm
 from patients.models import Patient
@@ -32,6 +32,12 @@ def _clinic_or_redirect(request):
     if not clinic:
         return None
     return clinic
+
+
+def _require_settings_permission(user):
+    membership = get_active_membership(user)
+    if not user_can_manage_settings(membership):
+        raise PermissionDenied
 
 
 @login_required
@@ -93,10 +99,12 @@ def calendar_events(request):
 
     for appointment in qs:
         colors = color_map.get(appointment.status, {})
+        local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
+        starts_at_label = local_start.strftime("%I:%M %p").lstrip("0").lower()
         events.append(
             {
                 "id": appointment.id,
-                "title": f"{appointment.patient.full_name} - {appointment.service.name}",
+                "title": f"{starts_at_label} {appointment.patient.full_name}",
                 "start": appointment.starts_at.isoformat(),
                 "end": appointment.ends_at.isoformat(),
                 "className": f"status-{appointment.status}",
@@ -169,10 +177,6 @@ def calendar_reschedule(request):
 
     if _inside_break(new_start.time(), new_end.time(), break_start, break_end):
         return JsonResponse({"success": False, "error": "Appointment overlaps with a break."})
-
-    blocked = BlockedTime.objects.filter(clinic=clinic, starts_at__lt=new_end, ends_at__gt=new_start).exists()
-    if blocked:
-        return JsonResponse({"success": False, "error": "This time slot is blocked."})
 
     overlaps = Appointment.objects.filter(
         clinic=clinic,
@@ -486,7 +490,7 @@ def add_appointment_note(request, pk):
 def patients(request):
     clinic = _clinic_or_redirect(request)
     query = request.GET.get("q", "")
-    qs = clinic.patients.all()
+    qs = clinic.patients.order_by("-created_at", "-id")
     if query:
         qs = qs.filter(Q(full_name__icontains=query) | Q(phone__icontains=query) | Q(email__icontains=query))
     context = {"clinic": clinic, "patients": qs, "patient_form": PatientForm(clinic=clinic), "query": query}
@@ -903,7 +907,6 @@ def settings(request):
 
     hours_dict = {h.weekday: h for h in clinic.business_hours.all()}
     hours_weekdays = list(range(7))
-    blocked_times = list(clinic.blocked_times.all())
     unavailable_dates = list(clinic.unavailable_dates.all())
 
     return render(request, "dashboard/settings.html", {
@@ -911,7 +914,6 @@ def settings(request):
         "form": form,
         "hours_dict": hours_dict,
         "hours_weekdays": hours_weekdays,
-        "blocked_times": blocked_times,
         "unavailable_dates": unavailable_dates,
         "slot_results": slot_results,
         "slot_service": slot_service,
@@ -922,9 +924,7 @@ def settings(request):
 @login_required
 def assistant_settings(request):
     clinic = _clinic_or_redirect(request)
-    membership = get_active_membership(request.user)
-    if not user_can_manage_settings(membership):
-        raise PermissionDenied
+    _require_settings_permission(request.user)
 
     if request.method == "POST" and request.POST.get("_form") == "widget_settings":
         widget_form = WidgetSettingsForm(request.POST, instance=clinic)
@@ -964,6 +964,7 @@ def widget_embed(request):
 @require_POST
 def create_faq(request):
     clinic = _clinic_or_redirect(request)
+    _require_settings_permission(request.user)
     form = ClinicFAQForm(request.POST)
     if form.is_valid():
         faq = form.save(commit=False)
@@ -979,6 +980,7 @@ def create_faq(request):
 @require_POST
 def edit_faq(request, pk):
     clinic = _clinic_or_redirect(request)
+    _require_settings_permission(request.user)
     faq = get_object_or_404(clinic.faqs, pk=pk)
     form = ClinicFAQForm(request.POST, instance=faq)
     if form.is_valid():
@@ -997,6 +999,7 @@ def edit_faq(request, pk):
 @require_POST
 def toggle_faq(request, pk):
     clinic = _clinic_or_redirect(request)
+    _require_settings_permission(request.user)
     faq = get_object_or_404(clinic.faqs, pk=pk)
     faq.is_active = not faq.is_active
     faq.save(update_fields=["is_active", "updated_at"])
@@ -1016,6 +1019,7 @@ def toggle_faq(request, pk):
 @require_POST
 def delete_faq(request, pk):
     clinic = _clinic_or_redirect(request)
+    _require_settings_permission(request.user)
     faq = get_object_or_404(clinic.faqs, pk=pk)
     faq.delete()
     messages.success(request, "FAQ deleted.")
@@ -1102,55 +1106,6 @@ def save_business_hours(request):
 
 
 @login_required
-def blocked_times(request):
-    clinic = _clinic_or_redirect(request)
-    membership = get_active_membership(request.user)
-    if not user_can_manage_settings(membership):
-        raise PermissionDenied
-    blocked = clinic.blocked_times.order_by("-starts_at")
-    return render(request, "dashboard/blocked_times.html", {
-        "clinic": clinic,
-        "blocked_times": blocked,
-    })
-
-
-@login_required
-@require_POST
-def create_blocked_time(request):
-    clinic = _clinic_or_redirect(request)
-    membership = get_active_membership(request.user)
-    if not user_can_manage_settings(membership):
-        raise PermissionDenied
-    starts_at = parse_datetime(request.POST.get("starts_at", ""))
-    ends_at = parse_datetime(request.POST.get("ends_at", ""))
-    reason = request.POST.get("reason", "")
-    if starts_at and ends_at:
-        BlockedTime.objects.create(
-            clinic=clinic,
-            starts_at=starts_at,
-            ends_at=ends_at,
-            reason=reason,
-        )
-        messages.success(request, "Blocked time created.")
-    else:
-        messages.error(request, "Invalid start or end time.")
-    return redirect(f"{reverse('dashboard:settings')}?tab=blocked")
-
-
-@login_required
-@require_POST
-def delete_blocked_time(request, pk):
-    clinic = _clinic_or_redirect(request)
-    membership = get_active_membership(request.user)
-    if not user_can_manage_settings(membership):
-        raise PermissionDenied
-    bt = get_object_or_404(clinic.blocked_times, pk=pk)
-    bt.delete()
-    messages.success(request, "Blocked time deleted.")
-    return redirect(f"{reverse('dashboard:settings')}?tab=blocked")
-
-
-@login_required
 def unavailable_dates(request):
     clinic = _clinic_or_redirect(request)
     membership = get_active_membership(request.user)
@@ -1227,40 +1182,35 @@ def messenger_settings(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_settings(membership):
         raise PermissionDenied
+    from clinics.models import ClinicAISettings
     from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
     from messenger.forms import MessengerAISettingsForm, MessengerConnectionForm
-    from messenger.models import MessengerAISettings
 
     connection = getattr(clinic, "messenger_connection", None)
-    ai_settings = getattr(connection, "ai_settings", None) if connection else None
+    ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
     post_form = request.POST.get("_form")
 
     if request.method == "POST" and post_form in {None, "", "connection_settings"}:
         form = MessengerConnectionForm(request.POST, instance=connection)
-        ai_form = MessengerAISettingsForm(instance=ai_settings) if connection else None
+        ai_form = MessengerAISettingsForm(instance=ai_settings)
         if form.is_valid():
             connection = form.save(commit=False)
             connection.clinic = clinic
             connection.is_active = True
             connection.save()
-            MessengerAISettings.objects.get_or_create(connection=connection)
 
             messages.success(request, "Messenger settings saved. Remember to configure the webhook in your Meta Developer Dashboard.")
             return redirect("dashboard:messenger_settings")
     elif request.method == "POST" and request.POST.get("_form") == "ai_settings":
         form = MessengerConnectionForm(instance=connection)
-        if not connection:
-            messages.error(request, "Save Facebook Page settings before configuring Messenger AI.")
-            return redirect("dashboard:messenger_settings")
-        ai_settings, _ = MessengerAISettings.objects.get_or_create(connection=connection)
         ai_form = MessengerAISettingsForm(request.POST, instance=ai_settings)
         if ai_form.is_valid():
             ai_form.save()
-            messages.success(request, "Messenger AI prompt settings saved.")
+            messages.success(request, "Shared AI prompt settings saved.")
             return redirect("dashboard:messenger_settings")
     else:
         form = MessengerConnectionForm(instance=connection)
-        ai_form = MessengerAISettingsForm(instance=ai_settings) if ai_settings else (MessengerAISettingsForm() if connection else None)
+        ai_form = MessengerAISettingsForm(instance=ai_settings)
 
     n8n_webhook_url = request.build_absolute_uri(reverse("messenger:n8n_webhook"))
     return render(request, "dashboard/messenger_settings.html", {

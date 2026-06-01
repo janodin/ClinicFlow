@@ -27,16 +27,6 @@ class ClinicBusinessHour(TimeStampedModel):
         ordering = ["weekday"]
 
 
-class BlockedTime(TimeStampedModel):
-    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="blocked_times")
-    starts_at = models.DateTimeField()
-    ends_at = models.DateTimeField()
-    reason = models.CharField(max_length=160, blank=True)
-
-    class Meta:
-        ordering = ["starts_at"]
-
-
 class UnavailableDate(TimeStampedModel):
     clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="unavailable_dates")
     date = models.DateField()

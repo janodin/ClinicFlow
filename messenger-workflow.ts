@@ -48,7 +48,7 @@ const djangoWebhook = node({
     name: 'Django Webhook',
     parameters: {
       method: 'POST',
-      url: 'https://178-105-83-211.nip.io/messenger/n8n-webhook/',
+      url: 'https://clinic.example.com/messenger/n8n-webhook/',
       sendBody: true,
       bodyParameters: {
         parameters: [
@@ -60,7 +60,7 @@ const djangoWebhook = node({
       },
       headerParameters: {
         parameters: [
-          { name: 'X-N8N-Webhook-Secret', value: 'n8n-webhook-b16190805c0c5c0fd06418a08f5763a0' },
+          { name: 'X-N8N-Webhook-Secret', value: 'replace-with-shared-n8n-webhook-secret' },
           { name: 'Content-Type', value: 'application/json' }
         ]
       },

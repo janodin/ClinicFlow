@@ -17,25 +17,43 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name, default=""):
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
+DJANGO_ENV = os.getenv("DJANGO_ENV", "development")
+IS_PRODUCTION = DJANGO_ENV == "production"
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-dev-clinic-booking-saas")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "1") == "1"
+DEBUG = env_bool("DEBUG", not IS_PRODUCTION)
 
-_allowed_hosts = os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",")
-# Auto-allow ngrok domains for local webhook testing
-if os.getenv("DEBUG", "1") == "1":
-    _allowed_hosts.append(".ngrok-free.dev")
-    _allowed_hosts.append(".ngrok.io")
-ALLOWED_HOSTS = _allowed_hosts
+ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "" if IS_PRODUCTION else "127.0.0.1,localhost,testserver")
+if DEBUG:
+    ALLOWED_HOSTS.extend([".ngrok-free.dev", ".ngrok.io"])
 
-# Trust X-Forwarded-Proto from ngrok so build_absolute_uri returns https://
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-USE_X_FORWARDED_HOST = True
+TRUST_X_FORWARDED_PROTO = env_bool("TRUST_X_FORWARDED_PROTO", False)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if TRUST_X_FORWARDED_PROTO else None
+USE_X_FORWARDED_HOST = env_bool("USE_X_FORWARDED_HOST", False)
+
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", IS_PRODUCTION)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", IS_PRODUCTION)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", IS_PRODUCTION)
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000" if IS_PRODUCTION else "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", IS_PRODUCTION)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", IS_PRODUCTION)
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
 
 
 # Application definition
@@ -173,28 +191,19 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 APP_NAME = os.getenv("APP_NAME", "ClinicFlow")
 
-# Auto-generate verify token if not configured
-_messenger_verify_token = os.getenv("MESSENGER_VERIFY_TOKEN", "")
-if not _messenger_verify_token:
-    import secrets
-    _messenger_verify_token = secrets.token_urlsafe(32)
-    _env_path = BASE_DIR / ".env"
-    if _env_path.exists():
-        with open(_env_path, "r") as f:
-            _env_content = f.read()
-        if "MESSENGER_VERIFY_TOKEN" not in _env_content:
-            with open(_env_path, "a") as f:
-                f.write(f"\nMESSENGER_VERIFY_TOKEN={_messenger_verify_token}\n")
-MESSENGER_VERIFY_TOKEN = _messenger_verify_token
-
+MESSENGER_VERIFY_TOKEN = os.getenv("MESSENGER_VERIFY_TOKEN", "dev-messenger-verify-token" if DEBUG else "")
 MESSENGER_APP_SECRET = os.getenv("MESSENGER_APP_SECRET", "")
 MESSENGER_APP_ID = os.getenv("MESSENGER_APP_ID", "")
 MESSENGER_SESSION_TIMEOUT_MINUTES = int(os.getenv("MESSENGER_SESSION_TIMEOUT_MINUTES", "30"))
 
 # n8n integration webhook secret (shared between Django and n8n)
 N8N_WEBHOOK_SECRET = os.getenv("N8N_WEBHOOK_SECRET", "")
+ASSISTANT_N8N_WEBHOOK_URL = os.getenv("ASSISTANT_N8N_WEBHOOK_URL", "")
+ASSISTANT_N8N_TIMEOUT_SECONDS = int(os.getenv("ASSISTANT_N8N_TIMEOUT_SECONDS", "12"))
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+import config.security_checks  # noqa: F401, E402

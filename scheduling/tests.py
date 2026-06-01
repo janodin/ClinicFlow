@@ -7,7 +7,7 @@ from django.utils import timezone
 from appointments.models import Appointment
 from clinics.models import Clinic, ClinicGroup, ClinicMembership
 from patients.models import Patient
-from scheduling.models import BlockedTime, ClinicBusinessHour, UnavailableDate, Weekday
+from scheduling.models import ClinicBusinessHour, UnavailableDate, Weekday
 from scheduling.utils import generate_slots, get_working_window, slot_is_available
 from services.models import Service
 
@@ -41,17 +41,6 @@ def test_get_working_window_uses_clinic_hours(clinic_setup):
     window = get_working_window(clinic, target_date)
     assert window[0] == time(9)
     assert window[1] == time(12)
-
-
-@pytest.mark.django_db
-def test_blocked_time_removes_slot(clinic_setup):
-    clinic, service = clinic_setup
-    target_date = timezone.localdate() + timedelta(days=1)
-    slots = generate_slots(clinic, service, target_date)
-    assert slots
-    BlockedTime.objects.create(clinic=clinic, starts_at=slots[0]["starts_at"], ends_at=slots[0]["ends_at"])
-    remaining = generate_slots(clinic, service, target_date)
-    assert slots[0]["starts_at"] not in [s["starts_at"] for s in remaining]
 
 
 @pytest.mark.django_db

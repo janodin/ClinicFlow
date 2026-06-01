@@ -4,25 +4,38 @@ from datetime import timedelta
 import requests
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
+from django.utils.crypto import constant_time_compare
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from .ai_tools import build_ai_context, book_confirmed_appointment, check_availability, match_services
+from .ai_tools import (
+    build_ai_context,
+    build_widget_ai_context,
+    book_confirmed_appointment,
+    book_widget_confirmed_appointment,
+    check_availability,
+    check_widget_availability,
+    match_services,
+    match_widget_services,
+)
 from .bot_engine import handle_message
+from .messenger_api import verify_signature
 from .models import MessengerConnection, MessengerSession
 
 
-def _verify_n8n_secret(request):
+def _verify_shared_secret(request):
     expected_secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
     provided_secret = request.headers.get("X-N8N-Webhook-Secret", "")
-    return not expected_secret or provided_secret == expected_secret
+    return bool(expected_secret) and constant_time_compare(provided_secret, expected_secret)
+
+
+def _verify_n8n_secret(request):
+    return _verify_shared_secret(request)
 
 
 def _verify_ai_tool_secret(request):
-    expected_secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
-    provided_secret = request.headers.get("X-N8N-Webhook-Secret", "")
-    return bool(expected_secret) and provided_secret == expected_secret
+    return _verify_shared_secret(request)
 
 
 def _json_body(request):
@@ -30,6 +43,84 @@ def _json_body(request):
         return json.loads(request.body.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
+
+
+def _meta_page_id_from_payload(data):
+    if not isinstance(data, dict):
+        return ""
+    for entry in data.get("entry", []):
+        if not isinstance(entry, dict):
+            continue
+        entry_id = entry.get("id")
+        if entry_id:
+            return str(entry_id)
+        for messaging in entry.get("messaging", []):
+            if not isinstance(messaging, dict):
+                continue
+            recipient = messaging.get("recipient", {})
+            if not isinstance(recipient, dict):
+                continue
+            recipient_id = recipient.get("id")
+            if recipient_id:
+                return str(recipient_id)
+    return ""
+
+
+def _payload_matches_page(data, page_id):
+    if not isinstance(data, dict) or not page_id:
+        return False
+    entries = data.get("entry", [])
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return False
+        entry_id = str(entry.get("id") or "")
+        if entry_id != page_id:
+            return False
+        messaging_items = entry.get("messaging", [])
+        if not isinstance(messaging_items, list):
+            return False
+        for messaging in messaging_items:
+            if not isinstance(messaging, dict):
+                return False
+            recipient = messaging.get("recipient", {})
+            if not isinstance(recipient, dict):
+                return False
+            recipient_id = str(recipient.get("id") or "")
+            if recipient_id != page_id:
+                return False
+    return True
+
+
+def _active_connection_for_page(page_id):
+    if not page_id:
+        return None
+    try:
+        return MessengerConnection.objects.select_related("clinic").get(
+            page_id=page_id,
+            is_active=True,
+            clinic__is_active=True,
+        )
+    except (MessengerConnection.DoesNotExist, MessengerConnection.MultipleObjectsReturned):
+        return None
+
+
+def _verified_messenger_connections_for_request(request):
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not signature:
+        return {}
+
+    verified = {}
+    connections = MessengerConnection.objects.select_related("clinic").filter(
+        app_secret__gt="",
+        is_active=True,
+        clinic__is_active=True,
+    )
+    for connection in connections:
+        if verify_signature(request.body, signature, connection.app_secret):
+            verified[connection.page_id] = connection
+    return verified
 
 
 def _ai_tool_response(request, handler):
@@ -72,6 +163,78 @@ def ai_availability(request):
 def ai_book(request):
     return _ai_tool_response(request, lambda data: book_confirmed_appointment(
         data.get("page_id", ""),
+        data.get("service_id"),
+        data.get("starts_at"),
+        data.get("full_name", ""),
+        data.get("phone", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
+        data.get("email", ""),
+        data.get("reason", ""),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def meta_signature_verify(request):
+    if not _verify_ai_tool_secret(request):
+        return JsonResponse({"error": "Unauthorized"}, status=401)
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"verified": False}, status=200)
+    if not isinstance(data, dict):
+        return JsonResponse({"error": "Invalid request data"}, status=400)
+
+    page_id = data.get("page_id", "")
+    raw_body = data.get("raw_body", "")
+    signature = data.get("signature", "")
+    if not all(isinstance(value, str) for value in [page_id, raw_body, signature]):
+        return JsonResponse({"verified": False}, status=200)
+
+    connection = _active_connection_for_page(page_id)
+    signature_valid = bool(
+        connection
+        and connection.app_secret
+        and verify_signature(raw_body.encode("utf-8"), signature, connection.app_secret)
+    )
+    verified = False
+    if signature_valid:
+        try:
+            raw_data = json.loads(raw_body)
+        except (json.JSONDecodeError, TypeError):
+            raw_data = None
+        verified = _payload_matches_page(raw_data, page_id)
+
+    return JsonResponse({"verified": verified}, status=200)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def widget_ai_context(request):
+    return _ai_tool_response(request, lambda data: build_widget_ai_context(data.get("clinic_slug", "")))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def widget_ai_services(request):
+    return _ai_tool_response(request, lambda data: match_widget_services(data.get("clinic_slug", ""), data.get("query", "")))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def widget_ai_availability(request):
+    return _ai_tool_response(request, lambda data: check_widget_availability(
+        data.get("clinic_slug", ""),
+        data.get("service_id"),
+        data.get("preferred_starts_at"),
+        data.get("preferred_date"),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def widget_ai_book(request):
+    return _ai_tool_response(request, lambda data: book_widget_confirmed_appointment(
+        data.get("clinic_slug", ""),
         data.get("service_id"),
         data.get("starts_at"),
         data.get("full_name", ""),
@@ -134,11 +297,8 @@ def n8n_webhook(request):
     if not page_id or not psid:
         return JsonResponse({"replies": [], "page_token": ""}, status=200)
 
-    try:
-        connection = MessengerConnection.objects.select_related("clinic").get(
-            page_id=page_id, is_active=True
-        )
-    except MessengerConnection.DoesNotExist:
+    connection = _active_connection_for_page(page_id)
+    if not connection:
         return JsonResponse({"replies": [], "page_token": ""}, status=200)
 
     session, _ = MessengerSession.objects.get_or_create(
@@ -167,20 +327,38 @@ def webhook(request):
         mode = request.GET.get("hub.mode")
         token = request.GET.get("hub.verify_token")
         challenge = request.GET.get("hub.challenge")
-        if mode == "subscribe" and token == settings.MESSENGER_VERIFY_TOKEN:
+        expected_token = getattr(settings, "MESSENGER_VERIFY_TOKEN", "")
+        if mode == "subscribe" and expected_token and constant_time_compare(token or "", expected_token):
             return HttpResponse(challenge)
         return HttpResponse(status=403)
 
     if request.method == "POST":
+        verified_connections = _verified_messenger_connections_for_request(request)
+        if not verified_connections:
+            return HttpResponse(status=403)
+
         try:
             data = json.loads(request.body.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return HttpResponse(status=400)
 
         for entry in data.get("entry", []):
+            entry_id = str(entry.get("id") or "")
+            for messaging in entry.get("messaging", []):
+                recipient = messaging.get("recipient", {})
+                if not isinstance(recipient, dict):
+                    return HttpResponse(status=403)
+                recipient_id = str(recipient.get("id") or "")
+                if not recipient_id or recipient_id != entry_id or recipient_id not in verified_connections:
+                    return HttpResponse(status=403)
+
+        for entry in data.get("entry", []):
             for messaging in entry.get("messaging", []):
                 sender_id = messaging.get("sender", {}).get("id")
-                recipient_id = messaging.get("recipient", {}).get("id")
+                recipient = messaging.get("recipient", {})
+                if not isinstance(recipient, dict):
+                    continue
+                recipient_id = recipient.get("id")
                 message = messaging.get("message", {})
                 postback = messaging.get("postback", {})
                 text = message.get("text", "")
@@ -189,11 +367,8 @@ def webhook(request):
                 if not sender_id or not recipient_id:
                     continue
 
-                try:
-                    connection = MessengerConnection.objects.select_related("clinic").get(
-                        page_id=recipient_id, is_active=True
-                    )
-                except MessengerConnection.DoesNotExist:
+                connection = verified_connections.get(recipient_id)
+                if not connection:
                     continue
 
                 session, _ = MessengerSession.objects.get_or_create(

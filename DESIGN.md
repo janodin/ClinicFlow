@@ -211,7 +211,7 @@ Common layout patterns:
 - Responsive grids for KPI cards, services, and secondary panels.
 - Public booking uses a two-column layout on desktop: clinic context on the left and the booking card on the right.
 - Widget mode is a fixed, self-contained 420px by 650px chat/booking panel.
-- Scheduling screens should express hierarchy clearly: clinic business hours, breaks, blocked times, unavailable dates, slot preview, and double-booking prevention.
+- Scheduling screens should express hierarchy clearly: clinic business hours, breaks, unavailable dates, slot preview, and double-booking prevention.
 
 Use horizontal overflow for dense tables on mobile instead of compressing columns into unreadable cards unless a screen is explicitly designed as a card workflow. Existing mobile tables use a 720px minimum width, while booking slot grids move from three columns to two columns below 640px.
 

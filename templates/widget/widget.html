@@ -2,6 +2,7 @@
 {% block title %}{{ clinic.name }} Widget{% endblock %}
 {% block body %}
 <main class="min-h-screen bg-transparent p-2 sm:p-3" x-data="widgetApp()" x-init="init()">
+  <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
   <section class="cf-widget-shell ml-auto flex h-[650px] max-h-[calc(100vh-1rem)] max-w-[420px] flex-col overflow-hidden">
     <header class="flex items-center justify-between px-4 py-3.5 text-white" :style="'background-color:' + accentColor">
       <div class="flex items-center gap-3">
@@ -50,7 +51,7 @@
           <h3 class="font-black text-lg">Select a service</h3>
           {% for item in services %}
           <button type="button" @click="selectService({{ item.id }})" class="flex w-full items-center gap-3 rounded-2xl border border-slate-200 p-3 text-left transition hover:bg-slate-50">
-            <span class="grid h-10 w-10 place-items-center rounded-xl text-white text-sm font-black" style="background-color: {{ clinic.widget_accent_color }}">{{ item.name|first }}</span>
+            <span class="grid h-10 w-10 place-items-center rounded-xl text-white text-sm font-black" style="background-color: {{ clinic.safe_widget_accent_color }}">{{ item.name|first }}</span>
             <div class="flex-1">
               <p class="font-bold text-sm">{{ item.name }}</p>
               <p class="text-xs text-slate-500">{{ item.effective_duration }} min{% if item.display_price %} · ₱{{ item.price }}{% endif %}</p>
@@ -98,9 +99,8 @@
             <h3 class="font-black text-lg">Your Details</h3>
           </div>
           <div id="booking-form-container">
-            <form hx-post="{% url 'widget:book' clinic.slug %}" hx-target="#booking-form-container" hx-swap="innerHTML" class="space-y-3">
+            <form hx-post="{% url 'widget:book' clinic.slug %}{% if widget_source == 'embed' %}?source=embed{% endif %}" hx-target="#booking-form-container" hx-swap="innerHTML" class="space-y-3">
               {% csrf_token %}
-              <input type="hidden" name="source" value="{{ widget_source }}">
               <input type="hidden" name="service" :value="selectedService">
               <input type="hidden" name="starts_at" :value="slot">
               <div><label class="text-xs font-bold text-slate-500 uppercase">Full Name</label><input name="full_name" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
@@ -175,7 +175,7 @@
 <script>
   function widgetApp() {
     return {
-      accentColor: '{{ clinic.widget_accent_color|default:"#0891b2" }}',
+      accentColor: '{{ clinic.safe_widget_accent_color|escapejs }}',
       mode: 'home',
       bookStep: 1,
       selectedService: '',

@@ -5,11 +5,45 @@ from django.http import Http404
 from django.utils import timezone
 
 from appointments.models import Appointment
+from clinics.models import Clinic, ClinicAISettings
 from scheduling.utils import generate_slots
 from widget.views import _process_guest_booking
 
 from .defaults import DEFAULT_MESSENGER_AI_PROMPT
 from .models import MessengerConnection
+
+DEFAULT_AI_FALLBACK_MESSAGE = "Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form."
+
+
+def get_or_create_clinic_ai_settings(clinic):
+    settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
+    return settings
+
+
+def get_clinic_for_slug(clinic_slug):
+    if not clinic_slug:
+        return None
+    return Clinic.objects.filter(slug=clinic_slug, is_active=True).first()
+
+
+def _ai_payload_for_clinic(clinic):
+    ai_settings = get_or_create_clinic_ai_settings(clinic)
+    return {
+        "is_ai_enabled": ai_settings.is_ai_enabled,
+        "instructions": ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT,
+        "fallback_message": ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE,
+    }
+
+
+def _ai_disabled_response_for_clinic(clinic):
+    ai_settings = get_or_create_clinic_ai_settings(clinic)
+    if not ai_settings.is_ai_enabled:
+        return {
+            "found": True,
+            "disabled": True,
+            "fallback_message": ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE,
+        }
+    return None
 
 
 def _service_payload(service):
@@ -44,22 +78,11 @@ def _parse_datetime(value):
     return parsed.astimezone(dt_timezone.utc)
 
 
-def _ai_disabled_response(connection):
-    ai_settings = getattr(connection, "ai_settings", None)
-    if ai_settings and not ai_settings.is_ai_enabled:
-        return {
-            "found": True,
-            "disabled": True,
-            "fallback_message": ai_settings.fallback_message,
-        }
-    return None
-
-
 def get_connection_for_page(page_id):
     if not page_id:
         return None
     return (
-        MessengerConnection.objects.select_related("clinic", "ai_settings")
+        MessengerConnection.objects.select_related("clinic")
         .filter(page_id=page_id, is_active=True, clinic__is_active=True)
         .first()
     )
@@ -71,7 +94,6 @@ def build_ai_context(page_id):
         return {"found": False}
 
     clinic = connection.clinic
-    ai_settings = getattr(connection, "ai_settings", None)
     services = clinic.services.filter(is_active=True, is_archived=False).order_by("name")
     faqs = clinic.faqs.filter(is_active=True).order_by("question")
     clinic_now = timezone.now().astimezone(ZoneInfo(clinic.timezone))
@@ -93,11 +115,37 @@ def build_ai_context(page_id):
             "email": clinic.email,
             "timezone": clinic.timezone,
         },
-        "ai": {
-            "is_ai_enabled": True if ai_settings is None else ai_settings.is_ai_enabled,
-            "instructions": DEFAULT_MESSENGER_AI_PROMPT if ai_settings is None else (ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT),
-            "fallback_message": "" if ai_settings is None else ai_settings.fallback_message,
+        "ai": _ai_payload_for_clinic(clinic),
+        "services": [_service_payload(service) for service in services],
+        "faqs": [{"question": faq.question, "answer": faq.answer} for faq in faqs],
+    }
+
+
+def build_widget_ai_context(clinic_slug):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"found": False}
+    services = clinic.services.filter(is_active=True, is_archived=False).order_by("name")
+    faqs = clinic.faqs.filter(is_active=True).order_by("question")
+    clinic_now = timezone.now().astimezone(ZoneInfo(clinic.timezone))
+    return {
+        "found": True,
+        "channel": "widget",
+        "current_time": {
+            "timezone": clinic.timezone,
+            "now": clinic_now.isoformat(),
+            "today": clinic_now.date().isoformat(),
         },
+        "clinic": {
+            "id": clinic.id,
+            "slug": clinic.slug,
+            "name": clinic.name,
+            "address": clinic.address,
+            "phone": clinic.phone,
+            "email": clinic.email,
+            "timezone": clinic.timezone,
+        },
+        "ai": _ai_payload_for_clinic(clinic),
         "services": [_service_payload(service) for service in services],
         "faqs": [{"question": faq.question, "answer": faq.answer} for faq in faqs],
     }
@@ -107,11 +155,30 @@ def match_services(page_id, query):
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"found": False, "matches": []}
-    disabled = _ai_disabled_response(connection)
+    disabled = _ai_disabled_response_for_clinic(connection.clinic)
     if disabled:
         return {**disabled, "matches": []}
     query_text = (query or "").strip().lower()
     services = connection.clinic.services.filter(is_active=True, is_archived=False).order_by("name")
+    if query_text:
+        matches = [
+            service for service in services
+            if query_text in service.name.lower() or query_text in service.description.lower()
+        ]
+    else:
+        matches = list(services)
+    return {"found": True, "matches": [_service_payload(service) for service in matches]}
+
+
+def match_widget_services(clinic_slug, query):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"found": False, "matches": []}
+    disabled = _ai_disabled_response_for_clinic(clinic)
+    if disabled:
+        return {**disabled, "matches": []}
+    query_text = (query or "").strip().lower()
+    services = clinic.services.filter(is_active=True, is_archived=False).order_by("name")
     if query_text:
         matches = [
             service for service in services
@@ -130,11 +197,14 @@ def check_availability(page_id, service_id, preferred_starts_at=None, preferred_
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"found": False, "available": False, "alternatives": []}
-    disabled = _ai_disabled_response(connection)
+    disabled = _ai_disabled_response_for_clinic(connection.clinic)
     if disabled:
         return {**disabled, "available": False, "alternatives": []}
 
-    clinic = connection.clinic
+    return _check_availability_for_clinic(connection.clinic, service_id, preferred_starts_at, preferred_date)
+
+
+def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None, preferred_date=None):
     service = clinic.services.filter(pk=service_id, is_active=True, is_archived=False).first()
     if not service:
         return {"found": True, "available": False, "error": "Service not found.", "alternatives": []}
@@ -172,36 +242,60 @@ def check_availability(page_id, service_id, preferred_starts_at=None, preferred_
     }
 
 
+def check_widget_availability(clinic_slug, service_id, preferred_starts_at=None, preferred_date=None):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"found": False, "available": False, "alternatives": []}
+    disabled = _ai_disabled_response_for_clinic(clinic)
+    if disabled:
+        return {**disabled, "available": False, "alternatives": []}
+    return _check_availability_for_clinic(clinic, service_id, preferred_starts_at, preferred_date)
+
+
 def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone, confirmed, email="", reason=""):
+    connection = get_connection_for_page(page_id)
+    if not connection:
+        return {"created": False, "error": "Messenger connection not found."}
+    disabled = _ai_disabled_response_for_clinic(connection.clinic)
+    if disabled:
+        return {**disabled, "created": False, "error": "Messenger AI is disabled for this clinic."}
+
+    return _book_confirmed_appointment_for_clinic(
+        connection.clinic,
+        Appointment.SOURCE_MESSENGER,
+        service_id,
+        starts_at,
+        full_name,
+        phone,
+        confirmed,
+        email,
+        reason,
+    )
+
+
+def _book_confirmed_appointment_for_clinic(clinic, source, service_id, starts_at, full_name, phone, confirmed, email="", reason=""):
     if confirmed is not True:
         return {
             "created": False,
             "error": "Appointment creation requires explicit user confirmation.",
         }
 
-    connection = get_connection_for_page(page_id)
-    if not connection:
-        return {"created": False, "error": "Messenger connection not found."}
-    disabled = _ai_disabled_response(connection)
-    if disabled:
-        return {**disabled, "created": False, "error": "Messenger AI is disabled for this clinic."}
-
     try:
-        appointment, error = _process_guest_booking(connection.clinic, {
+        appointment, error = _process_guest_booking(clinic, {
             "service": service_id,
             "starts_at": starts_at,
             "full_name": full_name,
             "phone": phone,
             "email": email,
             "reason": reason,
-        }, Appointment.SOURCE_MESSENGER)
+        }, source)
     except (Http404, ValueError, TypeError) as exc:
         return {"created": False, "error": str(exc)}
 
     if error:
         return {"created": False, "error": error}
 
-    local_start = appointment.starts_at.astimezone(ZoneInfo(connection.clinic.timezone))
+    local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
     return {
         "created": True,
         "appointment": {
@@ -215,3 +309,23 @@ def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone,
             "patient_phone": appointment.patient.phone,
         },
     }
+
+
+def book_widget_confirmed_appointment(clinic_slug, service_id, starts_at, full_name, phone, confirmed, email="", reason=""):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"created": False, "error": "Clinic not found."}
+    disabled = _ai_disabled_response_for_clinic(clinic)
+    if disabled:
+        return {**disabled, "created": False, "error": "AI is disabled for this clinic."}
+    return _book_confirmed_appointment_for_clinic(
+        clinic,
+        Appointment.SOURCE_CHAT_WIDGET,
+        service_id,
+        starts_at,
+        full_name,
+        phone,
+        confirmed,
+        email,
+        reason,
+    )

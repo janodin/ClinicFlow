@@ -1,13 +1,37 @@
 from django.contrib import admin
+from django import forms
 
 from .models import MessengerAISettings, MessengerConnection, MessengerSession
 
 
+class MessengerConnectionAdminForm(forms.ModelForm):
+    class Meta:
+        model = MessengerConnection
+        fields = "__all__"
+        widgets = {
+            "app_secret": forms.PasswordInput(render_value=False),
+            "page_access_token": forms.PasswordInput(render_value=False),
+        }
+
+    def clean_app_secret(self):
+        app_secret = self.cleaned_data.get("app_secret", "")
+        if not app_secret and self.instance and self.instance.pk:
+            return self.instance.app_secret
+        return app_secret
+
+    def clean_page_access_token(self):
+        page_access_token = self.cleaned_data.get("page_access_token", "")
+        if not page_access_token and self.instance and self.instance.pk:
+            return self.instance.page_access_token
+        return page_access_token
+
+
 @admin.register(MessengerConnection)
 class MessengerConnectionAdmin(admin.ModelAdmin):
-    list_display = ["clinic", "page_id", "is_active", "created_at"]
+    form = MessengerConnectionAdminForm
+    list_display = ["clinic", "app_id", "page_id", "is_active", "created_at"]
     list_filter = ["is_active"]
-    search_fields = ["clinic__name", "page_id"]
+    search_fields = ["clinic__name", "app_id", "page_id"]
 
 
 @admin.register(MessengerAISettings)

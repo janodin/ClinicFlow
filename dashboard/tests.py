@@ -9,7 +9,7 @@ from services.models import Service
 from appointments.models import Appointment
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from scheduling.models import BlockedTime, ClinicBusinessHour, UnavailableDate
+from scheduling.models import ClinicBusinessHour, UnavailableDate
 
 
 @pytest.fixture
@@ -72,6 +72,32 @@ def test_search_appointments(clinic_setup, client):
 
 
 @pytest.mark.django_db
+def test_settings_page_does_not_show_blocked_times(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:settings"))
+
+    assert response.status_code == 200
+    assert b"Blocked Times" not in response.content
+    assert b"Add Blocked Time" not in response.content
+    assert b"Unavailable Dates" in response.content
+
+
+@pytest.mark.django_db
+def test_patients_list_orders_latest_created_first(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    older = Patient.objects.create(clinic=clinic, full_name="Amy Older", phone="09170003333")
+    newer = Patient.objects.create(clinic=clinic, full_name="Zara Newer", phone="09170004444")
+
+    response = client.get(reverse("dashboard:patients"))
+
+    assert response.status_code == 200
+    assert list(response.context["patients"]) == [newer, older]
+
+
+@pytest.mark.django_db
 def test_calendar_events_returns_events(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     client.force_login(user)
@@ -80,6 +106,29 @@ def test_calendar_events_returns_events(calendar_setup, client):
     data = response.json()
     assert len(data) == 1
     assert data[0]["id"] == appointment.id
+
+
+@pytest.mark.django_db
+def test_calendar_events_title_shows_time_and_patient_only(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events"))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["title"] == "10:00 am Test Patient"
+
+
+@pytest.mark.django_db
+def test_calendar_page_uses_event_title_time_only(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar"))
+
+    assert response.status_code == 200
+    assert b"displayEventTime: false" in response.content
 
 
 @pytest.mark.django_db
@@ -141,17 +190,6 @@ def test_calendar_reschedule_double_booking(calendar_setup, client):
 
 
 @pytest.mark.django_db
-def test_calendar_reschedule_blocked_time(calendar_setup, client):
-    clinic, service, user, patient, appointment, target_date = calendar_setup
-    block_start = appointment.starts_at + timedelta(hours=1)
-    BlockedTime.objects.create(clinic=clinic, starts_at=block_start, ends_at=block_start + timedelta(minutes=30))
-    client.force_login(user)
-    response = client.post(reverse("dashboard:calendar_reschedule"), {"appointment_id": appointment.id, "starts_at": block_start.isoformat()})
-    assert response.json()["success"] is False
-    assert "blocked" in response.json()["error"].lower()
-
-
-@pytest.mark.django_db
 def test_calendar_reschedule_cross_clinic_isolation(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     other_user = get_user_model().objects.create_user(username="other@example.com", email="other@example.com", password="password123")
@@ -198,8 +236,9 @@ def test_calendar_reschedule_accepts_utc_iso_string(calendar_setup, client):
 
 @pytest.mark.django_db
 def test_messenger_settings_page_shows_ai_prompt_form(clinic_setup, client):
+    from clinics.models import ClinicAISettings
     from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
-    from messenger.models import MessengerAISettings, MessengerConnection
+    from messenger.models import MessengerConnection
 
     clinic, service, user = clinic_setup
     connection = MessengerConnection.objects.create(
@@ -207,8 +246,8 @@ def test_messenger_settings_page_shows_ai_prompt_form(clinic_setup, client):
         page_id="PAGE-DASH-AI",
         page_access_token="TOKEN-DASH-AI",
     )
-    MessengerAISettings.objects.create(
-        connection=connection,
+    ClinicAISettings.objects.create(
+        clinic=clinic,
         instructions="Use a warm clinic tone.",
         fallback_message="Please call the clinic.",
     )
@@ -217,7 +256,7 @@ def test_messenger_settings_page_shows_ai_prompt_form(clinic_setup, client):
     response = client.get(reverse("dashboard:messenger_settings"))
 
     assert response.status_code == 200
-    assert b"Messenger AI Prompt" in response.content
+    assert b"Shared AI Prompt" in response.content
     assert b"Prompt / Instructions" in response.content
     assert b'name="is_ai_enabled"' in response.content
     assert b'name="instructions"' in response.content
@@ -230,8 +269,9 @@ def test_messenger_settings_page_shows_ai_prompt_form(clinic_setup, client):
 
 @pytest.mark.django_db
 def test_messenger_settings_page_shows_empty_ai_prompt_form_without_settings(clinic_setup, client):
+    from clinics.models import ClinicAISettings
     from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
-    from messenger.models import MessengerAISettings, MessengerConnection
+    from messenger.models import MessengerConnection
 
     clinic, service, user = clinic_setup
     connection = MessengerConnection.objects.create(
@@ -244,15 +284,66 @@ def test_messenger_settings_page_shows_empty_ai_prompt_form_without_settings(cli
     response = client.get(reverse("dashboard:messenger_settings"))
 
     assert response.status_code == 200
-    assert b"Messenger AI Prompt" in response.content
+    assert b"Shared AI Prompt" in response.content
     assert b'name="instructions"' in response.content
     assert DEFAULT_MESSENGER_AI_PROMPT.splitlines()[0].encode() in response.content
-    assert not MessengerAISettings.objects.filter(connection=connection).exists()
+    assert ClinicAISettings.objects.filter(clinic=clinic).exists()
+
+
+@pytest.mark.django_db
+def test_owner_can_save_messenger_connection_app_credentials(clinic_setup, client):
+    from messenger.models import MessengerConnection
+
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:messenger_settings"),
+        {
+            "_form": "connection_settings",
+            "app_id": "1234567890",
+            "app_secret": "APP-SECRET-DASH",
+            "page_id": "PAGE-DASH-CREDS",
+            "page_access_token": "PAGE-TOKEN-DASH",
+        },
+    )
+
+    assert response.status_code == 302
+    connection = MessengerConnection.objects.get(clinic=clinic)
+    assert connection.app_id == "1234567890"
+    assert connection.app_secret == "APP-SECRET-DASH"
+    assert connection.page_id == "PAGE-DASH-CREDS"
+    assert connection.page_access_token == "PAGE-TOKEN-DASH"
+
+
+@pytest.mark.django_db
+def test_messenger_settings_page_does_not_render_saved_secrets(clinic_setup, client):
+    from messenger.models import MessengerConnection
+
+    clinic, service, user = clinic_setup
+    MessengerConnection.objects.create(
+        clinic=clinic,
+        app_id="1234567890",
+        app_secret="APP-SECRET-HIDDEN",
+        page_id="PAGE-DASH-HIDDEN",
+        page_access_token="PAGE-TOKEN-HIDDEN",
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:messenger_settings"))
+
+    assert response.status_code == 200
+    assert b'name="app_id"' in response.content
+    assert b'name="app_secret"' in response.content
+    assert b'name="page_access_token"' in response.content
+    assert b"APP-SECRET-HIDDEN" not in response.content
+    assert b"PAGE-TOKEN-HIDDEN" not in response.content
 
 
 @pytest.mark.django_db
 def test_owner_can_save_messenger_ai_settings(clinic_setup, client):
-    from messenger.models import MessengerAISettings, MessengerConnection
+    from clinics.models import ClinicAISettings
+    from messenger.models import MessengerConnection
 
     clinic, service, user = clinic_setup
     connection = MessengerConnection.objects.create(
@@ -273,7 +364,7 @@ def test_owner_can_save_messenger_ai_settings(clinic_setup, client):
 
     assert response.status_code == 302
     assert response.url == reverse("dashboard:messenger_settings")
-    settings = MessengerAISettings.objects.get(connection=connection)
+    settings = ClinicAISettings.objects.get(clinic=clinic)
     assert settings.is_ai_enabled is False
     assert settings.instructions == "Answer briefly and ask for confirmation before booking."
     assert settings.fallback_message == "A staff member will help you soon."
@@ -281,7 +372,8 @@ def test_owner_can_save_messenger_ai_settings(clinic_setup, client):
 
 @pytest.mark.django_db
 def test_owner_can_enable_messenger_ai_settings(clinic_setup, client):
-    from messenger.models import MessengerAISettings, MessengerConnection
+    from clinics.models import ClinicAISettings
+    from messenger.models import MessengerConnection
 
     clinic, service, user = clinic_setup
     connection = MessengerConnection.objects.create(
@@ -302,7 +394,7 @@ def test_owner_can_enable_messenger_ai_settings(clinic_setup, client):
     )
 
     assert response.status_code == 302
-    settings = MessengerAISettings.objects.get(connection=connection)
+    settings = ClinicAISettings.objects.get(clinic=clinic)
     assert settings.is_ai_enabled is True
     assert settings.instructions == "Use a friendly clinic tone."
     assert settings.fallback_message == "Please call us."
@@ -310,7 +402,8 @@ def test_owner_can_enable_messenger_ai_settings(clinic_setup, client):
 
 @pytest.mark.django_db
 def test_staff_cannot_save_messenger_ai_settings(clinic_setup, client):
-    from messenger.models import MessengerAISettings, MessengerConnection
+    from clinics.models import ClinicAISettings
+    from messenger.models import MessengerConnection
 
     User = get_user_model()
     clinic, service, owner = clinic_setup
@@ -321,8 +414,8 @@ def test_staff_cannot_save_messenger_ai_settings(clinic_setup, client):
         page_id="PAGE-DASH-STAFF",
         page_access_token="TOKEN-DASH-STAFF",
     )
-    settings = MessengerAISettings.objects.create(
-        connection=connection,
+    settings = ClinicAISettings.objects.create(
+        clinic=clinic,
         is_ai_enabled=False,
         instructions="Existing owner instructions.",
         fallback_message="Existing fallback.",
@@ -348,7 +441,8 @@ def test_staff_cannot_save_messenger_ai_settings(clinic_setup, client):
 
 @pytest.mark.django_db
 def test_owner_can_save_messenger_ai_settings_is_scoped_to_current_clinic(client):
-    from messenger.models import MessengerAISettings, MessengerConnection
+    from clinics.models import ClinicAISettings
+    from messenger.models import MessengerConnection
 
     User = get_user_model()
     owner_a = User.objects.create_user(username="owner-a@example.com", email="owner-a@example.com", password="password123")
@@ -360,8 +454,8 @@ def test_owner_can_save_messenger_ai_settings_is_scoped_to_current_clinic(client
         page_id="PAGE-DASH-A-ISO",
         page_access_token="TOKEN-DASH-A-ISO",
     )
-    settings_a = MessengerAISettings.objects.create(
-        connection=connection_a,
+    settings_a = ClinicAISettings.objects.create(
+        clinic=clinic_a,
         is_ai_enabled=False,
         instructions="Clinic A original instructions.",
         fallback_message="Clinic A original fallback.",
@@ -376,8 +470,8 @@ def test_owner_can_save_messenger_ai_settings_is_scoped_to_current_clinic(client
         page_id="PAGE-DASH-B-ISO",
         page_access_token="TOKEN-DASH-B-ISO",
     )
-    settings_b = MessengerAISettings.objects.create(
-        connection=connection_b,
+    settings_b = ClinicAISettings.objects.create(
+        clinic=clinic_b,
         is_ai_enabled=False,
         instructions="Clinic B original instructions.",
         fallback_message="Clinic B original fallback.",
@@ -403,3 +497,83 @@ def test_owner_can_save_messenger_ai_settings_is_scoped_to_current_clinic(client
     assert settings_b.is_ai_enabled is True
     assert settings_b.instructions == "Clinic B updated instructions."
     assert settings_b.fallback_message == "Clinic B updated fallback."
+
+
+@pytest.mark.django_db
+def test_owner_can_save_shared_ai_settings_without_messenger_connection(clinic_setup, client):
+    from clinics.models import ClinicAISettings
+
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:messenger_settings"),
+        {
+            "_form": "ai_settings",
+            "is_ai_enabled": "on",
+            "instructions": "Shared website and Messenger instructions.",
+            "fallback_message": "Shared fallback.",
+        },
+    )
+
+    assert response.status_code == 302
+    settings = ClinicAISettings.objects.get(clinic=clinic)
+    assert settings.is_ai_enabled is True
+    assert settings.instructions == "Shared website and Messenger instructions."
+    assert settings.fallback_message == "Shared fallback."
+
+
+@pytest.mark.django_db
+def test_staff_cannot_create_faq_directly(clinic_setup, client):
+    clinic, service, owner = clinic_setup
+    User = get_user_model()
+    staff = User.objects.create_user(username="staff-faq@example.com", email="staff-faq@example.com", password="password123")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.post(reverse("dashboard:create_faq"), {"question": "Q", "answer": "A", "is_active": "on"})
+
+    assert response.status_code == 403
+    assert clinic.faqs.count() == 0
+
+
+@pytest.mark.django_db
+def test_staff_cannot_edit_toggle_or_delete_faq_directly(clinic_setup, client):
+    from clinics.models import ClinicFAQ
+
+    clinic, service, owner = clinic_setup
+    faq = ClinicFAQ.objects.create(clinic=clinic, question="Question", answer="Answer")
+    User = get_user_model()
+    staff = User.objects.create_user(username="staff-faq-actions@example.com", email="staff-faq-actions@example.com", password="password123")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    edit = client.post(reverse("dashboard:edit_faq", args=[faq.id]), {"question": "Changed", "answer": "Changed", "is_active": "on"})
+    toggle = client.post(reverse("dashboard:toggle_faq", args=[faq.id]))
+    delete = client.post(reverse("dashboard:delete_faq", args=[faq.id]))
+
+    assert edit.status_code == 403
+    assert toggle.status_code == 403
+    assert delete.status_code == 403
+    faq.refresh_from_db()
+    assert faq.question == "Question"
+    assert faq.is_active is True
+
+
+@pytest.mark.django_db
+def test_widget_settings_rejects_invalid_accent_color(clinic_setup):
+    from clinics.forms import WidgetSettingsForm
+
+    clinic, service, owner = clinic_setup
+    form = WidgetSettingsForm(
+        data={
+            "widget_accent_color": '";alert(1)//',
+            "widget_welcome_message": "Welcome",
+            "widget_behavior_instructions": "Guide booking",
+            "show_reason_field": "on",
+        },
+        instance=clinic,
+    )
+
+    assert not form.is_valid()
+    assert "widget_accent_color" in form.errors
