@@ -230,6 +230,64 @@ def _save_widget_chat_history(request, clinic, history):
     request.session[f"widget_chat_history_{clinic.id}"] = history[-10:]
 
 
+def _chat_date_options():
+    return [
+        {
+            "label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"),
+            "value": (timezone.localdate() + timedelta(days=i)).isoformat(),
+        }
+        for i in range(1, 15)
+    ]
+
+
+def _chat_controls_for_state(clinic, state, data):
+    if state == "select_service":
+        services = clinic.services.filter(is_active=True, is_archived=False)
+        return [{"label": service.name, "value": str(service.id)} for service in services], "select_option"
+    if state == "select_date":
+        return _chat_date_options(), "select_option"
+    if state == "select_time":
+        service = clinic.services.filter(pk=data.get("service_id"), is_active=True, is_archived=False).first()
+        date_str = data.get("date", "")
+        try:
+            selected_date = datetime.fromisoformat(date_str).date()
+        except (ValueError, TypeError):
+            return [], "select_option"
+        slots = generate_slots(clinic, service, selected_date) if service else []
+        return [{"label": slot["label"], "value": slot["starts_at"].isoformat()} for slot in slots], "select_option"
+    if state == "collect_info":
+        return [], "submit_info"
+    if state == "confirm":
+        return [
+            {"label": "Confirm", "value": "confirm"},
+            {"label": "Cancel", "value": "cancel"},
+        ], "select_option"
+    return [{"label": "Book an appointment", "value": "start_booking"}], "select_option"
+
+
+def _assistant_message_with_widget_context(clinic, message, state, data):
+    if state == "greeting":
+        return message
+
+    context = [
+        "The patient is using the ClinicFlow website widget guided booking flow.",
+        f"Current guided booking state: {state}.",
+    ]
+    service = clinic.services.filter(pk=data.get("service_id"), is_active=True, is_archived=False).first()
+    if service:
+        context.append(f"Selected service: {service.name} (service_id={service.id}).")
+    if data.get("date"):
+        context.append(f"Selected date: {data['date']}.")
+    if data.get("starts_at"):
+        context.append(f"Selected start time: {data['starts_at']}.")
+    if data.get("full_name"):
+        context.append(f"Patient name already provided: {data['full_name']}.")
+    if data.get("phone"):
+        context.append("Patient phone has already been provided.")
+    context.append("Answer the user's message without repeating the guided booking prompt.")
+    return "\n".join(context) + f"\n\nUser message: {message}"
+
+
 @require_POST
 def chat_step(request, clinic_slug):
     clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
@@ -239,22 +297,24 @@ def chat_step(request, clinic_slug):
     value = request.POST.get("value", "")
     state = data.get("state", "greeting")
 
-    if action == "text_input" and value and state == "greeting":
+    if action == "text_input" and value:
         ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
+        options, next_action = _chat_controls_for_state(clinic, state, data)
         if not ai_settings.is_ai_enabled:
             message = fallback_message_for(ai_settings)
             return JsonResponse({
                 "state": state,
                 "message": message,
-                "options": [{"label": "Book an appointment", "value": "start_booking"}],
-                "next_action": "select_option",
+                "options": options,
+                "next_action": next_action,
             })
 
         history = _widget_chat_history(request, clinic)
         if not request.session.session_key:
             request.session.create()
         try:
-            reply = call_assistant_webhook(clinic, value, history, request.session.session_key)
+            assistant_message = _assistant_message_with_widget_context(clinic, value, state, data)
+            reply = call_assistant_webhook(clinic, assistant_message, history, request.session.session_key)
         except (AssistantUnavailable, requests.RequestException, ValueError):
             reply = fallback_message_for(ai_settings)
 
@@ -266,8 +326,8 @@ def chat_step(request, clinic_slug):
         return JsonResponse({
             "state": state,
             "message": reply,
-            "options": [{"label": "Book an appointment", "value": "start_booking"}],
-            "next_action": "select_option",
+            "options": options,
+            "next_action": next_action,
         })
 
     if state == "greeting":

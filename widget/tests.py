@@ -343,6 +343,61 @@ class WidgetTests(TestCase):
 
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
+    def test_chat_step_text_input_calls_n8n_during_select_date(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "AI can help with dates."}
+        url = reverse("widget:chat_step", args=[self.clinic.slug])
+        self.client.post(url, {"action": "init"})
+        self.client.post(url, {"action": "select_option", "value": "start_booking"})
+        self.client.post(url, {"action": "select_option", "value": str(self.service.id)})
+
+        response = self.client.post(url, {"action": "text_input", "value": "hi"})
+
+        data = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["state"], "select_date")
+        self.assertEqual(data["message"], "AI can help with dates.")
+        self.assertNotEqual(data["message"], "What date works for you?")
+        self.assertEqual(data["next_action"], "select_option")
+        self.assertTrue(data["options"])
+        mock_post.assert_called_once()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertIn("hi", payload["message"])
+        self.assertIn("select_date", payload["message"])
+        self.assertIn(self.service.name, payload["message"])
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_text_input_calls_n8n_during_select_time(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "AI can answer about this date."}
+        url = reverse("widget:chat_step", args=[self.clinic.slug])
+        selected_date = (timezone.localdate() + timedelta(days=1)).isoformat()
+        self.client.post(url, {"action": "init"})
+        self.client.post(url, {"action": "select_option", "value": "start_booking"})
+        self.client.post(url, {"action": "select_option", "value": str(self.service.id)})
+        self.client.post(url, {"action": "select_option", "value": selected_date})
+
+        response = self.client.post(url, {"action": "text_input", "value": "what date is this"})
+
+        data = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["state"], "select_time")
+        self.assertEqual(data["message"], "AI can answer about this date.")
+        self.assertNotEqual(data["message"], "Here are the available times:")
+        self.assertEqual(data["next_action"], "select_option")
+        self.assertTrue(data["options"])
+        self.assertIn("AM", data["options"][0]["label"])
+        mock_post.assert_called_once()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertIn("what date is this", payload["message"])
+        self.assertIn("select_time", payload["message"])
+        self.assertIn(selected_date, payload["message"])
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
     def test_chat_step_returns_fallback_without_n8n_when_ai_disabled(self, mock_post):
         ClinicAISettings.objects.create(
             clinic=self.clinic,
