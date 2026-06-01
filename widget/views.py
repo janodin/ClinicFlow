@@ -299,14 +299,13 @@ def chat_step(request, clinic_slug):
 
     if action == "text_input" and value:
         ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
-        options, next_action = _chat_controls_for_state(clinic, state, data)
         if not ai_settings.is_ai_enabled:
             message = fallback_message_for(ai_settings)
             return JsonResponse({
                 "state": state,
                 "message": message,
-                "options": options,
-                "next_action": next_action,
+                "options": [],
+                "next_action": "text_input",
             })
 
         history = _widget_chat_history(request, clinic)
@@ -326,8 +325,8 @@ def chat_step(request, clinic_slug):
         return JsonResponse({
             "state": state,
             "message": reply,
-            "options": options,
-            "next_action": next_action,
+            "options": [],
+            "next_action": "text_input",
         })
 
     if state == "greeting":

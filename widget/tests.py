@@ -361,8 +361,8 @@ class WidgetTests(TestCase):
         self.assertEqual(data["state"], "select_date")
         self.assertEqual(data["message"], "AI can help with dates.")
         self.assertNotEqual(data["message"], "What date works for you?")
-        self.assertEqual(data["next_action"], "select_option")
-        self.assertTrue(data["options"])
+        self.assertEqual(data["next_action"], "text_input")
+        self.assertEqual(data["options"], [])
         mock_post.assert_called_once()
         payload = mock_post.call_args.kwargs["json"]
         self.assertIn("hi", payload["message"])
@@ -389,9 +389,8 @@ class WidgetTests(TestCase):
         self.assertEqual(data["state"], "select_time")
         self.assertEqual(data["message"], "AI can answer about this date.")
         self.assertNotEqual(data["message"], "Here are the available times:")
-        self.assertEqual(data["next_action"], "select_option")
-        self.assertTrue(data["options"])
-        self.assertIn("AM", data["options"][0]["label"])
+        self.assertEqual(data["next_action"], "text_input")
+        self.assertEqual(data["options"], [])
         mock_post.assert_called_once()
         payload = mock_post.call_args.kwargs["json"]
         self.assertIn("what date is this", payload["message"])
