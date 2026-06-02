@@ -25,7 +25,7 @@ class GuestBookingForm(forms.Form):
     def __init__(self, clinic, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.clinic = clinic
-        self.fields["service"].queryset = clinic.services.filter(is_active=True)
+        self.fields["service"].queryset = clinic.services.filter(is_active=True, is_archived=False)
 
 
 class StaffAppointmentForm(forms.ModelForm):
@@ -49,7 +49,7 @@ class StaffAppointmentForm(forms.ModelForm):
     def __init__(self, clinic, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.clinic = clinic
-        self.fields["service"].queryset = clinic.services.filter(is_active=True)
+        self.fields["service"].queryset = clinic.services.filter(is_active=True, is_archived=False)
         if self.instance and self.instance.pk:
             self.fields["date"].initial = self.instance.starts_at.date()
             self.fields["time"].initial = self.instance.starts_at.time()
@@ -96,7 +96,7 @@ class AppointmentStatusForm(forms.ModelForm):
     def clean_status(self):
         new_status = self.cleaned_data["status"]
         if self.instance and self.instance.pk:
-            if not self.instance.can_transition_to(new_status):
+            if new_status != self.instance.status and not self.instance.can_transition_to(new_status):
                 raise forms.ValidationError(
                     f"Cannot change status from {self.instance.get_status_display()} to {dict(Appointment.STATUS_CHOICES).get(new_status)}."
                 )

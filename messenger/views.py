@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import timedelta
 
 import requests
@@ -22,6 +23,9 @@ from .ai_tools import (
 from .bot_engine import handle_message
 from .messenger_api import verify_signature
 from .models import MessengerConnection, MessengerSession
+
+
+logger = logging.getLogger(__name__)
 
 
 def _verify_shared_secret(request):
@@ -170,6 +174,7 @@ def ai_book(request):
         _normalize_confirmed(data.get("confirmed", False)),
         data.get("email", ""),
         data.get("reason", ""),
+        data.get("psid", ""),
     ))
 
 
@@ -272,9 +277,10 @@ def _send_facebook_reply(page_token, psid, actions):
         else:
             continue
         try:
-            requests.post(url, params={"access_token": page_token}, json=msg_payload, timeout=10)
-        except Exception:
-            pass
+            response = requests.post(url, params={"access_token": page_token}, json=msg_payload, timeout=10)
+            response.raise_for_status()
+        except requests.RequestException:
+            logger.error("Failed to send Messenger reply")
 
 
 @csrf_exempt

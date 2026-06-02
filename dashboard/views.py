@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
@@ -17,9 +18,9 @@ from django.conf import settings as django_settings
 from appointments.forms import AppointmentNoteForm, AppointmentStatusForm, StaffAppointmentForm
 from appointments.models import Appointment
 from clinics.forms import ClinicFAQForm, ClinicSettingsForm, WidgetSettingsForm
-from clinics.models import ClinicMembership
+from clinics.models import Clinic, ClinicMembership
 from clinics.tenant import current_clinic, get_active_membership, user_can_manage_daily_ops, user_can_manage_settings
-from django.utils.dateparse import parse_date, parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from scheduling.models import ClinicBusinessHour, UnavailableDate
 from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots, get_working_window, validate_slot
 from patients.forms import PatientForm
@@ -27,11 +28,74 @@ from patients.models import Patient
 from services.forms import ServiceForm
 
 
-def _clinic_or_redirect(request):
+def _clinic_or_redirect(request, allow_missing=False):
     clinic = current_clinic(request)
     if not clinic:
-        return None
+        if allow_missing:
+            return None
+        raise PermissionDenied("No active clinic membership.")
     return clinic
+
+
+def _embedded_iframe_url(request, clinic):
+    return request.build_absolute_uri(reverse("widget:home", args=[clinic.slug])) + "?source=embed"
+
+
+def _parse_required_time(value, label):
+    parsed = parse_time(value or "")
+    if parsed is None:
+        raise ValidationError(f"{label} must be a valid time.")
+    return parsed
+
+
+def _validated_business_hour_rows(request):
+    rows = []
+    default_open = time(9, 0)
+    default_close = time(17, 0)
+    for weekday in range(7):
+        is_open = request.POST.get(f"is_open_{weekday}") == "on"
+        open_time_str = request.POST.get(f"open_time_{weekday}")
+        close_time_str = request.POST.get(f"close_time_{weekday}")
+        break_start_str = request.POST.get(f"break_start_{weekday}") or ""
+        break_end_str = request.POST.get(f"break_end_{weekday}") or ""
+
+        if is_open:
+            open_time = _parse_required_time(open_time_str, "Open time")
+            close_time = _parse_required_time(close_time_str, "Close time")
+            if open_time >= close_time:
+                raise ValidationError("Open time must be before close time.")
+        else:
+            open_time = parse_time(open_time_str or "") or default_open
+            close_time = parse_time(close_time_str or "") or default_close
+
+        break_start = parse_time(break_start_str) if break_start_str else None
+        break_end = parse_time(break_end_str) if break_end_str else None
+        if bool(break_start) != bool(break_end):
+            raise ValidationError("Break start and end times must be provided together.")
+        if break_start and break_end:
+            if break_start >= break_end:
+                raise ValidationError("Break start must be before break end.")
+            if is_open and (break_start < open_time or break_end > close_time):
+                raise ValidationError("Break times must be inside working hours.")
+
+        rows.append(
+            {
+                "weekday": weekday,
+                "is_open": is_open,
+                "open_time": open_time,
+                "close_time": close_time,
+                "break_start": break_start,
+                "break_end": break_end,
+            }
+        )
+    return rows
+
+
+def _redirect_with_appointment_error(request, message):
+    if request.headers.get("HX-Request"):
+        return HttpResponse(f'<p class="text-sm text-rose-600">{message}</p>', status=400)
+    messages.error(request, message)
+    return redirect("dashboard:appointments")
 
 
 def _require_settings_permission(user):
@@ -42,7 +106,7 @@ def _require_settings_permission(user):
 
 @login_required
 def home(request):
-    clinic = _clinic_or_redirect(request)
+    clinic = _clinic_or_redirect(request, allow_missing=True)
     if not clinic:
         return redirect("accounts:signup")
     today = timezone.localdate()
@@ -61,7 +125,7 @@ def home(request):
 
 @login_required
 def calendar(request):
-    clinic = _clinic_or_redirect(request)
+    clinic = _clinic_or_redirect(request, allow_missing=True)
     if not clinic:
         return redirect("accounts:signup")
     return render(request, "dashboard/calendar.html", {"clinic": clinic})
@@ -69,7 +133,7 @@ def calendar(request):
 
 @login_required
 def calendar_events(request):
-    clinic = _clinic_or_redirect(request)
+    clinic = _clinic_or_redirect(request, allow_missing=True)
     if not clinic:
         return JsonResponse({"error": "No clinic context."}, status=400)
     events = []
@@ -178,20 +242,22 @@ def calendar_reschedule(request):
     if _inside_break(new_start.time(), new_end.time(), break_start, break_end):
         return JsonResponse({"success": False, "error": "Appointment overlaps with a break."})
 
-    overlaps = Appointment.objects.filter(
-        clinic=clinic,
-        starts_at__lt=new_end,
-        ends_at__gt=new_start,
-    ).exclude(status=Appointment.STATUS_CANCELLED).exclude(pk=appointment.pk)
-    if overlaps.exists():
-        return JsonResponse({"success": False, "error": "This clinic already has an appointment at that time."})
+    with transaction.atomic():
+        Clinic.objects.select_for_update().get(pk=clinic.pk)
+        overlaps = Appointment.objects.filter(
+            clinic=clinic,
+            starts_at__lt=new_end,
+            ends_at__gt=new_start,
+        ).exclude(status=Appointment.STATUS_CANCELLED).exclude(pk=appointment.pk)
+        if overlaps.exists():
+            return JsonResponse({"success": False, "error": "This clinic already has an appointment at that time."})
 
-    appointment.starts_at = new_start
-    appointment.ends_at = new_end
-    try:
-        appointment.save()
-    except ValidationError as e:
-        return JsonResponse({"success": False, "error": str(e)})
+        appointment.starts_at = new_start
+        appointment.ends_at = new_end
+        try:
+            appointment.save()
+        except ValidationError as e:
+            return JsonResponse({"success": False, "error": str(e)})
     return JsonResponse({"success": True})
 
 
@@ -228,7 +294,7 @@ def appointments(request):
         "page_obj": page_obj,
         "form": form,
         "patient_form": PatientForm(clinic=clinic),
-        "services": clinic.services.all(),
+        "services": clinic.services.filter(is_archived=False),
         "status": status,
         "date_from": date_from,
         "date_to": date_to,
@@ -251,21 +317,23 @@ def create_appointment(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
-    form = StaffAppointmentForm(clinic, request.POST)
-    if form.is_valid():
-        patient, _ = Patient.find_or_create_for_booking(
-            clinic=clinic,
-            full_name=form.cleaned_data["patient_name"],
-            phone=form.cleaned_data["patient_phone"],
-            email=form.cleaned_data["patient_email"],
-        )
-        appointment = form.save(commit=False)
-        appointment.clinic = clinic
-        appointment.patient = patient
-        appointment.save()
-        messages.success(request, "Appointment created.")
-    else:
-        messages.error(request, form.errors.as_text())
+    with transaction.atomic():
+        clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+        form = StaffAppointmentForm(clinic, request.POST)
+        if form.is_valid():
+            patient, _ = Patient.find_or_create_for_booking(
+                clinic=clinic,
+                full_name=form.cleaned_data["patient_name"],
+                phone=form.cleaned_data["patient_phone"],
+                email=form.cleaned_data["patient_email"],
+            )
+            appointment = form.save(commit=False)
+            appointment.clinic = clinic
+            appointment.patient = patient
+            appointment.save()
+            messages.success(request, "Appointment created.")
+        else:
+            messages.error(request, form.errors.as_text())
     return redirect("dashboard:appointments")
 
 
@@ -285,17 +353,25 @@ def appointment_edit(request, pk):
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
     if request.method == "POST":
-        form = StaffAppointmentForm(clinic, request.POST, instance=appointment)
+        with transaction.atomic():
+            clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+            form = StaffAppointmentForm(clinic, request.POST, instance=appointment)
+            if form.is_valid():
+                patient, _ = Patient.find_or_create_for_booking(
+                    clinic=clinic,
+                    full_name=form.cleaned_data["patient_name"],
+                    phone=form.cleaned_data["patient_phone"],
+                    email=form.cleaned_data["patient_email"],
+                )
+                appointment = form.save(commit=False)
+                appointment.patient = patient
+                appointment.save()
+            else:
+                if request.headers.get("HX-Request"):
+                    return render(request, "dashboard/partials/appointment_form.html", {"form": form, "appointment": appointment, "patient_form": PatientForm(clinic=clinic)})
+                messages.error(request, form.errors.as_text())
+                return redirect("dashboard:appointments")
         if form.is_valid():
-            patient, _ = Patient.find_or_create_for_booking(
-                clinic=clinic,
-                full_name=form.cleaned_data["patient_name"],
-                phone=form.cleaned_data["patient_phone"],
-                email=form.cleaned_data["patient_email"],
-            )
-            appointment = form.save(commit=False)
-            appointment.patient = patient
-            appointment.save()
             if request.headers.get("HX-Request"):
                 response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
                 response["HX-Retarget"] = f"#appointment-row-{appointment.id}"
@@ -306,11 +382,6 @@ def appointment_edit(request, pk):
                 })
                 return response
             messages.success(request, "Appointment updated.")
-            return redirect("dashboard:appointments")
-        else:
-            if request.headers.get("HX-Request"):
-                return render(request, "dashboard/partials/appointment_form.html", {"form": form, "appointment": appointment, "patient_form": PatientForm(clinic=clinic)})
-            messages.error(request, form.errors.as_text())
             return redirect("dashboard:appointments")
     else:
         form = StaffAppointmentForm(clinic, instance=appointment)
@@ -327,6 +398,8 @@ def appointment_cancel(request, pk):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
+    if not appointment.can_transition_to(Appointment.STATUS_CANCELLED):
+        return _redirect_with_appointment_error(request, "Cannot cancel this appointment from its current status.")
     reason = request.POST.get("cancellation_reason", "")
     appointment.status = Appointment.STATUS_CANCELLED
     appointment.cancellation_reason = reason
@@ -352,6 +425,8 @@ def appointment_reschedule(request, pk):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
+    if appointment.status in {Appointment.STATUS_COMPLETED, Appointment.STATUS_CANCELLED}:
+        return _redirect_with_appointment_error(request, "Cannot reschedule a completed or cancelled appointment.")
     new_date_str = request.POST.get("new_date")
     new_time_str = request.POST.get("new_time")
     if not new_date_str or not new_time_str:
@@ -372,17 +447,19 @@ def appointment_reschedule(request, pk):
             return HttpResponse(f'<p class="text-sm text-rose-600">{msg}</p>')
         messages.error(request, msg)
         return redirect("dashboard:appointments")
-    try:
-        validate_slot(clinic, new_starts_at, new_ends_at, exclude_appointment=appointment)
-    except ValidationError as e:
-        msg = str(e)
-        if request.headers.get("HX-Request"):
-            return HttpResponse(f'<p class="text-sm text-rose-600">{msg}</p>')
-        messages.error(request, msg)
-        return redirect("dashboard:appointments")
-    appointment.starts_at = new_starts_at
-    appointment.ends_at = new_ends_at
-    appointment.save()
+    with transaction.atomic():
+        Clinic.objects.select_for_update().get(pk=clinic.pk)
+        try:
+            validate_slot(clinic, new_starts_at, new_ends_at, exclude_appointment=appointment)
+        except ValidationError as e:
+            msg = str(e)
+            if request.headers.get("HX-Request"):
+                return HttpResponse(f'<p class="text-sm text-rose-600">{msg}</p>')
+            messages.error(request, msg)
+            return redirect("dashboard:appointments")
+        appointment.starts_at = new_starts_at
+        appointment.ends_at = new_ends_at
+        appointment.save()
     if request.headers.get("HX-Request"):
         response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
         response["HX-Retarget"] = f"#appointment-row-{appointment.pk}"
@@ -888,7 +965,7 @@ def settings(request):
         date_str = request.POST.get("date")
         if service_id and date_str:
             from datetime import date as date_class
-            slot_service = get_object_or_404(clinic.services, pk=service_id)
+            slot_service = get_object_or_404(clinic.services.filter(is_active=True, is_archived=False), pk=service_id)
             try:
                 slot_date = date_class.fromisoformat(date_str)
                 if slot_service:
@@ -936,7 +1013,7 @@ def assistant_settings(request):
         widget_form = WidgetSettingsForm(instance=clinic)
 
     faq_form = ClinicFAQForm()
-    iframe_url = request.build_absolute_uri(reverse("widget:home", args=[clinic.slug]))
+    iframe_url = _embedded_iframe_url(request, clinic)
     script_url = request.build_absolute_uri(reverse("widget:embed_js", args=[clinic.slug]))
     return render(
         request,
@@ -955,7 +1032,7 @@ def assistant_settings(request):
 @login_required
 def widget_embed(request):
     clinic = _clinic_or_redirect(request)
-    iframe_url = request.build_absolute_uri(reverse("widget:home", args=[clinic.slug]))
+    iframe_url = _embedded_iframe_url(request, clinic)
     script_url = request.build_absolute_uri(reverse("widget:embed_js", args=[clinic.slug]))
     return render(request, "dashboard/widget_embed.html", {"clinic": clinic, "iframe_url": iframe_url, "script_url": script_url})
 
@@ -1034,7 +1111,7 @@ def billing(request):
 
 @login_required
 def search(request):
-    clinic = _clinic_or_redirect(request)
+    clinic = _clinic_or_redirect(request, allow_missing=True)
     if not clinic:
         return HttpResponse("")
     query = request.GET.get("q", "").strip()
@@ -1084,21 +1161,21 @@ def save_business_hours(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_settings(membership):
         raise PermissionDenied
-    for weekday in range(7):
-        is_open = request.POST.get(f"is_open_{weekday}") == "on"
-        open_time_str = request.POST.get(f"open_time_{weekday}")
-        close_time_str = request.POST.get(f"close_time_{weekday}")
-        break_start_str = request.POST.get(f"break_start_{weekday}") or None
-        break_end_str = request.POST.get(f"break_end_{weekday}") or None
-        obj, _ = ClinicBusinessHour.objects.update_or_create(
+    try:
+        rows = _validated_business_hour_rows(request)
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, "messages") else str(exc))
+        return redirect(f"{reverse('dashboard:settings')}?tab=hours")
+    for row in rows:
+        ClinicBusinessHour.objects.update_or_create(
             clinic=clinic,
-            weekday=weekday,
+            weekday=row["weekday"],
             defaults={
-                "is_open": is_open,
-                "open_time": open_time_str,
-                "close_time": close_time_str,
-                "break_start": break_start_str,
-                "break_end": break_end_str,
+                "is_open": row["is_open"],
+                "open_time": row["open_time"],
+                "close_time": row["close_time"],
+                "break_start": row["break_start"],
+                "break_end": row["break_end"],
             },
         )
     messages.success(request, "Business hours saved.")
@@ -1155,7 +1232,7 @@ def delete_unavailable_date(request, pk):
 @login_required
 def slot_preview(request):
     clinic = _clinic_or_redirect(request)
-    services = clinic.services.all()
+    services = clinic.services.filter(is_active=True, is_archived=False)
     slots = []
     selected_service = None
     selected_date = None
@@ -1163,7 +1240,7 @@ def slot_preview(request):
         service_id = request.POST.get("service")
         date_str = request.POST.get("date")
         if service_id and date_str:
-            selected_service = get_object_or_404(clinic.services, pk=service_id)
+            selected_service = get_object_or_404(services, pk=service_id)
             selected_date = parse_date(date_str)
             if selected_date:
                 slots = generate_slots(clinic, selected_service, selected_date)

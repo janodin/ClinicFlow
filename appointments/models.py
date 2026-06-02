@@ -56,6 +56,9 @@ class Appointment(TimeStampedModel):
     status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_PENDING)
     payment_state = models.CharField(max_length=32, choices=PAYMENT_CHOICES, default=PAYMENT_UNPAID)
     source = models.CharField(max_length=32, choices=SOURCE_CHOICES, default=SOURCE_DIRECT)
+    messenger_psid = models.CharField(max_length=64, blank=True)
+    messenger_reminder_24h_sent_at = models.DateTimeField(blank=True, null=True)
+    messenger_reminder_1h_sent_at = models.DateTimeField(blank=True, null=True)
     reason = models.TextField(blank=True)
     cancellation_reason = models.TextField(blank=True)
     reference_code = models.CharField(max_length=16, unique=True, blank=True)
@@ -76,8 +79,15 @@ class Appointment(TimeStampedModel):
         return new_status in self.VALID_TRANSITIONS.get(self.status, [])
 
     def clean(self):
+        errors = {}
+        if self.clinic_id and self.patient_id and self.patient.clinic_id != self.clinic_id:
+            errors["patient"] = "Patient must belong to the appointment clinic."
+        if self.clinic_id and self.service_id and self.service.clinic_id != self.clinic_id:
+            errors["service"] = "Service must belong to the appointment clinic."
         if self.starts_at and self.ends_at and self.starts_at >= self.ends_at:
-            raise ValidationError("Appointment end time must be after start time.")
+            errors["ends_at"] = "Appointment end time must be after start time."
+        if errors:
+            raise ValidationError(errors)
         if not self.clinic_id:
             return
         overlaps = Appointment.objects.filter(

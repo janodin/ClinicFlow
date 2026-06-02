@@ -577,3 +577,91 @@ def test_widget_settings_rejects_invalid_accent_color(clinic_setup):
 
     assert not form.is_valid()
     assert "widget_accent_color" in form.errors
+
+
+@pytest.mark.django_db
+def test_completed_appointment_cannot_be_cancelled_directly(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    appointment.status = Appointment.STATUS_COMPLETED
+    appointment.save(update_fields=["status", "updated_at"])
+    client.force_login(user)
+
+    response = client.post(reverse("dashboard:appointment_cancel", args=[appointment.id]))
+
+    assert response.status_code == 302
+    appointment.refresh_from_db()
+    assert appointment.status == Appointment.STATUS_COMPLETED
+
+
+@pytest.mark.django_db
+def test_cancelled_appointment_cannot_be_rescheduled_directly(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    original_start = appointment.starts_at
+    appointment.status = Appointment.STATUS_CANCELLED
+    appointment.save(update_fields=["status", "updated_at"])
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_reschedule", args=[appointment.id]),
+        {"new_date": target_date.isoformat(), "new_time": "11:00"},
+    )
+
+    assert response.status_code == 302
+    appointment.refresh_from_db()
+    assert appointment.starts_at == original_start
+    assert appointment.status == Appointment.STATUS_CANCELLED
+
+
+@pytest.mark.django_db
+def test_dashboard_routes_without_clinic_membership_do_not_500(client):
+    User = get_user_model()
+    user = User.objects.create_user(username="no-clinic@example.com", email="no-clinic@example.com", password="password123")
+    client.force_login(user)
+    client.raise_request_exception = False
+
+    response = client.get(reverse("dashboard:appointments"))
+
+    assert response.status_code in {302, 403}
+
+
+@pytest.mark.django_db
+def test_save_business_hours_rejects_close_before_open(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    target_weekday = 0
+    existing = ClinicBusinessHour.objects.create(
+        clinic=clinic,
+        weekday=target_weekday,
+        is_open=True,
+        open_time=time(9),
+        close_time=time(17),
+    )
+    client.force_login(user)
+    data = {}
+    for weekday in range(7):
+        data[f"is_open_{weekday}"] = "on"
+        data[f"open_time_{weekday}"] = "09:00"
+        data[f"close_time_{weekday}"] = "17:00"
+        data[f"break_start_{weekday}"] = ""
+        data[f"break_end_{weekday}"] = ""
+    data[f"open_time_{target_weekday}"] = "17:00"
+    data[f"close_time_{target_weekday}"] = "09:00"
+
+    response = client.post(reverse("dashboard:save_business_hours"), data)
+
+    assert response.status_code == 302
+    existing.refresh_from_db()
+    assert existing.open_time == time(9)
+    assert existing.close_time == time(17)
+
+
+@pytest.mark.django_db
+def test_widget_embed_iframe_uses_embed_source_and_responsive_dimensions(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:widget_embed"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert "?source=embed" in content
+    assert "max-width:calc(100vw - 24px)" in content

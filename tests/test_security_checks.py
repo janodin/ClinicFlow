@@ -13,7 +13,6 @@ def _ids(errors):
 
 SECURE_SECRET_KEY = "ProductionStrongValueForDjangoChecksOnly12345678901234567890"
 SECURE_N8N_WEBHOOK_SECRET = "N8nWebhookValueForTestsOnly1234567890"
-SECURE_MESSENGER_APP_SECRET = "MessengerAppValueForTestsOnly1234567890"
 SECURE_MESSENGER_VERIFY_TOKEN = "MessengerVerifyValueForTestsOnly1234567890"
 
 
@@ -27,7 +26,6 @@ def _secure_settings(**overrides):
         "SECURE_SSL_REDIRECT": True,
         "SECURE_HSTS_SECONDS": 31536000,
         "N8N_WEBHOOK_SECRET": SECURE_N8N_WEBHOOK_SECRET,
-        "MESSENGER_APP_SECRET": SECURE_MESSENGER_APP_SECRET,
         "MESSENGER_VERIFY_TOKEN": SECURE_MESSENGER_VERIFY_TOKEN,
     }
     settings.update(overrides)
@@ -66,6 +64,25 @@ def test_production_hsts_subdomain_and_preload_defaults_are_enabled(monkeypatch)
         importlib.reload(project_settings)
 
 
+def test_production_embed_cookie_defaults_allow_secure_third_party_iframes(monkeypatch):
+    monkeypatch.delenv("DEBUG", raising=False)
+    monkeypatch.delenv("SESSION_COOKIE_SAMESITE", raising=False)
+    monkeypatch.delenv("CSRF_COOKIE_SAMESITE", raising=False)
+    monkeypatch.setenv("DJANGO_ENV", "production")
+
+    reloaded_settings = importlib.reload(project_settings)
+
+    try:
+        assert reloaded_settings.SESSION_COOKIE_SAMESITE == "None"
+        assert reloaded_settings.CSRF_COOKIE_SAMESITE == "None"
+        assert reloaded_settings.SESSION_COOKIE_SECURE is True
+        assert reloaded_settings.CSRF_COOKIE_SECURE is True
+    finally:
+        monkeypatch.setenv("DJANGO_ENV", "development")
+        monkeypatch.setenv("DEBUG", "1")
+        importlib.reload(project_settings)
+
+
 @override_settings(
     DEBUG=True,
     SECRET_KEY="django-insecure-dev-clinic-booking-saas",
@@ -75,7 +92,6 @@ def test_production_hsts_subdomain_and_preload_defaults_are_enabled(monkeypatch)
     SECURE_SSL_REDIRECT=False,
     SECURE_HSTS_SECONDS=0,
     N8N_WEBHOOK_SECRET="",
-    MESSENGER_APP_SECRET="",
     MESSENGER_VERIFY_TOKEN="",
 )
 def test_deploy_check_flags_insecure_settings():
@@ -89,7 +105,6 @@ def test_deploy_check_flags_insecure_settings():
     assert "clinic_security.E006" in ids
     assert "clinic_security.E007" in ids
     assert "clinic_security.E008" in ids
-    assert "clinic_security.E009" in ids
     assert "clinic_security.E010" in ids
 
 
@@ -102,7 +117,6 @@ def test_deploy_check_flags_insecure_settings():
     SECURE_SSL_REDIRECT=True,
     SECURE_HSTS_SECONDS=31536000,
     N8N_WEBHOOK_SECRET=SECURE_N8N_WEBHOOK_SECRET,
-    MESSENGER_APP_SECRET=SECURE_MESSENGER_APP_SECRET,
     MESSENGER_VERIFY_TOKEN=SECURE_MESSENGER_VERIFY_TOKEN,
 )
 def test_deploy_check_accepts_secure_settings():
@@ -118,7 +132,6 @@ def test_deploy_check_accepts_secure_settings():
     SECURE_SSL_REDIRECT=True,
     SECURE_HSTS_SECONDS=31536000,
     N8N_WEBHOOK_SECRET="n8n-secret",
-    MESSENGER_APP_SECRET="messenger-secret",
     MESSENGER_VERIFY_TOKEN="verify-token",
 )
 def test_deploy_check_rejects_placeholder_secret_key():
@@ -136,7 +149,6 @@ def test_deploy_check_rejects_placeholder_secret_key():
     SECURE_SSL_REDIRECT=True,
     SECURE_HSTS_SECONDS=31536000,
     N8N_WEBHOOK_SECRET="n8n-secret",
-    MESSENGER_APP_SECRET="messenger-secret",
     MESSENGER_VERIFY_TOKEN="verify-token",
 )
 def test_deploy_check_rejects_short_secret_key():
@@ -149,7 +161,6 @@ def test_deploy_check_rejects_short_secret_key():
     ("setting_name", "error_id"),
     [
         ("N8N_WEBHOOK_SECRET", "clinic_security.E008"),
-        ("MESSENGER_APP_SECRET", "clinic_security.E009"),
         ("MESSENGER_VERIFY_TOKEN", "clinic_security.E010"),
     ],
 )

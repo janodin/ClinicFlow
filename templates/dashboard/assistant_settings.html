@@ -107,7 +107,7 @@
           </div>
           <p class="text-xs text-[var(--cf-muted)] mb-3">Paste this where you want the widget. It floats fixed in the bottom-right.</p>
           <div class="relative">
-            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:24px;right:24px;width:420px;height:680px;border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
+            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:24px;right:24px;width:420px;max-width:calc(100vw - 24px);height:680px;max-height:calc(100vh - 24px);border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
             <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {iframeCopied=true; setTimeout(() => iframeCopied=false, 2000)})" class="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20" type="button">
               <i data-lucide="copy" class="h-3 w-3" x-show="!iframeCopied"></i>
               <i data-lucide="check" class="h-3 w-3" x-show="iframeCopied" x-cloak></i>

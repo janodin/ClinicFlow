@@ -32,6 +32,10 @@ def _parse_name_phone(text):
     return full_name, phone
 
 
+def _clinic_localdate(clinic):
+    return timezone.now().astimezone(ZoneInfo(clinic.timezone)).date()
+
+
 def handle_message(session, text, postback):
     clinic = session.connection.clinic
     state = session.state
@@ -49,6 +53,7 @@ def handle_message(session, text, postback):
                 status__in=[Appointment.STATUS_PENDING, Appointment.STATUS_CONFIRMED],
                 starts_at__gte=timezone.now(),
                 starts_at__lte=timezone.now() + timedelta(days=7),
+                messenger_psid=session.psid,
             )
             .order_by("starts_at")
             .first()
@@ -145,7 +150,7 @@ def handle_message(session, text, postback):
             state = MessengerSession.STATE_SELECT_TIME
         else:
             options = [
-                {"title": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "payload": (timezone.localdate() + timedelta(days=i)).isoformat()}
+                {"title": (_clinic_localdate(clinic) + timedelta(days=i)).strftime("%a, %b %d"), "payload": (_clinic_localdate(clinic) + timedelta(days=i)).isoformat()}
                 for i in range(1, 15)
             ]
             actions.append(_quick_reply("What date works for you?", options))
@@ -253,6 +258,8 @@ def handle_message(session, text, postback):
                 session.data = data
                 session.save()
                 return actions
+            appointment.messenger_psid = session.psid
+            appointment.save(update_fields=["messenger_psid", "updated_at"])
             state = MessengerSession.STATE_BOOKED
             local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
             actions.append(_text(

@@ -24,6 +24,10 @@ MIN_BOOKING_PHONE_DIGITS = 7
 SLOT_CONFLICT_MESSAGE = "That slot is no longer available. Please choose another time."
 
 
+def _clinic_localdate(clinic):
+    return timezone.now().astimezone(ZoneInfo(clinic.timezone)).date()
+
+
 def _find_next_available_date(clinic, service, from_date, max_days=14):
     if service is None:
         return None
@@ -40,7 +44,8 @@ def _booking_context(clinic, request):
     service_id = request.GET.get("service")
     service = services.filter(pk=service_id).first() if service_id else services.first()
     date_str = request.GET.get("date")
-    selected_date = timezone.localdate() + timedelta(days=1)
+    clinic_today = _clinic_localdate(clinic)
+    selected_date = clinic_today + timedelta(days=1)
     if date_str:
         try:
             selected_date = timezone.datetime.fromisoformat(date_str).date()
@@ -52,7 +57,7 @@ def _booking_context(clinic, request):
     next_available_date = None
     if not slots:
         next_available_date = _find_next_available_date(clinic, service, selected_date)
-    dates = [timezone.localdate() + timedelta(days=i) for i in range(1, 15)]
+    dates = [clinic_today + timedelta(days=i) for i in range(1, 15)]
     return {
         "clinic": clinic,
         "services": services,
@@ -186,7 +191,7 @@ def embed_js(request, clinic_slug):
     if (!iframe) {{
       iframe = document.createElement('iframe');
       iframe.src = src;
-      iframe.style.cssText = 'position:fixed;bottom:24px;right:24px;width:420px;height:680px;border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);opacity:0;transform:translateY(20px);transition:opacity .3s, transform .3s;';
+      iframe.style.cssText = 'position:fixed;bottom:24px;right:24px;width:420px;max-width:calc(100vw - 24px);height:680px;max-height:calc(100vh - 24px);border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);opacity:0;transform:translateY(20px);transition:opacity .3s, transform .3s;';
       iframe.allow = 'clipboard-write';
       document.body.appendChild(iframe);
       requestAnimationFrame(function() {{ iframe.style.opacity = '1'; iframe.style.transform = 'translateY(0)'; }});
@@ -230,11 +235,12 @@ def _save_widget_chat_history(request, clinic, history):
     request.session[f"widget_chat_history_{clinic.id}"] = history[-10:]
 
 
-def _chat_date_options():
+def _chat_date_options(clinic):
+    clinic_today = _clinic_localdate(clinic)
     return [
         {
-            "label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"),
-            "value": (timezone.localdate() + timedelta(days=i)).isoformat(),
+            "label": (clinic_today + timedelta(days=i)).strftime("%a, %b %d"),
+            "value": (clinic_today + timedelta(days=i)).isoformat(),
         }
         for i in range(1, 15)
     ]
@@ -245,7 +251,7 @@ def _chat_controls_for_state(clinic, state, data):
         services = clinic.services.filter(is_active=True, is_archived=False)
         return [{"label": service.name, "value": str(service.id)} for service in services], "select_option"
     if state == "select_date":
-        return _chat_date_options(), "select_option"
+        return _chat_date_options(clinic), "select_option"
     if state == "select_time":
         service = clinic.services.filter(pk=data.get("service_id"), is_active=True, is_archived=False).first()
         date_str = data.get("date", "")
@@ -396,12 +402,12 @@ def chat_step(request, clinic_slug):
                 value = ""
             else:
                 message = "Please select a valid date."
-                options = [{"label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "value": (timezone.localdate() + timedelta(days=i)).isoformat()} for i in range(1, 15)]
+                options = _chat_date_options(clinic)
                 data["state"] = state
                 request.session[session_key] = data
                 return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
         else:
-            options = [{"label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "value": (timezone.localdate() + timedelta(days=i)).isoformat()} for i in range(1, 15)]
+            options = _chat_date_options(clinic)
             message = "What date works for you?"
             data["state"] = state
             request.session[session_key] = data
@@ -436,7 +442,7 @@ def chat_step(request, clinic_slug):
                 request.session[session_key] = data
                 return JsonResponse({"state": state, "message": message, "options": options, "next_action": next_action})
             else:
-                options = [{"label": (timezone.localdate() + timedelta(days=i)).strftime("%a, %b %d"), "value": (timezone.localdate() + timedelta(days=i)).isoformat()} for i in range(1, 15)]
+                options = _chat_date_options(clinic)
                 message = "Sorry, no slots available on that date. Please choose another date."
                 state = "select_date"
                 data["state"] = state
@@ -492,6 +498,14 @@ def chat_step(request, clinic_slug):
             message = f"Your appointment is confirmed! Reference: {appointment.reference_code}"
             request.session.pop(session_key, None)
             return JsonResponse({"state": state, "message": message, "options": [{"label": "Book another", "value": "restart"}], "next_action": "select_option"})
+        if action == "select_option" and value == "cancel":
+            request.session.pop(session_key, None)
+            return JsonResponse({
+                "state": "greeting",
+                "message": "Booking cancelled. You can start again anytime.",
+                "options": [{"label": "Book an appointment", "value": "start_booking"}],
+                "next_action": "select_option",
+            })
         else:
             summary = f"{service.name} at {clinic.name} on {local_start.strftime('%A, %B %d at %I:%M %p')}"
             message = f"Please confirm your appointment:\n{summary}\nPatient: {data.get('full_name')}"

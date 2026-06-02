@@ -1,4 +1,4 @@
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta, timezone as dt_timezone
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -88,6 +88,30 @@ class WidgetTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTemplateUsed(resp, "widget/partials/slots.html")
 
+    def test_widget_date_options_use_clinic_timezone(self):
+        Clinic.objects.filter(pk=self.clinic.pk).update(timezone="America/New_York")
+        fixed_now = datetime(2026, 6, 2, 2, 0, tzinfo=dt_timezone.utc)
+
+        with patch("widget.views.timezone.now", return_value=fixed_now):
+            response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+
+        first_date = response.context["dates"][0]
+        self.assertEqual(first_date.isoformat(), "2026-06-02")
+
+    def test_widget_renders_reason_field_when_enabled(self):
+        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=True)
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+
+        self.assertContains(response, 'name="reason"')
+
+    def test_widget_omits_reason_field_when_disabled(self):
+        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=False)
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+
+        self.assertNotContains(response, 'name="reason"')
+
     def test_chat_step_state_machine_skips_doctor(self):
         url = reverse("widget:chat_step", args=[self.clinic.slug])
         self.client.post(url, {"action": "init"})
@@ -143,6 +167,17 @@ class WidgetTests(TestCase):
         self.assertEqual(data["next_action"], "submit_info")
         self.assertIn("valid email", data["message"])
         self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
+
+    def test_chat_step_cancel_at_confirmation_resets_without_booking(self):
+        url = self._drive_chat_to_collect_info()
+        self.client.post(url, {"action": "submit_info", "full_name": "Cancel Patient", "phone": "09170001111"})
+
+        response = self.client.post(url, {"action": "select_option", "value": "cancel"})
+
+        data = response.json()
+        self.assertEqual(data["state"], "greeting")
+        self.assertIn("cancelled", data["message"].lower())
+        self.assertFalse(Appointment.objects.filter(clinic=self.clinic, patient__full_name="Cancel Patient").exists())
 
     def test_booking_via_widget_sets_chat_widget_source(self):
         tomorrow = timezone.localdate() + timedelta(days=1)

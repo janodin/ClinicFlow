@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from clinics.models import Clinic, TimeStampedModel
@@ -25,6 +26,21 @@ class ClinicBusinessHour(TimeStampedModel):
     class Meta:
         unique_together = [("clinic", "weekday")]
         ordering = ["weekday"]
+
+    def clean(self):
+        errors = {}
+        if self.is_open and self.open_time and self.close_time and self.open_time >= self.close_time:
+            errors["close_time"] = "Close time must be after open time."
+        if bool(self.break_start) != bool(self.break_end):
+            errors["break_start"] = "Break start and end times must be provided together."
+        if self.break_start and self.break_end:
+            if self.break_start >= self.break_end:
+                errors["break_end"] = "Break end must be after break start."
+            if self.is_open and self.open_time and self.close_time:
+                if self.break_start < self.open_time or self.break_end > self.close_time:
+                    errors["break_start"] = "Break times must be inside working hours."
+        if errors:
+            raise ValidationError(errors)
 
 
 class UnavailableDate(TimeStampedModel):

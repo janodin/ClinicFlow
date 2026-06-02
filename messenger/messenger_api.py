@@ -32,11 +32,14 @@ def _send_message(connection, psid, payload):
 
 
 def send_messages(connection, psid, actions):
+    sent_any = False
+    all_sent = True
     for action in actions:
         msg_type = action.get("type")
         if msg_type == "text":
             payload = {"text": action["text"]}
-            _send_message(connection, psid, payload)
+            sent_any = True
+            all_sent = bool(_send_message(connection, psid, payload)) and all_sent
         elif msg_type == "quick_replies":
             payload = {
                 "text": action["text"],
@@ -49,7 +52,8 @@ def send_messages(connection, psid, actions):
                     for opt in action["options"]
                 ],
             }
-            _send_message(connection, psid, payload)
+            sent_any = True
+            all_sent = bool(_send_message(connection, psid, payload)) and all_sent
         elif msg_type == "template":
             payload = {
                 "attachment": {
@@ -68,4 +72,6 @@ def send_messages(connection, psid, actions):
                     },
                 }
             }
-            _send_message(connection, psid, payload)
+            sent_any = True
+            all_sent = bool(_send_message(connection, psid, payload)) and all_sent
+    return sent_any and all_sent

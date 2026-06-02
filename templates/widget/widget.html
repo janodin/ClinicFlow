@@ -106,6 +106,9 @@
               <div><label class="text-xs font-bold text-slate-500 uppercase">Full Name</label><input name="full_name" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
               <div><label class="text-xs font-bold text-slate-500 uppercase">Phone</label><input name="phone" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
               <div><label class="text-xs font-bold text-slate-500 uppercase">Email</label><input name="email" type="email" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"></div>
+              {% if clinic.show_reason_field %}
+              <div><label class="text-xs font-bold text-slate-500 uppercase">Reason for visit</label><textarea name="reason" rows="3" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" placeholder="Optional details for the clinic"></textarea></div>
+              {% endif %}
               <button type="submit" class="cf-btn w-full text-white" :style="'background-color:' + accentColor">Confirm Appointment</button>
             </form>
           </div>

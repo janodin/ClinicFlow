@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django import forms
 
+from clinics.admin_mixins import SuperuserOnlyAdminMixin
+
 from .models import MessengerAISettings, MessengerConnection, MessengerSession
 
 
@@ -27,7 +29,7 @@ class MessengerConnectionAdminForm(forms.ModelForm):
 
 
 @admin.register(MessengerConnection)
-class MessengerConnectionAdmin(admin.ModelAdmin):
+class MessengerConnectionAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
     form = MessengerConnectionAdminForm
     list_display = ["clinic", "app_id", "page_id", "is_active", "created_at"]
     list_filter = ["is_active"]
@@ -35,14 +37,14 @@ class MessengerConnectionAdmin(admin.ModelAdmin):
 
 
 @admin.register(MessengerAISettings)
-class MessengerAISettingsAdmin(admin.ModelAdmin):
+class MessengerAISettingsAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
     list_display = ["connection", "is_ai_enabled", "updated_at"]
     list_filter = ["is_ai_enabled"]
     search_fields = ["connection__clinic__name", "connection__page_id"]
 
 
 @admin.register(MessengerSession)
-class MessengerSessionAdmin(admin.ModelAdmin):
+class MessengerSessionAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
     list_display = ["connection", "psid", "state", "last_activity_at"]
     list_filter = ["state"]
     search_fields = ["psid"]

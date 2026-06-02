@@ -69,6 +69,10 @@ def _slot_payload(clinic, slot):
     }
 
 
+def _clinic_localdate(clinic):
+    return timezone.now().astimezone(ZoneInfo(clinic.timezone)).date()
+
+
 def _parse_datetime(value):
     if not value:
         return None
@@ -216,7 +220,7 @@ def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None,
         elif preferred_date:
             target_date = date.fromisoformat(str(preferred_date))
         else:
-            target_date = timezone.localdate() + timedelta(days=1)
+            target_date = _clinic_localdate(clinic) + timedelta(days=1)
     except (ValueError, TypeError):
         return {"found": True, "available": False, "error": "Invalid date or time.", "alternatives": []}
 
@@ -252,7 +256,7 @@ def check_widget_availability(clinic_slug, service_id, preferred_starts_at=None,
     return _check_availability_for_clinic(clinic, service_id, preferred_starts_at, preferred_date)
 
 
-def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone, confirmed, email="", reason=""):
+def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone, confirmed, email="", reason="", psid=""):
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"created": False, "error": "Messenger connection not found."}
@@ -270,10 +274,11 @@ def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone,
         confirmed,
         email,
         reason,
+        psid,
     )
 
 
-def _book_confirmed_appointment_for_clinic(clinic, source, service_id, starts_at, full_name, phone, confirmed, email="", reason=""):
+def _book_confirmed_appointment_for_clinic(clinic, source, service_id, starts_at, full_name, phone, confirmed, email="", reason="", psid=""):
     if confirmed is not True:
         return {
             "created": False,
@@ -294,6 +299,10 @@ def _book_confirmed_appointment_for_clinic(clinic, source, service_id, starts_at
 
     if error:
         return {"created": False, "error": error}
+
+    if source == Appointment.SOURCE_MESSENGER and psid:
+        appointment.messenger_psid = psid
+        appointment.save(update_fields=["messenger_psid", "updated_at"])
 
     local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
     return {

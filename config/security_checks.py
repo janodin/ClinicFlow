@@ -42,8 +42,6 @@ def production_security_settings(app_configs, **kwargs):
         errors.append(Error("SECURE_HSTS_SECONDS must be positive after HTTPS is confirmed.", id="clinic_security.E007"))
     if _is_weak_secret(getattr(settings, "N8N_WEBHOOK_SECRET", "")):
         errors.append(Error("N8N_WEBHOOK_SECRET is required for trusted assistant webhooks.", id="clinic_security.E008"))
-    if _is_weak_secret(getattr(settings, "MESSENGER_APP_SECRET", "")):
-        errors.append(Error("MESSENGER_APP_SECRET is required for Messenger signature checks.", id="clinic_security.E009"))
     if _is_weak_secret(getattr(settings, "MESSENGER_VERIFY_TOKEN", "")):
         errors.append(Error("MESSENGER_VERIFY_TOKEN is required for Messenger webhook verification.", id="clinic_security.E010"))
     return errors

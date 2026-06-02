@@ -1440,6 +1440,37 @@ def test_ai_booking_endpoint_creates_only_after_confirmation():
 
 
 @pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_booking_endpoint_persists_messenger_psid():
+    clinic, _ = _create_messenger_clinic("owner_ai_book_psid", "PAGEAI-PSID")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    from messenger.ai_tools import check_availability
+    slot = check_availability("PAGEAI-PSID", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_book"),
+        data=json.dumps({
+            "page_id": "PAGEAI-PSID",
+            "service_id": service.id,
+            "starts_at": slot["starts_at"],
+            "full_name": "PSID Patient",
+            "phone": "09170000001",
+            "confirmed": True,
+            "psid": "PSID-RIGHT",
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    appointment = Appointment.objects.get(clinic=clinic, patient__full_name="PSID Patient")
+    assert appointment.messenger_psid == "PSID-RIGHT"
+
+
+@pytest.mark.django_db
 @patch("messenger.management.commands.send_messenger_reminders.send_messages")
 def test_reminder_command_sends_message(mock_send):
     user = User.objects.create_user(username="owner_rem", email="owner_rem@test.com", password="pass")
@@ -1456,10 +1487,122 @@ def test_reminder_command_sends_message(mock_send):
         ends_at=timezone.now() + timedelta(hours=24, minutes=30),
         source=Appointment.SOURCE_MESSENGER,
         status=Appointment.STATUS_CONFIRMED,
+        messenger_psid="PSID1",
     )
     MessengerSession.objects.create(connection=conn, psid="PSID1")
     call_command("send_messenger_reminders")
     mock_send.assert_called_once()
+
+
+@pytest.mark.django_db
+@patch("messenger.management.commands.send_messenger_reminders.send_messages")
+def test_reminder_command_uses_appointment_psid_and_is_idempotent(mock_send):
+    user = User.objects.create_user(username="owner_rem_psid", email="owner_rem_psid@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupREMPSID", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicREMPSID", timezone="Asia/Manila")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-PSID", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="John", phone="09171234567")
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.now() + timedelta(hours=24),
+        ends_at=timezone.now() + timedelta(hours=24, minutes=30),
+        source=Appointment.SOURCE_MESSENGER,
+        status=Appointment.STATUS_CONFIRMED,
+        messenger_psid="PSID-RIGHT",
+    )
+    MessengerSession.objects.create(connection=conn, psid="PSID-WRONG")
+    MessengerSession.objects.create(connection=conn, psid="PSID-RIGHT")
+
+    call_command("send_messenger_reminders")
+    call_command("send_messenger_reminders")
+
+    mock_send.assert_called_once()
+    assert mock_send.call_args.args[1] == "PSID-RIGHT"
+
+
+@pytest.mark.django_db
+@patch("messenger.management.commands.send_messenger_reminders.send_messages")
+def test_reminder_command_does_not_mark_failed_send_as_sent(mock_send):
+    mock_send.return_value = False
+    user = User.objects.create_user(username="owner_rem_fail", email="owner_rem_fail@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupREMFail", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicREMFail", timezone="Asia/Manila")
+    MessengerConnection.objects.create(clinic=clinic, page_id="P-FAIL", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="John", phone="09171234567")
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.now() + timedelta(hours=24),
+        ends_at=timezone.now() + timedelta(hours=24, minutes=30),
+        source=Appointment.SOURCE_MESSENGER,
+        status=Appointment.STATUS_CONFIRMED,
+        messenger_psid="PSID-FAIL",
+    )
+
+    call_command("send_messenger_reminders")
+
+    appointment.refresh_from_db()
+    assert appointment.messenger_reminder_24h_sent_at is None
+
+
+@pytest.mark.django_db
+def test_messenger_cancel_only_cancels_matching_psid():
+    from messenger.bot_engine import handle_message
+
+    clinic, conn = _create_messenger_clinic("owner_cancel_psid", "PAGE-CANCEL-PSID")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient_one = Patient.objects.create(clinic=clinic, full_name="One", phone="09170000001")
+    patient_two = Patient.objects.create(clinic=clinic, full_name="Two", phone="09170000002")
+    first_start = timezone.now() + timedelta(days=1)
+    second_start = timezone.now() + timedelta(days=2)
+    appointment_one = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient_one,
+        service=service,
+        starts_at=first_start,
+        ends_at=first_start + timedelta(minutes=30),
+        source=Appointment.SOURCE_MESSENGER,
+        status=Appointment.STATUS_CONFIRMED,
+        messenger_psid="PSID-ONE",
+    )
+    appointment_two = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient_two,
+        service=service,
+        starts_at=second_start,
+        ends_at=second_start + timedelta(minutes=30),
+        source=Appointment.SOURCE_MESSENGER,
+        status=Appointment.STATUS_CONFIRMED,
+        messenger_psid="PSID-TWO",
+    )
+    session = MessengerSession.objects.create(connection=conn, psid="PSID-TWO")
+
+    handle_message(session, "cancel", "")
+
+    appointment_one.refresh_from_db()
+    appointment_two.refresh_from_db()
+    assert appointment_one.status == Appointment.STATUS_CONFIRMED
+    assert appointment_two.status == Appointment.STATUS_CANCELLED
+
+
+@pytest.mark.django_db
+@patch("messenger.views.requests.post")
+def test_direct_facebook_reply_logs_http_failures_without_token(mock_post, caplog):
+    from messenger.views import _send_facebook_reply
+
+    mock_post.return_value.raise_for_status.side_effect = requests.HTTPError(
+        "400 Client Error for token SECRET-PAGE-TOKEN"
+    )
+
+    _send_facebook_reply("SECRET-PAGE-TOKEN", "PSID1", [{"type": "text", "text": "Hello"}])
+
+    assert "Failed to send Messenger reply" in caplog.text
+    assert "SECRET-PAGE-TOKEN" not in caplog.text
 
 
 @pytest.mark.django_db
