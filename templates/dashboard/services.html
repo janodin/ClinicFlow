@@ -4,11 +4,13 @@
 <div x-data="{open:false, editModalOpen:false, tab:'active'}" class="cf-page">
   <div class="cf-page-header">
     <div>
-      <h1 class="ui-page-title">Services</h1>
-      <p class="mt-2 text-[var(--cf-muted)]">{{ active_services|length }} active · {{ archived_services|length }} archived</p>
+      <h1 class="cf-page-title ui-page-title">Services</h1>
+      <p class="cf-page-description">{{ active_services|length }} active · {{ archived_services|length }} archived</p>
     </div>
     {% if can_manage %}
-      <button @click="open=true" class="cf-btn cf-btn-primary">Add Service</button>
+      <div class="cf-page-actions">
+        <button @click="open=true" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add service</button>
+      </div>
     {% endif %}
   </div>
 
@@ -30,17 +32,23 @@
   </div>
 
   <!-- Add Modal -->
-  <div x-show="open" class="cf-modal-backdrop" x-cloak @click.away="open=false" x-on:service-created.camel="open=false">
-    <div id="add-modal-body" class="cf-modal max-w-xl p-6" @click.stop>
+  <div x-show="open" class="cf-modal-backdrop" x-cloak @click.self="open=false" x-on:service-created.camel="open=false">
+    <div id="add-modal-body" class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="add-service-modal-title" @click.stop>
       {% include "dashboard/partials/service_form.html" with service=None form=form %}
     </div>
   </div>
 
   <!-- Edit Modal -->
-  <div x-show="editModalOpen" class="cf-modal-backdrop" x-cloak @click.away="editModalOpen=false" x-on:service-saved.camel="editModalOpen=false">
-    <div id="edit-modal-body" class="cf-modal max-w-xl p-6" @click.stop>
-      <div class="flex items-center justify-center py-12">
-        <i data-lucide="loader-2" class="h-8 w-8 animate-spin text-[var(--cf-muted)]"></i>
+  <div x-show="editModalOpen" class="cf-modal-backdrop" x-cloak @click.self="editModalOpen=false" x-on:service-saved.camel="editModalOpen=false">
+    <div id="edit-modal-body" class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="edit-service-modal-title" @click.stop>
+      <div class="cf-modal-header sr-only">
+        <h2 id="edit-service-modal-title" class="cf-modal-title">Edit Service</h2>
+      </div>
+      <div class="cf-modal-body">
+        <div class="flex items-center justify-center py-8">
+          <i data-lucide="loader-2" class="h-6 w-6 animate-spin text-[var(--cf-muted)]"></i>
+          <span class="ml-2 text-sm text-[var(--cf-muted)]">Loading service form...</span>
+        </div>
       </div>
     </div>
   </div>

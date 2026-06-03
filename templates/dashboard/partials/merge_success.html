@@ -1,7 +1,7 @@
-<div class="soft-card rounded-3xl p-6 space-y-4">
-  <div class="rounded-2xl border border-cyan-100 bg-cyan-50 p-4 text-sm text-cyan-800">
-    <p class="font-black">Merge Complete</p>
+<div class="cf-card space-y-4">
+  <div class="rounded-[var(--cf-radius)] border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-4 text-sm text-[var(--cf-brand-strong)]">
+    <p class="font-semibold">Merge Complete</p>
     <p class="mt-1">All appointments have been moved to <strong>{{ primary.full_name }}</strong>.</p>
   </div>
-  <a href="{% url 'dashboard:patients' %}" class="inline-block rounded-2xl bg-cyan-700 px-5 py-3 font-black text-white shadow-lg shadow-cyan-700/20">Back to Patients</a>
+  <a href="{% url 'dashboard:patients' %}" class="cf-btn cf-btn-primary"><i data-lucide="arrow-left" class="h-4 w-4"></i>Back to Patients</a>
 </div>

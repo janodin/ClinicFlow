@@ -4,12 +4,9 @@ from django import forms
 
 from .models import Clinic, ClinicFAQ
 
-# Text inputs / textareas match PatientForm tailwind styling.
-# Selects use ui-input ui-select because <select> elements need
-# appearance:none plus a custom arrow and different padding handling.
-_INPUT = "w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition"
-_SELECT = "w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 bg-white focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition appearance-none"
-_TEXTAREA = "w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition resize-y"
+_INPUT = "cf-input"
+_SELECT = "cf-select"
+_TEXTAREA = "cf-textarea"
 _CHECKBOX = "cf-checkbox"
 _COLOR = "h-10 w-20 rounded-xl border border-[var(--cf-line)] p-1 cursor-pointer"
 

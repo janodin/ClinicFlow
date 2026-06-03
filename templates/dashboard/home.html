@@ -4,13 +4,15 @@
 <div class="cf-page">
 <div class="cf-page-header">
   <div>
-    <div class="cf-eyebrow"><span class="cf-pulse"></span> Clinic overview</div>
-    <h1 class="mt-2 ui-page-title">Good day, {{ request.user.display_name|default:"Clinic Team" }}</h1>
-    <p class="mt-2 text-sm text-[var(--cf-muted)]">{{ clinic.name }} · {{ clinic.timezone }}</p>
+    <h1 class="cf-page-title ui-page-title">Today at {{ clinic.name }}</h1>
+    <p class="cf-page-description">{{ today|date:"F j, Y" }} · {{ clinic.timezone }} · Active clinic: {{ clinic.name }}</p>
   </div>
-  <a href="{% url 'dashboard:appointments' %}" class="cf-btn cf-btn-primary"><i data-lucide="calendar-check" class="h-4 w-4"></i>View All Appointments</a>
+  <div class="cf-page-actions">
+    <a href="{% url 'dashboard:appointments' %}" class="cf-btn cf-btn-primary"><i data-lucide="calendar-plus" class="h-4 w-4"></i>New appointment</a>
+    <a href="{% url 'dashboard:patients' %}" class="cf-btn cf-btn-secondary"><i data-lucide="user-plus" class="h-4 w-4"></i>Add patient</a>
+  </div>
 </div>
-<div class="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
   <div class="cf-card cf-kpi">
     <div class="flex items-start justify-between">
       <div><p class="cf-kpi-label">Today</p><div class="cf-kpi-value">{{ metrics.today }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Scheduled today</p></div>
@@ -19,60 +21,82 @@
   </div>
   <div class="cf-card cf-kpi">
     <div class="flex items-start justify-between">
-      <div><p class="cf-kpi-label">Upcoming</p><div class="cf-kpi-value">{{ metrics.upcoming }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Booked & confirmed</p></div>
+      <div><p class="cf-kpi-label">Pending</p><div class="cf-kpi-value">{{ metrics.pending }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Requests to review</p></div>
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-status-pending-bg)] text-[var(--cf-status-pending-text)]"><i data-lucide="clock" class="h-5 w-5"></i></div>
+    </div>
+  </div>
+  <div class="cf-card cf-kpi">
+    <div class="flex items-start justify-between">
+      <div><p class="cf-kpi-label">Open slots</p><div class="cf-kpi-value">{{ open_slots_count }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">{% if slot_service and next_slot_label %}Next: {{ next_slot_label }}{% elif slot_service %}No slots left today{% else %}<a href="{% url 'dashboard:services' %}" class="font-black text-[var(--cf-brand)]">Configure services</a>{% endif %}</p></div>
       <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]"><i data-lucide="calendar-clock" class="h-5 w-5"></i></div>
     </div>
   </div>
   <div class="cf-card cf-kpi">
     <div class="flex items-start justify-between">
-      <div><p class="cf-kpi-label">Patients</p><div class="cf-kpi-value">{{ metrics.patients }}</div><p class="mt-2 text-sm text-[var(--cf-brand)]">All time</p></div>
+      <div><p class="cf-kpi-label">No-shows</p><div class="cf-kpi-value">{{ metrics.no_show }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Marked today</p></div>
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-status-no-show-bg)] text-[var(--cf-status-no-show-text)]"><i data-lucide="user-x" class="h-5 w-5"></i></div>
+    </div>
+  </div>
+</div>
+<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+  <div class="cf-card cf-kpi">
+    <div class="flex items-start justify-between">
+      <div><p class="cf-kpi-label">Upcoming</p><div class="cf-kpi-value">{{ metrics.upcoming }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Future bookings</p></div>
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]"><i data-lucide="calendar-days" class="h-5 w-5"></i></div>
+    </div>
+  </div>
+  <div class="cf-card cf-kpi">
+    <div class="flex items-start justify-between">
+      <div><p class="cf-kpi-label">Patients</p><div class="cf-kpi-value">{{ metrics.patients }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">All-time records</p></div>
       <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]"><i data-lucide="users" class="h-5 w-5"></i></div>
     </div>
   </div>
   <div class="cf-card cf-kpi">
     <div class="flex items-start justify-between">
-      <div><p class="cf-kpi-label">Cancelled</p><div class="cf-kpi-value">{{ metrics.cancelled }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">All time</p></div>
-      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]"><i data-lucide="calendar-x" class="h-5 w-5"></i></div>
-    </div>
-  </div>
-  <div class="cf-card cf-kpi">
-    <div class="flex items-start justify-between">
-      <div><p class="cf-kpi-label">Completed</p><div class="cf-kpi-value">{{ metrics.completed }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Visits done</p></div>
+      <div><p class="cf-kpi-label">Completed</p><div class="cf-kpi-value">{{ metrics.completed }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">All-time visits</p></div>
       <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-status-completed-bg)] text-[var(--cf-status-completed-text)]"><i data-lucide="circle-check" class="h-5 w-5"></i></div>
     </div>
   </div>
   <div class="cf-card cf-kpi">
     <div class="flex items-start justify-between">
-      <div><p class="cf-kpi-label">No-shows</p><div class="cf-kpi-value">{{ metrics.no_show }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Missed visits</p></div>
-      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-status-no-show-bg)] text-[var(--cf-status-no-show-text)]"><i data-lucide="user-x" class="h-5 w-5"></i></div>
+      <div><p class="cf-kpi-label">Cancelled</p><div class="cf-kpi-value">{{ metrics.cancelled }}</div><p class="mt-2 text-sm text-[var(--cf-muted)]">All-time cancellations</p></div>
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]"><i data-lucide="calendar-x" class="h-5 w-5"></i></div>
+    </div>
+  </div>
+  <div class="cf-card cf-kpi">
+    <div class="flex items-start justify-between">
+      <div><p class="cf-kpi-label">Widget health</p><div class="cf-kpi-value text-xl">Active</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Booking widget active</p></div>
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]"><i data-lucide="message-circle" class="h-5 w-5"></i></div>
     </div>
   </div>
 </div>
 {% if not metrics.patients and not metrics.today and not metrics.upcoming %}
 <section class="cf-card cf-empty-state">
   <div class="cf-icon-box h-16 w-16">
-    <i data-lucide="rocket" class="h-8 w-8"></i>
+    <i data-lucide="calendar-plus" class="h-8 w-8"></i>
   </div>
-  <h2 class="mt-4 text-lg font-black text-slate-800">Welcome to ClinicFlow</h2>
-  <p class="mt-2 max-w-md text-sm text-slate-400">Your dashboard is ready. Start by adding your first service and patient to see bookings come to life.</p>
+  <h2 class="mt-4 text-lg font-black text-[var(--cf-ink)]">Set up today's booking workspace</h2>
+  <p class="mt-2 max-w-md text-sm text-[var(--cf-muted)]">Add a service and your first appointment to start managing the clinic schedule.</p>
   <div class="mt-6 flex flex-wrap justify-center gap-3">
-    <a href="{% url 'dashboard:services' %}" class="cf-btn cf-btn-primary">Add Service</a>
+    <a href="{% url 'dashboard:services' %}" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add service</a>
   </div>
 </section>
 {% endif %}
 <div class="grid gap-6 xl:grid-cols-[1fr_380px]">
   <section class="cf-table-wrap">
-    <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-      <div><h2 class="text-xl font-black">Today's Schedule</h2><p class="text-slate-500">{{ appointments|length }} appointments</p></div>
+    <div class="cf-table-header">
+      <div><h2 class="cf-section-title">Today's schedule</h2><p class="cf-muted">{{ appointments|length }} appointments</p></div>
       <span class="cf-badge cf-badge-info">{{ appointments|length }} appointments</span>
     </div>
     <div class="overflow-x-auto">
       {% if appointments %}
       <table class="cf-table">
-        <thead class="text-xs uppercase tracking-wider text-[var(--cf-faint)]"><tr><th class="px-5 py-3">Patient</th><th class="px-5 py-3">Service</th><th class="px-5 py-3">Date & Time</th><th class="px-5 py-3">Source</th><th class="px-5 py-3">Status</th></tr></thead>
+        <thead class="text-xs uppercase tracking-wider text-[var(--cf-faint)]">
+          <tr><th class="px-5 py-3">Time</th><th class="px-5 py-3">Patient</th><th class="px-5 py-3">Service</th><th class="px-5 py-3">Source / payment</th><th class="px-5 py-3">Status</th></tr>
+        </thead>
         <tbody class="divide-y divide-[var(--cf-line-soft)]">
           {% for appointment in appointments %}
-            <tr><td class="p-5 font-black text-[var(--cf-ink)]">{{ appointment.patient.full_name }}<div class="font-normal text-[var(--cf-muted)]">{{ appointment.patient.phone }}</div></td><td>{{ appointment.service.name }}<div class="text-[var(--cf-muted)]">{{ appointment.service.effective_duration }} min</div></td><td>{{ appointment.starts_at|date:"M j, Y" }}<div class="text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }} - {{ appointment.ends_at|time:"g:i A" }}</div></td><td><span class="cf-badge cf-badge-info">{{ appointment.get_source_display }}</span></td><td><span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span></td></tr>
+            <tr><td class="p-5 font-black text-[var(--cf-ink)]">{{ appointment.starts_at|time:"g:i A" }}<div class="font-normal text-[var(--cf-muted)]">{{ appointment.ends_at|time:"g:i A" }}</div></td><td class="font-black text-[var(--cf-ink)]">{{ appointment.patient.full_name }}<div class="font-normal text-[var(--cf-muted)]">{{ appointment.patient.phone }}</div></td><td>{{ appointment.service.name }}<div class="text-[var(--cf-muted)]">{{ appointment.service.effective_duration }} min</div></td><td><span class="cf-badge cf-badge-info">{{ appointment.get_source_display }}</span><div class="mt-1 text-sm text-[var(--cf-muted)]">{{ appointment.get_payment_state_display }}</div></td><td><span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span></td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -81,14 +105,24 @@
         <div class="cf-icon-box h-16 w-16">
           <i data-lucide="calendar-x" class="h-8 w-8"></i>
         </div>
-        <p class="mt-4 text-sm font-semibold text-slate-700">No appointments today</p>
-        <p class="mt-1 text-sm text-slate-400">Your schedule is clear. Enjoy the day or add an appointment.</p>
-        <a href="{% url 'dashboard:appointments' %}" class="cf-btn cf-btn-primary mt-4">Go to Appointments</a>
+        <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No appointments today</p>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Your schedule is clear. Add an appointment when the clinic receives a booking.</p>
+        <a href="{% url 'dashboard:appointments' %}" class="cf-btn cf-btn-primary mt-4"><i data-lucide="calendar-plus" class="h-4 w-4"></i>New appointment</a>
       </div>
       {% endif %}
     </div>
   </section>
   <aside class="space-y-6">
+    <section class="cf-card p-6">
+      <div class="flex items-center justify-between"><h2 class="text-xl font-black text-[var(--cf-ink)]">Needs attention</h2><a class="text-sm font-black text-[var(--cf-brand)]" href="{% url 'dashboard:appointments' %}">Review all</a></div>
+      <div class="mt-5 space-y-4">
+        {% for appointment in needs_attention %}
+          <div class="rounded-2xl border border-[var(--cf-line-soft)] bg-[var(--cf-surface-warm)] p-4"><div class="flex items-start justify-between gap-3"><div><p class="font-black text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</p><p class="text-sm text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }} · {{ appointment.service.name }}</p></div><span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span></div></div>
+        {% empty %}
+          <p class="rounded-2xl border border-[var(--cf-line-soft)] bg-[var(--cf-surface-warm)] p-4 text-sm text-[var(--cf-muted)]">No pending or no-show items need front-desk review.</p>
+        {% endfor %}
+      </div>
+    </section>
     <section class="cf-card p-6">
       <div class="flex items-center justify-between"><h2 class="text-xl font-black text-[var(--cf-ink)]">Upcoming</h2><a class="text-sm font-black text-[var(--cf-brand)]" href="{% url 'dashboard:appointments' %}">See all</a></div>
       <div class="mt-5 space-y-4">
@@ -99,15 +133,15 @@
           <div class="grid h-14 w-14 place-items-center rounded-2xl bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]">
             <i data-lucide="calendar-off" class="h-7 w-7"></i>
           </div>
-          <p class="mt-3 text-sm font-semibold text-slate-700">No upcoming appointments</p>
-          <p class="mt-1 text-sm text-slate-400">New bookings will appear here.</p>
+          <p class="mt-3 text-sm font-semibold text-[var(--cf-ink)]">No upcoming appointments</p>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">New bookings will appear here.</p>
         </div>
         {% endfor %}
       </div>
     </section>
     <section class="cf-card p-5">
       <p class="text-xs font-black uppercase tracking-widest text-[var(--cf-faint)]">Widget</p>
-      <h2 class="mt-2 text-xl font-black text-[var(--cf-ink)]">Smart booking active</h2>
+      <h2 class="mt-2 text-xl font-black text-[var(--cf-ink)]">Booking widget active</h2>
       <p class="mt-2 text-sm text-[var(--cf-muted)]">Your widget is linked to <code>{{ clinic.slug }}</code>.</p>
       <a href="{% url 'dashboard:assistant_settings' %}" class="cf-btn cf-btn-primary mt-4"><i data-lucide="settings" class="h-4 w-4"></i>Configure Widget</a>
     </section>

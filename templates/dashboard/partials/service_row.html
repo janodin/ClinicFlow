@@ -10,7 +10,7 @@
         <span class="inline-flex items-center rounded-full bg-[var(--cf-status-no-show-bg)] px-2.5 py-1 text-xs font-bold text-[var(--cf-status-no-show-text)]">Inactive</span>
       {% endif %}
     </div>
-    <h2 class="mt-3 text-xl font-[850] text-[var(--cf-ink)]">{{ service.name }}</h2>
+    <h2 class="mt-3 cf-section-title">{{ service.name }}</h2>
     <p class="mt-1.5 text-sm text-[var(--cf-muted)]">{{ service.effective_duration }} minutes</p>
     {% if service.display_price %}
       <p class="mt-1 text-sm text-[var(--cf-muted)]">₱ {{ service.price }}</p>
@@ -26,8 +26,8 @@
         hx-target="#edit-modal-body"
         hx-swap="innerHTML"
         @click="editModalOpen=true"
-        class="cf-btn cf-btn-sm cf-btn-secondary"
-      >Edit</button>
+        class="cf-btn cf-btn-sm cf-btn-secondary cf-service-edit-action"
+      ><i data-lucide="pencil" class="h-4 w-4"></i>Edit</button>
       <form
         hx-post="{% url 'dashboard:archive_service' service.id %}"
         hx-target="#services-list-container"
@@ -35,7 +35,7 @@
         class="inline"
       >
         {% csrf_token %}
-        <button type="submit" class="cf-btn cf-btn-sm cf-btn-danger">Archive</button>
+        <button type="submit" class="cf-btn cf-btn-sm cf-btn-muted cf-service-archive-action"><i data-lucide="archive" class="h-4 w-4"></i>Archive</button>
       </form>
       <form
         hx-post="{% url 'dashboard:toggle_service' service.id %}"
@@ -44,7 +44,8 @@
         class="inline"
       >
         {% csrf_token %}
-        <button type="submit" class="cf-btn cf-btn-sm cf-btn-ghost" aria-label="Toggle {{ service.name }} active status">
+        <button type="submit" class="cf-btn cf-btn-sm {% if service.is_active %}cf-btn-danger{% else %}cf-btn-primary{% endif %}" aria-label="Toggle {{ service.name }} active status">
+          <i data-lucide="power" class="h-4 w-4"></i>
           {{ service.is_active|yesno:"Deactivate,Activate" }}
         </button>
       </form>
@@ -56,7 +57,7 @@
         class="inline"
       >
         {% csrf_token %}
-        <button type="submit" class="cf-btn cf-btn-sm cf-btn-primary">Restore</button>
+        <button type="submit" class="cf-btn cf-btn-sm cf-btn-primary"><i data-lucide="rotate-ccw" class="h-4 w-4"></i>Restore</button>
       </form>
     {% endif %}
   </div>

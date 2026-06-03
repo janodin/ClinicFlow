@@ -9,7 +9,7 @@
       <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No active services</p>
       <p class="mt-1 text-sm text-[var(--cf-muted)]">Add your first service so patients can book appointments.</p>
       {% if can_manage %}
-        <button @click="open=true" class="cf-btn cf-btn-primary mt-4">Add Service</button>
+        <button @click="open=true" class="cf-btn cf-btn-primary mt-4"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add Service</button>
       {% endif %}
     </div>
   {% endfor %}

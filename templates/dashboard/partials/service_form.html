@@ -6,30 +6,33 @@
   {% endif %}
   hx-target="#{% if service %}edit{% else %}add{% endif %}-modal-body"
   hx-swap="innerHTML"
-  class="space-y-4"
 >
   {% csrf_token %}
-  <div class="flex items-center justify-between mb-4 pb-4 border-b border-[var(--cf-line-soft)]">
-    <h2 class="text-[var(--cf-section-title-size)] font-[850] text-[var(--cf-ink)]">{% if service %}Edit Service{% else %}Add New Service{% endif %}</h2>
-    <button type="button" @click="{% if service %}editModalOpen{% else %}open{% endif %}=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0" aria-label="Close modal">
+  <div class="cf-modal-header flex items-center justify-between">
+    <h2 id="{% if service %}edit-service-modal-title{% else %}add-service-modal-title{% endif %}" class="cf-modal-title">{% if service %}Edit Service{% else %}Add New Service{% endif %}</h2>
+    <button type="button" @click="{% if service %}editModalOpen{% else %}open{% endif %}=false" class="cf-icon-btn" aria-label="Close modal">
       <i data-lucide="x" class="h-5 w-5"></i>
     </button>
   </div>
-  {% if form.non_field_errors %}
-    <div class="rounded-[var(--cf-radius-lg)] bg-[var(--cf-status-cancelled-bg)] p-3 text-sm text-[var(--cf-status-cancelled-text)]">
-      {{ form.non_field_errors.0 }}
-    </div>
-  {% endif %}
-  <div class="space-y-3">
-    {% for field in form %}
-      <div class="cf-field">
-        <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
-        {{ field }}
-        {% if field.errors %}
-          <p class="mt-1 text-xs text-[var(--cf-red)]">{{ field.errors.0 }}</p>
-        {% endif %}
+  <div class="cf-modal-body space-y-4">
+    {% if form.non_field_errors %}
+      <div class="cf-error rounded-[var(--cf-radius-lg)] bg-[var(--cf-status-cancelled-bg)] p-3">
+        {{ form.non_field_errors.0 }}
       </div>
-    {% endfor %}
+    {% endif %}
+    <div class="space-y-3">
+      {% for field in form %}
+        <div class="cf-field">
+          <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
+          {{ field }}
+          {% if field.errors %}
+            <p class="cf-error">{{ field.errors.0 }}</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
   </div>
-  <button type="submit" class="cf-btn cf-btn-primary w-full">{% if service %}Save Changes{% else %}Create Service{% endif %}</button>
+  <div class="cf-modal-footer">
+    <button type="submit" class="cf-btn cf-btn-primary w-full"><i data-lucide="{% if service %}save{% else %}plus-circle{% endif %}" class="h-4 w-4"></i>{% if service %}Save Changes{% else %}Create Service{% endif %}</button>
+  </div>
 </form>

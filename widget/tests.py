@@ -51,12 +51,12 @@ class WidgetTests(TestCase):
         content = response.content.decode()
 
         self.assertNotIn("alert(1)", content)
-        self.assertIn("#0891b2", content)
+        self.assertIn("#06b6d4", content)
 
     def test_safe_widget_accent_color_falls_back_for_invalid_stored_value(self):
         Clinic.objects.filter(pk=self.clinic.pk).update(widget_accent_color='";alert(1)//')
         self.clinic.refresh_from_db()
-        self.assertEqual(self.clinic.safe_widget_accent_color, "#0891b2")
+        self.assertEqual(self.clinic.safe_widget_accent_color, "#06b6d4")
 
         Clinic.objects.filter(pk=self.clinic.pk).update(widget_accent_color="#123abc")
         self.clinic.refresh_from_db()
@@ -70,6 +70,12 @@ class WidgetTests(TestCase):
         self.assertNotContains(resp, "Doctor")
         self.assertNotContains(resp, "First available")
 
+    def test_widget_home_uses_plain_preview_background(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "cf-gradient-mesh")
+
     def test_widget_accent_color_is_escaped_in_script(self):
         dangerous = '";alert(1)//'
         Clinic.objects.filter(pk=self.clinic.pk).update(widget_accent_color=dangerous)
@@ -79,7 +85,7 @@ class WidgetTests(TestCase):
 
         self.assertNotIn(dangerous, content)
         self.assertNotIn("alert(1)", content)
-        self.assertIn("#0891b2", content)
+        self.assertIn("#06b6d4", content)
         self.assertIn("accentColor:", content)
 
     def test_widget_slots_returns_partial(self):

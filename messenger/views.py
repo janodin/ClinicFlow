@@ -110,6 +110,12 @@ def _active_connection_for_page(page_id):
         return None
 
 
+def _meta_app_secret_for_connection(connection):
+    if not connection:
+        return ""
+    return connection.app_secret or getattr(settings, "MESSENGER_APP_SECRET", "")
+
+
 def _verified_messenger_connections_for_request(request):
     signature = request.headers.get("X-Hub-Signature-256", "")
     if not signature:
@@ -117,12 +123,11 @@ def _verified_messenger_connections_for_request(request):
 
     verified = {}
     connections = MessengerConnection.objects.select_related("clinic").filter(
-        app_secret__gt="",
         is_active=True,
         clinic__is_active=True,
     )
     for connection in connections:
-        if verify_signature(request.body, signature, connection.app_secret):
+        if verify_signature(request.body, signature, _meta_app_secret_for_connection(connection)):
             verified[connection.page_id] = connection
     return verified
 
@@ -196,10 +201,11 @@ def meta_signature_verify(request):
         return JsonResponse({"verified": False}, status=200)
 
     connection = _active_connection_for_page(page_id)
+    app_secret = _meta_app_secret_for_connection(connection)
     signature_valid = bool(
         connection
-        and connection.app_secret
-        and verify_signature(raw_body.encode("utf-8"), signature, connection.app_secret)
+        and app_secret
+        and verify_signature(raw_body.encode("utf-8"), signature, app_secret)
     )
     verified = False
     if signature_valid:

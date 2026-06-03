@@ -1,13 +1,24 @@
 <div x-show="patientOpen" class="cf-modal-backdrop" x-cloak @click.self="patientOpen=false">
-  <form method="post" action="{% url 'dashboard:create_patient' %}" class="cf-modal max-w-xl space-y-4 p-6">
+  <form method="post" action="{% url 'dashboard:create_patient' %}" class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="add-patient-modal-title">
     {% csrf_token %}
-    <div class="flex items-center justify-between">
-      <h2 class="text-xl font-black text-[var(--cf-ink)]">Add New Patient</h2>
-      <button type="button" @click="patientOpen=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0">
+    <div class="cf-modal-header flex items-center justify-between">
+      <h2 id="add-patient-modal-title" class="cf-modal-title">Add New Patient</h2>
+      <button type="button" @click="patientOpen=false" class="cf-icon-btn" aria-label="Close">
         <i data-lucide="x" class="h-5 w-5"></i>
       </button>
     </div>
-    {{ patient_form.as_p }}
-    <button class="cf-btn cf-btn-primary w-full">Add Patient</button>
+    <div class="cf-modal-body grid gap-4 md:grid-cols-2">
+      {% for field in patient_form %}
+        <div class="cf-field {% if field.name == 'notes' %}md:col-span-2{% endif %}">
+          <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="cf-help">{{ field.help_text }}</p>{% endif %}
+          {% if field.errors %}<p class="cf-error">{{ field.errors.0 }}</p>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <div class="cf-modal-footer">
+      <button class="cf-btn cf-btn-primary w-full"><i data-lucide="user-plus" class="h-4 w-4"></i>Add Patient</button>
+    </div>
   </form>
 </div>

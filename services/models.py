@@ -19,7 +19,7 @@ class Service(TimeStampedModel):
     is_active = models.BooleanField(default=True)
     is_archived = models.BooleanField(default=False)
     display_price = models.BooleanField(default=True)
-    color = models.CharField(max_length=7, default="#0891b2")
+    color = models.CharField(max_length=7, default="#06b6d4")
 
     class Meta:
         ordering = ["name"]

@@ -184,14 +184,14 @@ def embed_js(request, clinic_slug):
   var launcher = document.createElement('button');
   launcher.setAttribute('aria-label', 'Open booking widget');
   launcher.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-  launcher.style.cssText = 'position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;border:none;z-index:9999;background:' + accent + ';color:white;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;transition:transform .2s;';
+  launcher.style.cssText = 'position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:60px;height:60px;border-radius:50%;border:none;z-index:9999;background:' + accent + ';color:white;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;transition:transform .2s;';
   launcher.addEventListener('mouseenter', function() {{ launcher.style.transform = 'scale(1.05)'; }});
   launcher.addEventListener('mouseleave', function() {{ launcher.style.transform = 'scale(1)'; }});
   launcher.addEventListener('click', function() {{
     if (!iframe) {{
       iframe = document.createElement('iframe');
       iframe.src = src;
-      iframe.style.cssText = 'position:fixed;bottom:24px;right:24px;width:420px;max-width:calc(100vw - 24px);height:680px;max-height:calc(100vh - 24px);border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);opacity:0;transform:translateY(20px);transition:opacity .3s, transform .3s;';
+      iframe.style.cssText = 'position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);opacity:0;transform:translateY(20px);transition:opacity .3s, transform .3s;';
       iframe.allow = 'clipboard-write';
       document.body.appendChild(iframe);
       requestAnimationFrame(function() {{ iframe.style.opacity = '1'; iframe.style.transform = 'translateY(0)'; }});

@@ -1,38 +1,40 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Slot Preview{% endblock %}
 {% block content %}
-<div class="space-y-6">
-  <div><h1 class="ui-page-title">Slot Preview</h1><p class="mt-2 text-slate-500">Preview available slots for a service on a specific date.</p></div>
-  <form method="post" class="soft-card rounded-3xl p-6">
+<div class="cf-page">
+  <div class="cf-page-header">
+    <div><h1 class="cf-page-title ui-page-title">Slot Preview</h1><p class="cf-page-description">Preview available slots for a service on a specific date.</p></div>
+  </div>
+  <form method="post" class="cf-card p-6">
     {% csrf_token %}
     <div class="grid gap-4 md:grid-cols-2">
-      <div>
-        <label class="mb-1 block text-sm font-bold text-slate-600">Service</label>
-        <select name="service" required class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 bg-white focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition appearance-none">
+      <div class="cf-field">
+        <label for="slot-preview-service" class="cf-label">Service</label>
+        <select id="slot-preview-service" name="service" required class="cf-select">
           <option value="">Select service</option>
           {% for s in services %}<option value="{{ s.id }}" {% if selected_service.id == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
         </select>
       </div>
-      <div>
-        <label class="mb-1 block text-sm font-bold text-slate-600">Date</label>
-        <input type="date" name="date" value="{{ selected_date|date:'Y-m-d' }}" required class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition">
+      <div class="cf-field">
+        <label for="slot-preview-date" class="cf-label">Date</label>
+        <input id="slot-preview-date" type="date" name="date" value="{{ selected_date|date:'Y-m-d' }}" required class="cf-input">
       </div>
     </div>
     <div class="mt-4">
-      <button class="rounded-2xl bg-cyan-700 px-6 py-3 font-black text-white">Preview Slots</button>
+      <button class="cf-btn cf-btn-primary"><i data-lucide="eye" class="h-4 w-4"></i>Preview Slots</button>
     </div>
   </form>
   {% if selected_date %}
-  <section class="soft-card rounded-3xl p-6">
-    <h2 class="mb-4 text-xl font-black">Available Slots on {{ selected_date|date:"M j, Y" }}</h2>
+  <section class="cf-card p-6">
+    <h2 class="cf-section-title mb-4">Available Slots on {{ selected_date|date:"M j, Y" }}</h2>
     {% if slots %}
       <div class="flex flex-wrap gap-2">
         {% for slot in slots %}
-          <span class="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{{ slot.label }}</span>
+          <span class="cf-badge cf-badge-active">{{ slot.label }}</span>
         {% endfor %}
       </div>
     {% else %}
-      <p class="text-slate-500">No available slots for this selection.</p>
+      <p class="cf-muted">No available slots for this selection.</p>
     {% endif %}
   </section>
   {% endif %}

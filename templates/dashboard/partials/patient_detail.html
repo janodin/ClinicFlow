@@ -8,15 +8,37 @@
 
   <!-- Appointment Detail Modal -->
   <div x-show="detailOpen" class="cf-modal-backdrop" x-cloak @click.self="detailOpen=false">
-    <div class="cf-modal max-w-2xl" @click.stop>
-      <div id="detail-modal-body" class="p-6"></div>
+    <div class="cf-modal cf-modal-lg" role="dialog" aria-modal="true" aria-labelledby="appointment-detail-modal-title" @click.stop>
+      <div id="detail-modal-body">
+        <div class="cf-modal-header sr-only">
+          <h2 id="appointment-detail-modal-title" class="cf-modal-title">Appointment details</h2>
+        </div>
+        <div class="cf-modal-body">
+          <div class="flex items-center justify-center py-8">
+            <i data-lucide="loader-2" class="h-6 w-6 animate-spin text-[var(--cf-muted)]"></i>
+            <span class="ml-2 text-sm text-[var(--cf-muted)]">Loading appointment details...</span>
+          </div>
+        </div>
+        <div class="cf-modal-footer sr-only"></div>
+      </div>
     </div>
   </div>
 
   <!-- Edit Patient Modal -->
   <div x-show="editOpen" class="cf-modal-backdrop" x-cloak @click.self="editOpen=false">
-    <div class="cf-modal max-w-xl" @click.stop>
-      <div id="edit-modal-body" class="p-6"></div>
+    <div class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="patient-edit-modal-title" @click.stop>
+      <div id="edit-modal-body">
+        <div class="cf-modal-header sr-only">
+          <h2 id="patient-edit-modal-title" class="cf-modal-title">Edit patient</h2>
+        </div>
+        <div class="cf-modal-body">
+          <div class="flex items-center justify-center py-8">
+            <i data-lucide="loader-2" class="h-6 w-6 animate-spin text-[var(--cf-muted)]"></i>
+            <span class="ml-2 text-sm text-[var(--cf-muted)]">Loading patient form...</span>
+          </div>
+        </div>
+        <div class="cf-modal-footer sr-only"></div>
+      </div>
     </div>
   </div>
 </div>

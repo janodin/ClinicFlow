@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Q
 from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
@@ -93,7 +93,7 @@ def _validated_business_hour_rows(request):
 
 def _redirect_with_appointment_error(request, message):
     if request.headers.get("HX-Request"):
-        return HttpResponse(f'<p class="text-sm text-rose-600">{message}</p>', status=400)
+        return HttpResponse(f'<p class="cf-error">{message}</p>')
     messages.error(request, message)
     return redirect("dashboard:appointments")
 
@@ -104,23 +104,52 @@ def _require_settings_permission(user):
         raise PermissionDenied
 
 
+def _calendar_modal_trigger(message, *, close=False, refetch=True):
+    trigger = {"toast-message": {"message": message, "type": "success"}}
+    if refetch:
+        trigger["calendar-refetch"] = True
+    if close:
+        trigger["close-calendar-modal"] = True
+    return json.dumps(trigger)
+
+
 @login_required
 def home(request):
     clinic = _clinic_or_redirect(request, allow_missing=True)
     if not clinic:
         return redirect("accounts:signup")
-    today = timezone.localdate()
-    appointments = clinic.appointments.select_related("patient", "service").filter(starts_at__date=today)
+    clinic_tz = ZoneInfo(clinic.timezone)
+    today = timezone.localdate(timezone.now(), clinic_tz)
+    day_start = datetime.combine(today, time.min, clinic_tz)
+    day_end = day_start + timedelta(days=1)
+    appointments = clinic.appointments.select_related("patient", "service").filter(starts_at__gte=day_start, starts_at__lt=day_end)
+    pending_appointments = clinic.appointments.select_related("patient", "service").filter(status=Appointment.STATUS_PENDING)
+    needs_attention = appointments.filter(status__in=[Appointment.STATUS_PENDING, Appointment.STATUS_NO_SHOW])[:6]
     upcoming = clinic.appointments.select_related("patient", "service").filter(starts_at__gte=timezone.now()).exclude(status=Appointment.STATUS_CANCELLED)[:5]
+    slot_service = clinic.services.filter(is_active=True, is_archived=False).first()
+    open_slots = generate_slots(clinic, slot_service, today) if slot_service else []
     metrics = {
         "today": appointments.count(),
+        "pending": pending_appointments.count(),
         "upcoming": clinic.appointments.filter(starts_at__gte=timezone.now()).exclude(status=Appointment.STATUS_CANCELLED).count(),
         "patients": clinic.patients.count(),
         "cancelled": clinic.appointments.filter(status=Appointment.STATUS_CANCELLED).count(),
         "completed": clinic.appointments.filter(status=Appointment.STATUS_COMPLETED).count(),
-        "no_show": clinic.appointments.filter(status=Appointment.STATUS_NO_SHOW).count(),
+        "no_show": appointments.filter(status=Appointment.STATUS_NO_SHOW).count(),
     }
-    return render(request, "dashboard/home.html", {"clinic": clinic, "appointments": appointments, "upcoming": upcoming, "metrics": metrics})
+    context = {
+        "clinic": clinic,
+        "appointments": appointments,
+        "upcoming": upcoming,
+        "metrics": metrics,
+        "today": today,
+        "needs_attention": needs_attention,
+        "open_slots_count": len(open_slots),
+        "next_slot_label": open_slots[0]["label"] if open_slots else "",
+        "slot_service": slot_service,
+    }
+    with timezone.override(clinic_tz):
+        return render(request, "dashboard/home.html", context)
 
 
 @login_required
@@ -128,7 +157,7 @@ def calendar(request):
     clinic = _clinic_or_redirect(request, allow_missing=True)
     if not clinic:
         return redirect("accounts:signup")
-    return render(request, "dashboard/calendar.html", {"clinic": clinic})
+    return render(request, "dashboard/calendar.html", {"clinic": clinic, "status_choices": Appointment.STATUS_CHOICES})
 
 
 @login_required
@@ -151,14 +180,25 @@ def calendar_events(request):
 
     service = request.GET.get("service")
     if service:
-        qs = qs.filter(service_id=service)
+        try:
+            service_id = int(service)
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "Invalid service filter."}, status=400)
+        _, max_service_id = connection.ops.integer_field_range("BigAutoField")
+        if service_id < 1 or (max_service_id is not None and service_id > max_service_id):
+            return JsonResponse({"error": "Invalid service filter."}, status=400)
+        qs = qs.filter(service_id=service_id)
+
+    status = request.GET.get("status")
+    if status:
+        qs = qs.filter(status=status)
 
     color_map = {
-        Appointment.STATUS_PENDING: {"backgroundColor": "#fff3d9", "borderColor": "#9b6b21", "textColor": "#8a5a10"},
-        Appointment.STATUS_CONFIRMED: {"backgroundColor": "#e2f2ff", "borderColor": "#276a8f", "textColor": "#245d82"},
-        Appointment.STATUS_COMPLETED: {"backgroundColor": "#e7f3ee", "borderColor": "#0f6b55", "textColor": "#0f6b55"},
-        Appointment.STATUS_CANCELLED: {"backgroundColor": "#fbe5e2", "borderColor": "#b94444", "textColor": "#a73f3f"},
-        Appointment.STATUS_NO_SHOW: {"backgroundColor": "#ece8e1", "borderColor": "#5f6870", "textColor": "#5f6870"},
+        Appointment.STATUS_PENDING: {"backgroundColor": "#fff6e7", "borderColor": "#80531f", "textColor": "#80531f"},
+        Appointment.STATUS_CONFIRMED: {"backgroundColor": "#ecfeff", "borderColor": "#06b6d4", "textColor": "#0e7490"},
+        Appointment.STATUS_COMPLETED: {"backgroundColor": "#e9f7ef", "borderColor": "#0f766e", "textColor": "#0f766e"},
+        Appointment.STATUS_CANCELLED: {"backgroundColor": "#fde8ef", "borderColor": "#ea2261", "textColor": "#b3194a"},
+        Appointment.STATUS_NO_SHOW: {"backgroundColor": "#edf2f7", "borderColor": "#4a5870", "textColor": "#4a5870"},
     }
 
     for appointment in qs:
@@ -172,7 +212,7 @@ def calendar_events(request):
                 "start": appointment.starts_at.isoformat(),
                 "end": appointment.ends_at.isoformat(),
                 "className": f"status-{appointment.status}",
-                "url": reverse("dashboard:appointment_detail", args=[appointment.id]),
+                "url": f"{reverse('dashboard:appointment_detail', args=[appointment.id])}?source=calendar",
                 **colors,
             }
         )
@@ -265,6 +305,14 @@ def calendar_reschedule(request):
 def appointments(request):
     clinic = _clinic_or_redirect(request)
     qs = clinic.appointments.select_related("patient", "service").all()
+    search_query = request.GET.get("q", "").strip()
+    if search_query:
+        qs = qs.filter(
+            Q(patient__full_name__icontains=search_query)
+            | Q(patient__phone__icontains=search_query)
+            | Q(service__name__icontains=search_query)
+            | Q(reference_code__icontains=search_query)
+        )
     status = request.GET.get("status")
     if status:
         qs = qs.filter(status=status)
@@ -284,7 +332,7 @@ def appointments(request):
     if payment_filter:
         qs = qs.filter(payment_state=payment_filter)
     qs = qs.order_by("-starts_at")
-    paginator = Paginator(qs, 20)
+    paginator = Paginator(qs, 10)
     page_number = request.GET.get("page", 1)
     page_obj = paginator.get_page(page_number)
     form = StaffAppointmentForm(clinic)
@@ -295,6 +343,7 @@ def appointments(request):
         "form": form,
         "patient_form": PatientForm(clinic=clinic),
         "services": clinic.services.filter(is_archived=False),
+        "search_query": search_query,
         "status": status,
         "date_from": date_from,
         "date_to": date_to,
@@ -341,7 +390,17 @@ def create_appointment(request):
 def appointment_detail(request, pk):
     clinic = _clinic_or_redirect(request)
     appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
-    context = {"clinic": clinic, "appointment": appointment, "status_form": AppointmentStatusForm(instance=appointment), "note_form": AppointmentNoteForm(), "init_mode": request.GET.get("mode", "detail")}
+    init_mode = request.GET.get("mode", "detail")
+    if init_mode not in {"detail", "cancel", "reschedule"}:
+        init_mode = "detail"
+    context = {
+        "clinic": clinic,
+        "appointment": appointment,
+        "status_form": AppointmentStatusForm(instance=appointment),
+        "note_form": AppointmentNoteForm(),
+        "init_mode": init_mode,
+        "source": request.GET.get("source", ""),
+    }
     return render(request, "dashboard/partials/appointment_detail.html", context)
 
 
@@ -368,11 +427,25 @@ def appointment_edit(request, pk):
                 appointment.save()
             else:
                 if request.headers.get("HX-Request"):
-                    return render(request, "dashboard/partials/appointment_form.html", {"form": form, "appointment": appointment, "patient_form": PatientForm(clinic=clinic)})
+                    return render(request, "dashboard/partials/appointment_form.html", {
+                        "form": form,
+                        "appointment": appointment,
+                        "patient_form": PatientForm(clinic=clinic),
+                        "source": request.POST.get("modal_source", ""),
+                    })
                 messages.error(request, form.errors.as_text())
                 return redirect("dashboard:appointments")
         if form.is_valid():
             if request.headers.get("HX-Request"):
+                if request.POST.get("modal_source") == "calendar":
+                    response = render(request, "dashboard/partials/appointment_detail.html", {
+                        "appointment": appointment,
+                        "status_form": AppointmentStatusForm(instance=appointment),
+                        "note_form": AppointmentNoteForm(),
+                        "source": "calendar",
+                    })
+                    response["HX-Trigger"] = _calendar_modal_trigger("Appointment updated.")
+                    return response
                 response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
                 response["HX-Retarget"] = f"#appointment-row-{appointment.id}"
                 response["HX-Reswap"] = "outerHTML"
@@ -386,7 +459,12 @@ def appointment_edit(request, pk):
     else:
         form = StaffAppointmentForm(clinic, instance=appointment)
         if request.headers.get("HX-Request"):
-            return render(request, "dashboard/partials/appointment_form.html", {"form": form, "appointment": appointment, "patient_form": PatientForm(clinic=clinic)})
+            return render(request, "dashboard/partials/appointment_form.html", {
+                "form": form,
+                "appointment": appointment,
+                "patient_form": PatientForm(clinic=clinic),
+                "source": request.GET.get("source", ""),
+            })
         return redirect("dashboard:appointments")
 
 
@@ -405,6 +483,10 @@ def appointment_cancel(request, pk):
     appointment.cancellation_reason = reason
     appointment.save()
     if request.headers.get("HX-Request"):
+        if request.POST.get("modal_source") == "calendar":
+            response = HttpResponse("")
+            response["HX-Trigger"] = _calendar_modal_trigger("Appointment cancelled.", close=True)
+            return response
         response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
         response["HX-Retarget"] = f"#appointment-row-{appointment.pk}"
         response["HX-Reswap"] = "outerHTML"
@@ -461,6 +543,10 @@ def appointment_reschedule(request, pk):
         appointment.ends_at = new_ends_at
         appointment.save()
     if request.headers.get("HX-Request"):
+        if request.POST.get("modal_source") == "calendar":
+            response = HttpResponse("")
+            response["HX-Trigger"] = _calendar_modal_trigger("Appointment rescheduled.", close=True)
+            return response
         response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
         response["HX-Retarget"] = f"#appointment-row-{appointment.pk}"
         response["HX-Reswap"] = "outerHTML"
@@ -522,18 +608,27 @@ def update_appointment(request, pk):
     clinic = _clinic_or_redirect(request)
     appointment = get_object_or_404(clinic.appointments, pk=pk)
     form = AppointmentStatusForm(request.POST, instance=appointment)
-    if form.is_valid():
+    updated = form.is_valid()
+    if updated:
         form.save()
         messages.success(request, "Appointment updated.")
+    else:
+        appointment.refresh_from_db()
     if request.headers.get("HX-Request"):
         response = render(request, "dashboard/partials/appointment_detail.html", {
             "appointment": appointment,
-            "status_form": AppointmentStatusForm(instance=appointment),
+            "status_form": AppointmentStatusForm(instance=appointment) if updated else form,
             "note_form": AppointmentNoteForm(),
+            "source": request.POST.get("modal_source", ""),
         })
-        response["HX-Trigger"] = json.dumps({
-            "toast-message": {"message": "Appointment updated.", "type": "success"}
-        })
+        if not updated:
+            return response
+        if request.POST.get("modal_source") == "calendar":
+            response["HX-Trigger"] = _calendar_modal_trigger("Appointment updated.")
+        else:
+            response["HX-Trigger"] = json.dumps({
+                "toast-message": {"message": "Appointment updated.", "type": "success"}
+            })
         return response
     return redirect("dashboard:appointments")
 
@@ -544,7 +639,8 @@ def add_appointment_note(request, pk):
     clinic = _clinic_or_redirect(request)
     appointment = get_object_or_404(clinic.appointments, pk=pk)
     form = AppointmentNoteForm(request.POST)
-    if form.is_valid():
+    added = form.is_valid()
+    if added:
         note = form.save(commit=False)
         note.appointment = appointment
         note.author = request.user
@@ -554,11 +650,17 @@ def add_appointment_note(request, pk):
         response = render(request, "dashboard/partials/appointment_detail.html", {
             "appointment": appointment,
             "status_form": AppointmentStatusForm(instance=appointment),
-            "note_form": AppointmentNoteForm(),
+            "note_form": AppointmentNoteForm() if added else form,
+            "source": request.POST.get("modal_source", ""),
         })
-        response["HX-Trigger"] = json.dumps({
-            "toast-message": {"message": "Note added.", "type": "success"}
-        })
+        if not added:
+            return response
+        if request.POST.get("modal_source") == "calendar":
+            response["HX-Trigger"] = _calendar_modal_trigger("Note added.", refetch=False)
+        else:
+            response["HX-Trigger"] = json.dumps({
+                "toast-message": {"message": "Note added.", "type": "success"}
+            })
         return response
     return redirect("dashboard:appointments")
 

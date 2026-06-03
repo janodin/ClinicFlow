@@ -1,22 +1,24 @@
-<div class="text-center">
-  <div class="mx-auto grid h-16 w-16 place-items-center rounded-full text-white" style="background-color: {{ clinic.safe_widget_accent_color }}">
-    <i data-lucide="check" class="h-8 w-8"></i>
+<div class="text-center text-[var(--cf-ink)]">
+  <div class="cf-gradient-mesh rounded-3xl p-4">
+    <div class="mx-auto grid h-16 w-16 place-items-center rounded-full text-white" style="background-color: {{ clinic.safe_widget_accent_color }}">
+      <i data-lucide="check" class="h-8 w-8"></i>
+    </div>
+    <h2 class="mt-4 text-xl font-black">Booking Confirmed!</h2>
+    <p class="mt-2 text-sm text-[var(--cf-muted)]">Your appointment has been successfully booked.</p>
   </div>
-  <h2 class="mt-4 text-xl font-black">Booking Confirmed!</h2>
-  <p class="mt-2 text-sm text-slate-500">Your appointment has been successfully booked.</p>
 
   <div class="mt-4 rounded-2xl p-4 text-white" style="background-color: {{ clinic.safe_widget_accent_color }}">
     <p class="text-xs font-medium opacity-90">Reference Code</p>
     <p class="text-lg font-black tracking-wider" data-testid="reference-code">{{ appointment.reference_code }}</p>
   </div>
 
-  <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left text-sm space-y-2">
-    <div class="flex justify-between py-1"><span class="text-slate-500">Service</span><strong class="text-slate-800">{{ appointment.service.name }}</strong></div>
-    <div class="flex justify-between py-1"><span class="text-slate-500">Clinic</span><strong class="text-slate-800">{{ clinic.name }}</strong></div>
-    <div class="flex justify-between py-1"><span class="text-slate-500">Date</span><strong class="text-slate-800">{{ appointment.starts_at|date:"M j, Y" }}</strong></div>
-    <div class="flex justify-between py-1"><span class="text-slate-500">Time</span><strong class="text-slate-800">{{ appointment.starts_at|time:"g:i A" }}</strong></div>
-    <div class="flex justify-between py-1"><span class="text-slate-500">Patient</span><strong class="text-slate-800">{{ appointment.patient.full_name }}</strong></div>
+  <div class="mt-4 space-y-2 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-left text-sm">
+    <div class="flex justify-between gap-3 py-1"><span class="shrink-0 text-[var(--cf-muted)]">Service</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.service.name }}</strong></div>
+    <div class="flex justify-between gap-3 py-1"><span class="shrink-0 text-[var(--cf-muted)]">Clinic</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ clinic.name }}</strong></div>
+    <div class="flex justify-between gap-3 py-1"><span class="shrink-0 text-[var(--cf-muted)]">Date</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y" }}</strong></div>
+    <div class="flex justify-between gap-3 py-1"><span class="shrink-0 text-[var(--cf-muted)]">Time</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.starts_at|time:"g:i A" }}</strong></div>
+    <div class="flex justify-between gap-3 py-1"><span class="shrink-0 text-[var(--cf-muted)]">Patient</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></div>
   </div>
 
-  <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn w-full text-white mt-4 inline-block" style="background-color: {{ clinic.safe_widget_accent_color }}">Book Another Appointment</a>
+  <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full text-white" style="background-color: {{ clinic.safe_widget_accent_color }}"><i data-lucide="calendar-plus" class="h-4 w-4"></i>Book Another Appointment</a>
 </div>

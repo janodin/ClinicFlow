@@ -2,34 +2,34 @@
 {% load dashboard_extras %}
 {% block body %}
 {% active_membership_role as role %}
-<div x-data="{ sidebarOpen: false, toasts: [] }" @toast-message.window="toasts.push({message: $event.detail.message, type: $event.detail.type || 'success'}); setTimeout(() => toasts.shift(), 4000)" class="cf-app-shell flex min-h-screen">
+<div x-data="{ sidebarOpen: false, isDesktop: false, toasts: [], toastId: 0, init() { const media = window.matchMedia('(min-width: 1024px)'); const sync = () => { this.isDesktop = media.matches; }; sync(); if (media.addEventListener) { media.addEventListener('change', sync); } else { media.addListener(sync); } }, addToast(message, type) { const id = ++this.toastId; this.toasts.push({ id: id, message: message, type: type || 'success' }); this.refreshIcons(); setTimeout(() => { this.toasts = this.toasts.filter((toast) => toast.id !== id); }, 4000); }, refreshIcons() { this.$nextTick(() => { if (typeof lucide !== 'undefined') lucide.createIcons(); }); }, addToastFromEvent(detail) { const messages = Array.isArray(detail) ? detail : [detail]; messages.forEach((toast) => { if (toast && toast.message) { this.addToast(toast.message, toast.type); } }); }, toastClass(type) { if (type === 'error') return 'cf-toast-error'; if (type === 'warning') return 'cf-toast-warning'; if (type === 'info') return 'cf-toast-info'; return 'cf-toast-success'; }, toastIcon(type) { if (type === 'error') return 'alert-circle'; if (type === 'warning') return 'alert-triangle'; if (type === 'info') return 'info'; return 'check-circle'; }, removeToast(id) { this.toasts = this.toasts.filter((toast) => toast.id !== id); } }" @toast-message.window="addToastFromEvent($event.detail)" @keydown.escape.window="sidebarOpen = false" class="cf-app-shell flex min-h-screen">
   <!-- Mobile overlay -->
-  <div x-show="sidebarOpen" @click="sidebarOpen = false" class="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm transition-opacity lg:hidden" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"></div>
+  <div x-show="sidebarOpen" @click="sidebarOpen = false" class="fixed inset-0 z-40 bg-[rgba(5,47,58,0.52)] backdrop-blur-sm transition-opacity lg:hidden" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"></div>
 
-  <aside class="cf-sidebar fixed inset-y-0 left-0 z-50 flex w-[17rem] flex-col overflow-hidden px-4 py-5 backdrop-blur transition-transform duration-300 ease-in-out -translate-x-full lg:translate-x-0" :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'">
-    <div class="flex items-center gap-3 border-b border-[var(--cf-line)] px-2 pb-5">
-      <div class="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--cf-brand-strong)] text-white">
+  <aside class="cf-sidebar fixed inset-y-0 left-0 z-50 flex w-[17rem] flex-col overflow-hidden px-4 py-5 backdrop-blur transition-transform duration-300 ease-in-out -translate-x-full lg:translate-x-0" :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" :inert="!sidebarOpen && !isDesktop" :aria-hidden="(!sidebarOpen && !isDesktop).toString()">
+    <div class="cf-sidebar-header flex items-center gap-3 px-2 pb-5">
+      <div class="grid h-10 w-10 place-items-center rounded-xl bg-[var(--cf-brand)] text-white shadow-[var(--cf-shadow-subtle)]">
         <i data-lucide="heart-pulse" class="h-5 w-5"></i>
       </div>
       <div>
-        <div class="text-base font-black leading-tight">ClinicFlow</div>
-        <div class="max-w-40 truncate text-xs font-semibold text-[var(--cf-brand)]">{{ clinic.name }}</div>
+        <div class="text-base font-semibold leading-tight tracking-[-0.01em]">ClinicFlow</div>
+        <div class="max-w-40 truncate text-xs font-medium text-[var(--cf-brand)]">{{ clinic.name }}</div>
       </div>
-      <button @click="sidebarOpen = false" class="ml-auto rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)] hover:text-[var(--cf-ink)] lg:hidden">
+      <button @click="sidebarOpen = false" class="ml-auto cf-icon-btn lg:hidden" aria-label="Close sidebar">
         <i data-lucide="x" class="h-5 w-5"></i>
       </button>
     </div>
-    <nav class="mt-8 flex-1 space-y-1 overflow-y-auto text-sm font-semibold text-[var(--cf-muted)]">
-      <p class="px-3 pb-1.5 text-xs font-black uppercase tracking-widest text-[var(--cf-faint)]">Main</p>
-      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:home" icon="layout-dashboard" label="Dashboard" %}
+    <nav class="mt-8 flex-1 space-y-1 overflow-y-auto text-sm font-medium text-[var(--cf-muted)]">
+      <p class="px-3 pb-1.5 text-xs font-semibold uppercase tracking-widest text-[var(--cf-faint)]">Operations</p>
+      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:home" icon="layout-dashboard" label="Overview" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:calendar" icon="calendar-days" label="Calendar" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:appointments" icon="clipboard-list" label="Appointments" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:patients" icon="users" label="Patients" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:services" icon="stethoscope" label="Services" %}
-      <p class="px-3 pb-1.5 pt-4 text-xs font-black uppercase tracking-widest text-[var(--cf-faint)]">Config</p>
-      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:assistant_settings" icon="bot" label="Assistant" %}
+      <p class="px-3 pb-1.5 pt-4 text-xs font-semibold uppercase tracking-widest text-[var(--cf-faint)]">Setup</p>
+      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:assistant_settings" icon="message-circle" label="Booking Widget" %}
+      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:messenger_settings" icon="messages-square" label="Messenger" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:settings" icon="settings" label="Settings" %}
-      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:messenger_settings" icon="message-circle" label="Messenger" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:billing" icon="credit-card" label="Billing" %}
     </nav>
   </aside>
@@ -37,50 +37,52 @@
   <main class="cf-dashboard-main flex-1 pt-16 lg:pl-[17rem]">
     <header class="cf-topbar fixed top-0 right-0 left-0 z-20 flex h-16 items-center border-b border-[var(--cf-line)] px-4 md:px-6 lg:left-[17rem]">
       <div class="flex flex-1 items-center gap-2">
-        <button @click="sidebarOpen = true" class="rounded-2xl p-2 text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)] hover:text-[var(--cf-ink)] lg:hidden">
+        <button @click="sidebarOpen = true" class="cf-icon-btn lg:hidden" aria-label="Open sidebar">
           <i data-lucide="menu" class="h-6 w-6"></i>
         </button>
-        <div class="cf-topbar-search w-full max-w-[200px] sm:max-w-xs">
+        <div class="cf-topbar-search min-w-0 flex-1 md:max-w-[420px]">
           <div class="relative">
-            <i data-lucide="search" class="absolute left-3.5 top-3 h-4 w-4 text-slate-400"></i>
-            <input name="q" hx-get="{% url 'dashboard:search' %}" hx-target="#search-results" hx-trigger="keyup changed delay:300ms, focus" hx-indicator="#search-indicator" class="cf-input w-full py-2 pl-10 pr-4 text-sm" placeholder="Find anything in your clinic..." autocomplete="off">
+            <i data-lucide="search" class="absolute left-3.5 top-3 h-4 w-4 text-[var(--cf-faint)]"></i>
+            <input name="q" hx-get="{% url 'dashboard:search' %}" hx-target="#search-results" hx-trigger="keyup changed delay:300ms, focus" hx-indicator="#search-indicator" class="cf-input w-full py-2 pl-10 pr-4 text-sm" placeholder="Find anything in your clinic..." autocomplete="off" aria-label="Search clinic records">
             <div id="search-results" class="cf-search-panel absolute mt-2 w-full" @click.away="$el.innerHTML = ''"></div>
             <div id="search-indicator" class="htmx-indicator absolute right-3.5 top-3">
-              <i data-lucide="loader-2" class="h-4 w-4 animate-spin text-slate-400"></i>
+              <i data-lucide="loader-2" class="h-4 w-4 animate-spin text-[var(--cf-faint)]"></i>
             </div>
           </div>
         </div>
       </div>
       <div class="flex items-center gap-2 md:gap-3">
-        <div x-data="{ dropdownOpen: false }" class="relative">
-          <button @click="dropdownOpen = !dropdownOpen" @click.away="dropdownOpen = false" class="grid h-9 w-9 place-items-center rounded-full bg-[var(--cf-brand-strong)] text-xs font-black text-white cursor-pointer">{{ request.user.first_name|first|default:"U" }}{{ request.user.last_name|first }}</button>
-          <div x-show="dropdownOpen" x-cloak x-transition class="cf-menu-panel absolute right-0 top-full z-50 mt-2 w-48">
+        <div x-data="{ dropdownOpen: false }" @keydown.escape.window="dropdownOpen = false" class="relative">
+          <button @click="dropdownOpen = !dropdownOpen" @click.away="dropdownOpen = false" class="grid h-10 w-10 place-items-center rounded-full bg-[var(--cf-brand)] text-xs font-semibold text-white shadow-[var(--cf-shadow-subtle)] cursor-pointer" aria-label="Open account menu" :aria-expanded="dropdownOpen.toString()" aria-controls="account-menu-panel">{{ request.user.first_name|first|default:"U" }}{{ request.user.last_name|first }}</button>
+          <div id="account-menu-panel" x-show="dropdownOpen" x-cloak x-transition class="cf-menu-panel absolute right-0 top-full z-50 mt-2 w-48">
             <div class="border-b border-[var(--cf-line)] px-4 py-3">
               <p class="truncate text-sm font-bold text-[var(--cf-ink)]">{{ request.user.get_full_name|default:request.user.username }}</p>
               <p class="truncate text-xs text-[var(--cf-muted)]">{{ request.user.email }}</p>
             </div>
             <a href="{% url 'dashboard:profile' %}" class="flex items-center gap-3 px-4 py-3 text-sm font-semibold text-[var(--cf-muted)] hover:bg-[var(--cf-surface-muted)] transition"><i data-lucide="circle-user" class="h-4 w-4"></i>My Profile</a>
-            <form method="post" action="{% url 'accounts:logout' %}">{% csrf_token %}<button type="submit" class="flex w-full items-center gap-3 px-4 py-3 text-sm font-semibold text-[var(--cf-red)] hover:bg-[var(--cf-status-cancelled-bg)] transition"><i data-lucide="log-out" class="h-4 w-4"></i>Logout</button></form>
+            <form method="post" action="{% url 'accounts:logout' %}">{% csrf_token %}<button type="submit" class="flex w-full items-center gap-3 px-4 py-3 text-sm font-semibold text-[var(--cf-danger)] hover:bg-[var(--cf-danger-soft)] transition"><i data-lucide="log-out" class="h-4 w-4"></i>Logout</button></form>
           </div>
         </div>
       </div>
     </header>
 
-    <section class="w-full px-6 pt-4 pb-12 md:px-8 md:pt-5 lg:px-12 lg:pt-6">
+    <section class="w-full px-6 pt-4 pb-24 md:px-8 md:pt-5 md:pb-12 lg:px-12 lg:pt-6">
       <!-- Toast container -->
-      <div class="fixed right-4 top-24 z-[60] flex w-full max-w-sm flex-col gap-3">
+      <div class="cf-toast-container" aria-live="polite" aria-atomic="false">
         {% for message in messages %}
-          <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 4000)" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="translate-x-full opacity-0" x-transition:enter-end="translate-x-0 opacity-100" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="translate-x-0 opacity-100" x-transition:leave-end="translate-x-full opacity-0" class="cf-toast {% if message.tags == 'error' %}cf-toast-error{% else %}cf-toast-success{% endif %}">
-            <div class="flex-1 text-sm font-semibold">{{ message }}</div>
-            <button @click="show = false" class="mt-0.5 rounded-lg p-1 hover:bg-white/20">
+          <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 4000)" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="translate-x-full opacity-0" x-transition:enter-end="translate-x-0 opacity-100" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="translate-x-0 opacity-100" x-transition:leave-end="translate-x-full opacity-0" class="cf-toast {% if 'error' in message.tags %}cf-toast-error{% elif 'warning' in message.tags %}cf-toast-warning{% elif 'info' in message.tags %}cf-toast-info{% else %}cf-toast-success{% endif %}" {% if 'error' in message.tags %}role="alert"{% else %}role="status"{% endif %}>
+            {% if 'error' in message.tags %}<i data-lucide="alert-circle" class="cf-toast-icon" aria-hidden="true"></i>{% elif 'warning' in message.tags %}<i data-lucide="alert-triangle" class="cf-toast-icon" aria-hidden="true"></i>{% elif 'info' in message.tags %}<i data-lucide="info" class="cf-toast-icon" aria-hidden="true"></i>{% else %}<i data-lucide="check-circle" class="cf-toast-icon" aria-hidden="true"></i>{% endif %}
+            <div class="cf-toast-message">{{ message }}</div>
+            <button @click="show = false" class="cf-toast-close" aria-label="Dismiss notification">
               <i data-lucide="x" class="h-4 w-4"></i>
             </button>
           </div>
         {% endfor %}
-        <template x-for="(toast, index) in toasts" :key="index">
-          <div x-show="true" x-init="setTimeout(() => toasts.splice(index, 1), 4000)" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="translate-x-full opacity-0" x-transition:enter-end="translate-x-0 opacity-100" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="translate-x-0 opacity-100" x-transition:leave-end="translate-x-full opacity-0" class="cf-toast" :class="toast.type === 'error' ? 'cf-toast-error' : 'cf-toast-success'">
-            <div class="flex-1 text-sm font-semibold" x-text="toast.message"></div>
-            <button @click="toasts.splice(index, 1)" class="mt-0.5 rounded-lg p-1 hover:bg-white/20">
+        <template x-for="toast in toasts" :key="toast.id">
+          <div x-show="true" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="translate-x-full opacity-0" x-transition:enter-end="translate-x-0 opacity-100" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="translate-x-0 opacity-100" x-transition:leave-end="translate-x-full opacity-0" class="cf-toast" :class="toastClass(toast.type)" :role="toast.type === 'error' ? 'alert' : 'status'">
+            <i :data-lucide="toastIcon(toast.type)" class="cf-toast-icon" aria-hidden="true"></i>
+            <div class="cf-toast-message" x-text="toast.message"></div>
+            <button @click="removeToast(toast.id)" class="cf-toast-close" aria-label="Dismiss notification">
               <i data-lucide="x" class="h-4 w-4"></i>
             </button>
           </div>
@@ -95,7 +97,7 @@
     <div class="flex items-center justify-around py-2">
       <a href="{% url 'dashboard:home' %}" class="flex flex-col items-center gap-0.5 rounded-2xl p-2 text-xs font-semibold {% if request.resolver_match.url_name == 'home' %}text-[var(--cf-brand)] bg-[var(--cf-brand-soft)]{% else %}text-[var(--cf-muted)]{% endif %}">
         <i data-lucide="layout-dashboard" class="h-5 w-5"></i>
-        <span>Home</span>
+        <span>Overview</span>
       </a>
       <a href="{% url 'dashboard:appointments' %}" class="flex flex-col items-center gap-0.5 rounded-2xl p-2 text-xs font-semibold {% if request.resolver_match.url_name == 'appointments' %}text-[var(--cf-brand)] bg-[var(--cf-brand-soft)]{% else %}text-[var(--cf-muted)]{% endif %}">
         <i data-lucide="clipboard-list" class="h-5 w-5"></i>
@@ -129,10 +131,27 @@
         btn = elt.querySelector('button[type="submit"]');
       }
       if (btn && !btn.dataset.originalHtml) {
+        var loadingLabel = btn.getAttribute('aria-label') || btn.textContent.trim() || 'Loading';
         btn.dataset.originalHtml = btn.innerHTML;
-        btn.innerHTML = '<i data-lucide="loader-2" class="h-4 w-4 animate-spin inline-block"></i>';
-        btn.classList.add('opacity-50', 'cursor-not-allowed');
-        btn.disabled = true;
+        btn.dataset.originalAriaLabel = btn.getAttribute('aria-label') || '';
+        btn.textContent = '';
+        var srText = document.createElement('span');
+        srText.className = 'sr-only';
+        srText.textContent = loadingLabel + ' loading';
+        var icon = document.createElement('i');
+        icon.setAttribute('data-lucide', 'loader-2');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.className = 'h-4 w-4 animate-spin inline-block';
+        btn.appendChild(srText);
+        btn.appendChild(icon);
+        btn.setAttribute('aria-label', loadingLabel + ' loading');
+        btn.setAttribute('aria-busy', 'true');
+        btn.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+        if (btn.tagName === 'BUTTON') {
+          btn.disabled = true;
+        } else {
+          btn.setAttribute('aria-disabled', 'true');
+        }
         if (typeof lucide !== 'undefined') lucide.createIcons();
       }
     });
@@ -146,24 +165,48 @@
       }
       if (btn && btn.dataset.originalHtml) {
         btn.innerHTML = btn.dataset.originalHtml;
-        btn.classList.remove('opacity-50', 'cursor-not-allowed');
-        btn.disabled = false;
+        if (btn.dataset.originalAriaLabel) {
+          btn.setAttribute('aria-label', btn.dataset.originalAriaLabel);
+        } else {
+          btn.removeAttribute('aria-label');
+        }
+        btn.removeAttribute('aria-busy');
+        btn.removeAttribute('aria-disabled');
+        btn.classList.remove('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+        if (btn.tagName === 'BUTTON') {
+          btn.disabled = false;
+        }
         delete btn.dataset.originalHtml;
+        delete btn.dataset.originalAriaLabel;
       }
     });
     document.body.addEventListener('htmx:afterSwap', function(evt) {
       if (typeof lucide !== 'undefined') lucide.createIcons();
+      var requestElt = evt.detail.requestConfig && evt.detail.requestConfig.elt;
+      var preserveFocus = requestElt && requestElt.closest('[data-cf-preserve-focus="true"]');
+      if (preserveFocus) {
+        return;
+      }
       var target = evt.detail.elt;
-      var focusable = target.querySelector('h2, h3, button, a, input, [tabindex]');
-      if (focusable) {
-        focusable.setAttribute('tabindex', '-1');
-        focusable.focus({ preventScroll: true });
+      var focusTarget = target.matches('h2, h3, [role="dialog"], section') ? target : target.querySelector('h2, h3, [role="dialog"], section');
+      if (focusTarget) {
+        if (!focusTarget.hasAttribute('tabindex')) {
+          focusTarget.setAttribute('tabindex', '-1');
+          focusTarget.setAttribute('data-cf-temp-focus', 'true');
+          focusTarget.addEventListener('blur', function() {
+            if (focusTarget.getAttribute('data-cf-temp-focus') === 'true') {
+              focusTarget.removeAttribute('tabindex');
+              focusTarget.removeAttribute('data-cf-temp-focus');
+            }
+          }, { once: true });
+        }
+        focusTarget.focus({ preventScroll: true });
       }
     });
     document.body.addEventListener('htmx:responseError', function(evt) {
       var msg = 'Something went wrong. Please try again.';
       if (typeof Alpine !== 'undefined') {
-        document.dispatchEvent(new CustomEvent('toast-message', { detail: { message: msg, type: 'error' } }));
+        window.dispatchEvent(new CustomEvent('toast-message', { detail: { message: msg, type: 'error' } }));
       }
     });
   }

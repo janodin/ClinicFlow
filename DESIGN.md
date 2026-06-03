@@ -1,283 +1,332 @@
 ---
 version: alpha
-name: ClinicFlow
-description: Appointment-first clinic management SaaS design system for Django templates, Tailwind CSS, HTMX, Alpine.js, FullCalendar, and embeddable guest booking.
+name: Neon-Aqua-Clinical
+description: A cool clinical SaaS design language inspired by illuminated cyan setup imagery. The system pairs white and ice-cyan surfaces with deep teal ink, electric aqua CTAs, subtle glow mesh accents, compact pill controls, dense operational tables, and Inter typography with light display weights and tabular numerics.
+
 colors:
-  background: "#EEF5F8"
-  background-strong: "#F4F9FB"
-  surface: "#FFFFFF"
-  surface-muted: "#E8F1F5"
-  surface-tint: "#E4F3EC"
-  line: "#D5E3EB"
-  line-soft: "#E2EEF4"
-  ink: "#18232C"
-  muted: "#5F6870"
-  faint: "#8A8378"
-  primary: "#0F6B55"
-  primary-strong: "#0A4036"
-  primary-soft: "#E4F3EC"
-  blue: "#276A8F"
-  danger: "#B94444"
-  amber: "#9B6B21"
-  focus: "#CFE5DD"
-  widget-default-accent: "#0891B2"
-  status-pending-bg: "#FFF3D9"
-  status-pending-text: "#8A5A10"
-  status-confirmed-bg: "#E2F2FF"
-  status-confirmed-text: "#245D82"
-  status-completed-bg: "#E7F3EE"
-  status-completed-text: "#0F6B55"
-  status-cancelled-bg: "#FBE5E2"
-  status-cancelled-text: "#A73F3F"
-  status-no-show-bg: "#ECE8E1"
-  status-no-show-text: "#5F6870"
-  dark-background: "#0F1720"
-  dark-background-strong: "#0A1017"
-  dark-surface: "#151D27"
-  dark-surface-muted: "#1C2631"
-  dark-line: "#2A3644"
-  dark-ink: "#F8F3EC"
-  dark-muted: "#C5BEB4"
-  dark-primary: "#76D2AA"
-  dark-primary-strong: "#A8EBCC"
+  primary: "#06b6d4"
+  primary-deep: "#0891b2"
+  primary-press: "#0e7490"
+  primary-soft: "#ecfeff"
+  primary-bg-subdued-hover: "#cffafe"
+  brand-dark-900: "#052f3a"
+  ink: "#083344"
+  ink-secondary: "#164e63"
+  ink-mute: "#527486"
+  ink-mute-2: "#6b8fa0"
+  on-primary: "#ffffff"
+  canvas: "#ffffff"
+  canvas-soft: "#f0fdff"
+  canvas-cream: "#e0fbff"
+  hairline: "#d5f3f8"
+  hairline-input: "#8ed8e8"
+  ruby: "#ea2261"
+  magenta: "#22d3ee"
+  lemon: "#0f766e"
+  shadow-blue: "#083344"
+
 typography:
-  page-title:
-    fontFamily: Cormorant Garamond
-    fontSize: 40px
-    fontWeight: 700
-    lineHeight: 0.98
-    letterSpacing: 0
-  section-title:
-    fontFamily: Manrope
+  display-xxl:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 56px
+    fontWeight: 300
+    lineHeight: 1.03
+    letterSpacing: -1.4px
+    fontFeature: ss01
+  display-xl:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 48px
+    fontWeight: 300
+    lineHeight: 1.15
+    letterSpacing: -0.96px
+    fontFeature: ss01
+  display-lg:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 32px
+    fontWeight: 300
+    lineHeight: 1.1
+    letterSpacing: -0.64px
+    fontFeature: ss01
+  display-md:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 26px
+    fontWeight: 300
+    lineHeight: 1.12
+    letterSpacing: -0.26px
+    fontFeature: ss01
+  heading-lg:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 22px
+    fontWeight: 300
+    lineHeight: 1.1
+    letterSpacing: -0.22px
+    fontFeature: ss01
+  heading-md:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
     fontSize: 20px
-    fontWeight: 850
-    lineHeight: 1.2
-    letterSpacing: 0
-  body:
-    fontFamily: Manrope
-    fontSize: 16px
-    fontWeight: 500
-    lineHeight: 1.55
-    letterSpacing: 0
-  body-sm:
-    fontFamily: Manrope
-    fontSize: 14px
-    fontWeight: 500
-    lineHeight: 1.55
-    letterSpacing: 0
-  label:
-    fontFamily: Manrope
-    fontSize: 12px
-    fontWeight: 800
-    lineHeight: 1.2
-    letterSpacing: 0.04em
-  label-caps:
-    fontFamily: Manrope
-    fontSize: 12px
-    fontWeight: 850
-    lineHeight: 1
-    letterSpacing: 0.08em
-  kpi-value:
-    fontFamily: IBM Plex Mono
-    fontSize: 36px
-    fontWeight: 600
-    lineHeight: 1
-    letterSpacing: 0
-  mono:
-    fontFamily: IBM Plex Mono
-    fontSize: 14px
-    fontWeight: 500
+    fontWeight: 300
+    lineHeight: 1.4
+    letterSpacing: -0.2px
+    fontFeature: ss01
+  heading-sm:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 18px
+    fontWeight: 300
     lineHeight: 1.4
     letterSpacing: 0
+    fontFeature: ss01
+  body-lg:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 16px
+    fontWeight: 300
+    lineHeight: 1.4
+    letterSpacing: 0
+    fontFeature: ss01
+  body-md:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 15px
+    fontWeight: 300
+    lineHeight: 1.4
+    letterSpacing: 0
+    fontFeature: ss01
+  body-tabular:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 14px
+    fontWeight: 300
+    lineHeight: 1.4
+    letterSpacing: -0.42px
+    fontFeature: tnum
+  button-md:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 16px
+    fontWeight: 400
+    lineHeight: 1.0
+    letterSpacing: 0
+    fontFeature: ss01
+  button-sm:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.0
+    letterSpacing: 0
+    fontFeature: ss01
+  caption:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: -0.39px
+    fontFeature: tnum
+  micro:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 11px
+    fontWeight: 300
+    lineHeight: 1.4
+    letterSpacing: 0
+    fontFeature: ss01
+  micro-cap:
+    fontFamily: "Inter, system-ui, -apple-system, sans-serif"
+    fontSize: 10px
+    fontWeight: 400
+    lineHeight: 1.15
+    letterSpacing: 0.1px
+    fontFeature: ss01
+
 rounded:
-  sm: 9px
-  md: 14px
-  lg: 18px
-  full: 9999px
+  xs: 4px
+  sm: 6px
+  md: 8px
+  lg: 12px
+  xl: 16px
+  pill: 9999px
+
 spacing:
+  xxs: 2px
   xs: 4px
   sm: 8px
   md: 12px
-  base: 16px
-  lg: 20px
+  lg: 16px
   xl: 24px
-  page-x-mobile: 24px
-  page-x-desktop: 48px
-  sidebar-width: 272px
-  widget-width: 420px
-  widget-height: 650px
-  table-mobile-min-width: 720px
-components:
-  button-primary:
-    backgroundColor: "{colors.primary-strong}"
-    textColor: "{colors.surface}"
-    rounded: "{rounded.md}"
-    padding: "10px 16px"
-    height: "41px"
-    typography: "{typography.body-sm}"
-  button-secondary:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.muted}"
-    borderColor: "{colors.line}"
-    rounded: "{rounded.md}"
-    padding: "10px 16px"
-    height: "41px"
-    typography: "{typography.body-sm}"
-  card:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.ink}"
-    borderColor: "{colors.line}"
-    rounded: "{rounded.lg}"
-    padding: "{spacing.lg}"
-  input:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.ink}"
-    borderColor: "{colors.line}"
-    rounded: "{rounded.md}"
-    padding: "12px 15px"
-    height: "44px"
-  table:
-    backgroundColor: "{colors.surface}"
-    borderColor: "{colors.line}"
-    rounded: "{rounded.lg}"
-    typography: "{typography.body-sm}"
-  badge:
-    rounded: "{rounded.full}"
-    padding: "5px 11px"
-    typography: "{typography.label}"
-  modal:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.lg}"
-    padding: "{spacing.xl}"
-  widget-shell:
-    backgroundColor: "{colors.surface}"
-    borderColor: "{colors.line}"
-    rounded: "{rounded.lg}"
-    width: "{spacing.widget-width}"
-    height: "{spacing.widget-height}"
----
+  xxl: 32px
+  huge: 64px
 
-# ClinicFlow Design System
+components:
+  button-primary-pill:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.button-md}"
+    rounded: "{rounded.pill}"
+    padding: 8px 16px
+  button-primary-pill-pressed:
+    backgroundColor: "{colors.primary-press}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.button-md}"
+    rounded: "{rounded.pill}"
+    padding: 8px 16px
+  button-secondary:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.primary}"
+    typography: "{typography.button-md}"
+    rounded: "{rounded.pill}"
+    padding: 8px 16px
+  button-on-dark:
+    backgroundColor: "{colors.brand-dark-900}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.button-md}"
+    rounded: "{rounded.pill}"
+    padding: 8px 16px
+  text-input:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.sm}"
+    padding: 8px 12px
+  text-input-focused:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.sm}"
+    padding: 8px 12px
+  card-feature-light:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-md}"
+    rounded: "{rounded.lg}"
+    padding: 32px
+  card-dashboard:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body-tabular}"
+    rounded: "{rounded.lg}"
+    padding: 24px
+  pill-tag-soft:
+    backgroundColor: "{colors.primary-bg-subdued-hover}"
+    textColor: "{colors.primary-press}"
+    typography: "{typography.micro-cap}"
+    rounded: "{rounded.pill}"
+    padding: 4px 8px
+---
 
 ## Overview
 
-ClinicFlow is a focused clinic operations product, not a marketplace, patient portal, or medical records system. The interface should feel calm, trustworthy, fast to scan, and clearly appointment-first. Staff users need dense operational screens for managing appointments, patients, services, schedules, and clinic settings. Patients book as guests through a focused public booking form or floating embeddable widget.
+ClinicFlow uses the **Neon Aqua Clinical** system. It should feel cool, clean, and modern: white and ice-cyan surfaces, deep teal text, electric aqua calls to action, and subtle cyan glow accents inspired by illuminated desk/setup imagery. The result should be bright and distinctive without turning operational clinic screens into a gaming interface.
 
-The visual direction is clean teal and white SaaS with a restrained clinical warmth. Use structured tables, compact KPI cards, clear status badges, rounded cards/modals, and a persistent left sidebar for authenticated workflows. Public booking should feel lighter and more guided, but it must share the same design vocabulary.
+The design is implemented through Django templates, Tailwind utility classes, and the canonical `cf-*` CSS layer in `static/css/clinicflow.css`. Prefer existing component classes before adding new utilities.
 
-Primary implementation targets are Django templates, Tailwind utility classes, shared CSS variables in `static/css/clinicflow.css`, HTMX for server-rendered interactions, Alpine.js for small UI state, Lucide icons, and FullCalendar for the calendar screen. The primary staff IA is Dashboard, Calendar, Appointments, Patients, Services, Assistant/Widget, Settings, and Billing.
+## Key Characteristics
+
+- Electric aqua is the primary action color. Use `{colors.primary}` for filled buttons, active states, focus states, selected slots, and high-emphasis links.
+- Deep teal provides structure. Use `{colors.ink}` for default text and `{colors.brand-dark-900}` for the dashboard sidebar shell.
+- Ice-cyan surfaces create the glow. Use `{colors.canvas-soft}`, `{colors.primary-soft}`, and `{colors.primary-bg-subdued-hover}` for panels, selected states, empty states, and public/widget accents.
+- Glow is selective. Use cyan radial gradients on auth, booking, widget, and confirmation surfaces where contrast stays readable.
+- Dashboard screens stay operational. Keep them dense, table-first, appointment-first, and optimized for staff workflows.
 
 ## Colors
 
-The palette is rooted in soft clinical surfaces, deep green-teal actions, and muted slate text.
+### Brand & Accent
 
-- **Primary (#0F6B55):** Main brand accent for active states, status highlights, links, progress, and key affordances.
-- **Primary Strong (#0A4036):** Primary CTA background, sidebar logo tile, strong emphasis, and success toasts.
-- **Primary Soft (#E4F3EC):** Selected navigation, active panels, low-pressure highlights, and icon containers.
-- **Background (#EEF5F8) and Background Strong (#F4F9FB):** App-level gradient foundation. Keep dashboards light and quiet.
-- **Surface (#FFFFFF):** Main card, table, input, modal, menu, search, and widget surface.
-- **Ink (#18232C):** Main text and headings.
-- **Muted (#5F6870):** Secondary body copy, metadata, table cells, and helper text.
-- **Line (#D5E3EB):** Borders and table wrappers. Prefer subtle borders over heavy shadows.
-- **Status Colors:** Pending uses amber, confirmed uses blue, completed uses teal-green, cancelled uses rose, and no-show uses muted grey.
+- **Aqua** (`{colors.primary}` - `#06b6d4`): Primary CTA, selected state, widget default accent, active navigation, focus borders.
+- **Aqua Deep** (`{colors.primary-deep}` - `#0891b2`): Hover state, info text, chart/event border where a stronger edge is needed.
+- **Aqua Press** (`{colors.primary-press}` - `#0e7490`): Pressed state, strong labels on aqua-soft backgrounds.
+- **Aqua Soft** (`{colors.primary-soft}` - `#ecfeff`): Selected row backgrounds, slot hover, confirmed appointments, soft icon wells.
+- **Aqua Subdued** (`{colors.primary-bg-subdued-hover}` - `#cffafe`): Stronger soft hover background.
+- **Deep Teal Shell** (`{colors.brand-dark-900}` - `#052f3a`): Sidebar and dark operational chrome.
+- **Ruby** (`{colors.ruby}` - `#ea2261`): Destructive/error accent only.
 
-Use clinic-specific accent colors only where the clinic owns the surface, especially the embeddable widget header, widget CTAs, and public booking confirmation reference card. Do not let per-clinic accent colors rewrite the dashboard system globally.
+### Surface
+
+- **Canvas** (`{colors.canvas}` - `#ffffff`): Default card and page surface.
+- **Canvas Soft** (`{colors.canvas-soft}` - `#f0fdff`): Main page wash and low-emphasis panels.
+- **Glow Interlude** (`{colors.canvas-cream}` - `#e0fbff`): Aqua-tinted feature/confirmation band.
+- **Hairline** (`{colors.hairline}` - `#d5f3f8`): Card, table, dropdown, and modal borders.
+- **Input Hairline** (`{colors.hairline-input}` - `#8ed8e8`): Form fields and select controls.
+
+### Text
+
+- **Ink** (`{colors.ink}` - `#083344`): Default body text, headings, table content.
+- **Ink Secondary** (`{colors.ink-secondary}` - `#164e63`): Secondary headings and strong helper content.
+- **Muted** (`{colors.ink-mute}` - `#527486`): Captions, labels, helper text.
+- **Faint** (`{colors.ink-mute-2}` - `#6b8fa0`): Low-emphasis metadata and placeholders.
+- **On Primary** (`{colors.on-primary}` - `#ffffff`): Text on aqua/dark fills.
+
+### Semantic Status
+
+Status colors must remain semantically distinct:
+
+- Pending/booked: warm amber/cream.
+- Confirmed/info: aqua/ice-cyan.
+- Completed: green/teal.
+- Cancelled/error: ruby/red.
+- No-show/inactive: neutral gray-blue.
 
 ## Typography
 
-Use **Manrope** as the primary interface family. It keeps dense clinic data readable while still feeling polished. Use **Cormorant Garamond** only for page-level titles via `.ui-page-title`; it gives major screens a recognizable editorial voice without making tables decorative. Use **IBM Plex Mono** for KPI values, reference codes, and compact technical identifiers.
-
-Typography should remain operational and compact:
-
-- Page titles: large, elegant, and limited to one per screen.
-- Section titles: bold Manrope, usually 18-24px.
-- Body text: 14-16px Manrope with enough line height for forms and table metadata.
-- Labels: uppercase or near-uppercase, bold, muted, and compact.
-- KPI values: mono, large, and numerically stable.
-
-Do not scale typography with viewport width. Preserve `letter-spacing: 0` for normal text and reserve tracking for labels only.
+Use Inter from Google Fonts. Display and page-title roles use weight 300 with tight negative tracking. Operational data uses tabular numerics for times, durations, counts, prices, and KPI values.
 
 ## Layout
 
-Authenticated dashboard screens use a fixed left sidebar of 272px on desktop, a topbar, and a responsive content area with generous but efficient padding. Mobile uses a hidden sidebar, topbar menu, and bottom navigation. Operational screens should be table-first, with filters and actions above the main data region.
-
-Common layout patterns:
-
-- `.cf-page` for vertical page rhythm with consistent gaps.
-- `.cf-page-header` for title, metadata, and primary action alignment.
-- `.cf-toolbar` for filters, segmented status controls, and compact form controls.
-- `.cf-table-wrap` for the main operational table container.
-- Responsive grids for KPI cards, services, and secondary panels.
-- Public booking uses a two-column layout on desktop: clinic context on the left and the booking card on the right.
-- Widget mode is a fixed, self-contained 420px by 650px chat/booking panel.
-- Scheduling screens should express hierarchy clearly: clinic business hours, breaks, unavailable dates, slot preview, and double-booking prevention.
-
-Use horizontal overflow for dense tables on mobile instead of compressing columns into unreadable cards unless a screen is explicitly designed as a card workflow. Existing mobile tables use a 720px minimum width, while booking slot grids move from three columns to two columns below 640px.
-
-## Elevation & Depth
-
-Depth is soft and utilitarian. The current system uses subtle card shadows and borders:
-
-- Card shadow: `0 18px 46px rgba(24, 35, 44, .08)`.
-- Raised shadow: `0 28px 80px rgba(24, 35, 44, .16)`.
-- Dark mode raises shadow opacity but still avoids harsh contrast.
-
-Use borders and tonal surface shifts as the primary hierarchy tools. Reserve raised shadows for cards, menus, dropdowns, modals, toasts, and the floating widget. Do not create decorative glass panels, large marketing hero effects, or ornamental backgrounds beyond the existing soft page gradient.
-
-## Shapes
-
-The shape language is softly rounded and consistent:
-
-- Small controls: about 9px.
-- Buttons, inputs, nav links, tabs, and compact containers: about 14px.
-- Cards, modals, table wrappers, widget shells, and large panels: about 18px.
-- Avatars, pills, status badges, and presence dots: full radius.
-
-Avoid mixing sharp corners with rounded ClinicFlow components. Use rounded cards/modals as product surfaces, but keep page sections unframed unless they are a real container or repeated item.
+- Preserve the left dashboard sidebar and topbar.
+- Preserve compact KPI cards, operational tables, rounded modals, dense forms, and dashboard-first information hierarchy.
+- Public booking, widget, auth, and confirmation surfaces may use glow mesh accents.
+- Do not introduce React, Next.js, or a separate frontend.
 
 ## Components
 
-**Buttons:** Use `.cf-btn` as the base. Primary buttons use `primary-strong` with white text and are for the main action on a screen or modal. Secondary buttons are white/surface with border and muted text. Danger actions use the cancelled status palette. Include Lucide icons when the action benefits from immediate recognition.
+### Buttons
 
-**Inputs and Forms:** Inputs, selects, and textareas are full-width by default with rounded borders, surface background, and a teal focus ring. Labels are compact, bold, muted, and usually uppercase. Keep form layouts to one column on mobile and two columns where desktop density helps.
+Primary buttons use `{colors.primary}` with white text, pill geometry, and compact `8px 16px` padding. Hover uses `{colors.primary-deep}`. Pressed state uses `{colors.primary-press}`.
 
-**Tables:** Tables are the default for operational resources. Use uppercase headers, soft row dividers, hover tinting, and action buttons aligned at the row end. Table containers should use `.cf-table-wrap`.
+Secondary buttons stay quiet: white background, aqua text/border, and aqua-soft hover. Destructive actions use the ruby danger tokens, not aqua.
 
-**Status Badges:** Use `.cf-badge` plus status classes. Keep status language short and consistent with appointment model states: Booked, Confirmed, Cancelled, Completed, No Show. Payment states should remain visually secondary to appointment status.
+### Cards & Tables
 
-**Navigation:** Sidebar nav uses Lucide icons, muted text, and active teal-soft background with a left inset accent. Keep sections grouped under short uppercase labels like Practice and Settings. Mobile bottom nav mirrors the main operational screens.
+Cards use white surfaces, `#d5f3f8` borders, compact radius, and subtle teal shadows. Tables remain high-density and readable. Avoid heavy glow inside operational tables.
 
-**Cards and KPIs:** KPI cards are compact, numeric, and scannable. Use mono values, small uppercase labels, and simple icon boxes. Repeated cards, such as service cards, should expose the few operational details needed for decisions.
+### Inputs & Forms
 
-**Modals:** Use `.cf-modal-backdrop` and `.cf-modal`. Modal content should be direct and form-oriented, with a clear title, close affordance, and full-width primary submit where appropriate.
+Inputs use white backgrounds, teal ink, aqua input borders, and aqua focus rings. Disabled states must remain readable and cannot rely on opacity alone.
 
-**Public Booking:** Use a guided wizard with progress bars, one decision per step, and clear Back/Continue actions. Reinforce guest booking and no-login behavior. Keep service, date, slot, patient details, review, and confirmation visually distinct.
+### Sidebar & Navigation
 
-**Widget:** The widget is compact and clinic-branded. It can offer booking and FAQ/chat-like assistance, but it should remain deterministic and booking-oriented in V1. Header and key CTAs may use `clinic.widget_accent_color`; internal content should still respect ClinicFlow spacing, badges, inputs, and cards.
+The dashboard sidebar uses deep teal shell color with white text. Active navigation uses subtle translucent fill and an aqua inset accent.
 
-**Calendar:** FullCalendar should be contained in a soft card. Use status color legend and service filters. Event detail opens in a modal loaded by HTMX.
+### Widget
 
-**Patients:** Patient records are pragmatic V1 CRM records, not accounts. Represent identity around name, phone, optional email, and clinic-local history. Duplicate detection and merge flows should feel careful and reversible.
+The default widget accent is `{colors.primary}` (`#06b6d4`). Clinics may still customize `widget_accent_color`; unsafe values must fall back to the default aqua.
 
-**Services:** Services are clinic-scoped operational resources. Service cards can include duration, price visibility, active/archived state, and optional service color.
+### Glow Mesh
 
-**Empty States:** Empty states should be helpful and calm: icon box, one concise heading, one sentence of guidance, and a single next action.
+Glow mesh backgrounds layer white, ice-cyan, electric aqua, and deep teal radial gradients. Use them sparingly behind public or confirmation surfaces, never behind dense data tables.
 
-## Do's and Don'ts
+## Do's And Don'ts
 
-- Do preserve clinic tenant boundaries in UI language and data surfaces.
-- Do keep authenticated screens dense, table-first, and optimized for repeated staff use.
-- Do use the shared `cf-*` and `ui-*` classes before inventing new styling.
-- Do use HTMX for dynamic server-rendered updates and Alpine.js only for small local state.
-- Do keep guest booking passwordless and focused on appointment completion.
-- Do keep patient phone matching, slot validation, and double-booking prevention visible in flow decisions where relevant.
-- Do use Lucide icons for navigation, actions, empty states, and compact affordances.
-- Do keep status colors consistent across dashboard, calendar, booking, and widget surfaces.
-- Do make mobile layouts usable with stable controls, safe bottom spacing, and horizontal table overflow where needed.
-- Don't introduce React, Next.js, Supabase, Drizzle, or a separate frontend for V1 screens.
-- Don't add patient portal, medical records, prescriptions, inventory, online payments, marketplace booking, or real AI/Messenger automation unless explicitly requested.
-- Don't make marketing-style landing pages for operational workflows.
-- Don't use purple gradients, decorative blobs, stock-like imagery, or oversized hero compositions.
-- Don't create nested cards or put UI cards inside other UI cards.
-- Don't leave unused template fragments, imports, URLs, or tests behind when changing UI features.
+### Do
+
+- Use `DESIGN.md` and `static/css/clinicflow.css` as the color source of truth.
+- Keep all text, controls, dropdowns, modals, badges, and disabled states WCAG AA readable.
+- Keep appointment statuses visually distinct.
+- Prefer `cf-*` classes and CSS custom properties over raw Tailwind color classes.
+- Use aqua glow as atmosphere, not as decoration on every element.
+
+### Don't
+
+- Do not use old indigo/purple theme tokens for new UI.
+- Do not collapse all statuses into aqua.
+- Do not turn operational dashboard pages into marketing pages.
+- Do not add patient portal, medical records, prescriptions, inventory, payments, marketplace booking, or real AI automation as part of visual work.
+- Do not introduce a separate frontend stack.
+
+## Responsive Behavior
+
+- Dashboard tables may scroll horizontally on small screens.
+- Forms and buttons maintain at least 40px touch targets.
+- Widget layout remains constrained to the floating widget dimensions.
+- Glow mesh should remain subtle on mobile so content contrast is not reduced.
+
+## Iteration Guide
+
+1. Start with CSS variables in `static/css/clinicflow.css`.
+2. Prefer reusable `cf-*` classes.
+3. Update tests when intentional design tokens change.
+4. Run targeted design-system tests after theme edits.
+5. Verify dashboard, widget, auth, and email surfaces remain readable.

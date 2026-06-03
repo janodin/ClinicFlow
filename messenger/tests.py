@@ -326,6 +326,45 @@ def test_webhook_post_uses_connection_app_secret():
 
 
 @pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="legacy-meta-app-secret")
+def test_webhook_post_accepts_global_secret_when_connection_secret_missing():
+    client = Client()
+    user = User.objects.create_user(username="owner_wh_global", email="owner_wh_global@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupWHGlobal", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicWHGlobal")
+    conn = MessengerConnection.objects.create(
+        clinic=clinic,
+        page_id="PAGE-GLOBAL-SECRET",
+        page_access_token="TOKEN",
+    )
+    Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-GLOBAL-SECRET",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE-GLOBAL-SECRET"},
+                "message": {"text": "Book an appointment"},
+            }]
+        }]
+    }).encode()
+    signature = "sha256=" + hmac.new("legacy-meta-app-secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    resp = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert resp.status_code == 200
+    assert MessengerSession.objects.get(connection=conn, psid="PSID1").state == MessengerSession.STATE_SELECT_SERVICE
+
+
+@pytest.mark.django_db
 def test_webhook_post_rejects_signature_from_other_clinic_app_secret():
     client = Client()
     user = User.objects.create_user(username="owner_wh_cross", email="owner_wh_cross@test.com", password="pass")
@@ -1135,6 +1174,35 @@ def test_meta_signature_verification_endpoint_accepts_valid_per_clinic_secret():
         reverse("messenger:meta_signature_verify"),
         data=json.dumps({
             "page_id": "PAGE-META-VERIFY",
+            "raw_body": raw_body,
+            "signature": signature,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": True}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123", MESSENGER_APP_SECRET="legacy-meta-app-secret")
+def test_meta_signature_verification_endpoint_accepts_global_secret_when_connection_secret_missing():
+    _clinic, _connection = _create_messenger_clinic("owner_meta_global_secret", "PAGE-META-GLOBAL")
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-META-GLOBAL",
+            "messaging": [{"recipient": {"id": "PAGE-META-GLOBAL"}}],
+        }],
+    })
+    signature = "sha256=" + hmac.new("legacy-meta-app-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({
+            "page_id": "PAGE-META-GLOBAL",
             "raw_body": raw_body,
             "signature": signature,
         }),

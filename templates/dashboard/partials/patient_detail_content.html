@@ -2,14 +2,14 @@
     <div class="flex items-center gap-4">
       <span class="grid h-14 w-14 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-xl font-black text-[var(--cf-brand)]" aria-hidden="true">{{ patient.full_name|first }}</span>
       <div>
-        <h1 class="ui-page-title">{{ patient.full_name }}</h1>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">
+        <h1 class="cf-page-title ui-page-title">{{ patient.full_name }}</h1>
+        <p class="cf-page-description">
           Patient #{{ patient.id }}
           {% if patient.created_at %} &middot; Since {{ patient.created_at|date:"M j, Y" }}{% endif %}
         </p>
       </div>
     </div>
-    <div class="flex items-center gap-3">
+    <div class="cf-page-actions">
       <a href="{% url 'dashboard:patients' %}" class="cf-btn cf-btn-secondary">
         <i data-lucide="arrow-left" class="h-4 w-4"></i>
         Back
@@ -111,6 +111,12 @@
 
     {% if patient.appointments.all %}
       <div class="cf-table-wrap mt-4">
+        <div class="cf-table-header">
+          <div>
+            <h3 class="cf-section-title">Appointment history</h3>
+            <p class="cf-muted">Past and upcoming visits for this patient.</p>
+          </div>
+        </div>
         <div class="overflow-x-auto">
           <table class="cf-table">
             <thead class="text-xs uppercase text-[var(--cf-faint)]">
@@ -135,7 +141,7 @@
                   <td class="text-[var(--cf-muted)] text-xs">{{ appointment.get_source_display }}</td>
                   <td class="pr-5">
                     <div class="flex justify-end gap-2">
-                      <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-btn cf-btn-sm cf-btn-secondary">View</button>
+                      <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-btn cf-btn-sm cf-btn-secondary"><i data-lucide="eye" class="h-4 w-4"></i>View</button>
                     </div>
                   </td>
                 </tr>

@@ -50,6 +50,16 @@ class ServiceTests(TestCase):
         self.assertEqual(str(self.service.price), "750.00")
         self.assertEqual(self.service.color, "#ff0000")
 
+    def test_service_default_color_uses_neon_aqua_primary(self):
+        service = Service.objects.create(
+            clinic=self.clinic,
+            name="Neon Aqua Default Service",
+            duration_minutes=20,
+            price="300.00",
+        )
+
+        self.assertEqual(service.color, "#06b6d4")
+
     def test_service_archive_hides_from_active_lists(self):
         self.assertIn(self.service, self.clinic.services.filter(is_archived=False))
         url = reverse("dashboard:archive_service", args=[self.service.id])

@@ -5,14 +5,14 @@
   <div class="w-full max-w-lg">
     <!-- Branding -->
     <div class="mb-8 text-center">
-      <div class="inline-flex items-center gap-3 text-xl font-black text-white">
-        <span class="grid h-10 w-10 place-items-center rounded-2xl bg-white/15">
+      <div class="inline-flex items-center gap-3 text-xl font-black text-[var(--cf-ink)]">
+        <span class="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]">
           <i data-lucide="activity" class="h-5 w-5"></i>
         </span>
         ClinicFlow
       </div>
-      <h1 class="mt-6 text-3xl font-black leading-tight text-white">Start with a cleaner schedule.</h1>
-      <p class="mt-3 text-base leading-7 text-white/70">Set up your clinic, add services, configure schedules, and start accepting patient bookings.</p>
+      <h1 class="mt-6 text-3xl font-black leading-tight text-[var(--cf-ink)]">Start with a cleaner schedule.</h1>
+      <p class="mt-3 text-base leading-7 text-[var(--cf-muted)]">Set up your clinic, add services, configure schedules, and start accepting patient bookings.</p>
     </div>
 
     <!-- Form Card -->
@@ -31,7 +31,7 @@
             {% endif %}
           </div>
         {% endfor %}
-        <button class="cf-btn cf-btn-primary w-full">Create Account</button>
+        <button class="cf-btn cf-btn-primary w-full"><i data-lucide="user-plus" class="h-4 w-4"></i>Create Account</button>
         <p class="text-center text-sm text-[var(--cf-muted)]">
           Already have an account?
           <a class="font-bold text-[var(--cf-brand)] hover:text-[var(--cf-brand-strong)] transition-colors" href="{% url 'accounts:login' %}">Sign in</a>
@@ -39,7 +39,7 @@
       </form>
     </div>
 
-    <div class="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-white/50">
+    <div class="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-[var(--cf-muted)]">
       <span class="inline-flex items-center gap-1"><i data-lucide="check" class="h-3 w-3"></i>No card required</span>
       <span class="inline-flex items-center gap-1"><i data-lucide="check" class="h-3 w-3"></i>Manual plan management</span>
       <span class="inline-flex items-center gap-1"><i data-lucide="check" class="h-3 w-3"></i>Booking widget ready immediately</span>

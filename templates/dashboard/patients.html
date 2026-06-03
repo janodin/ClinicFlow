@@ -1,23 +1,26 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Patients{% endblock %}
 {% block content %}
-<div x-data="{patientOpen:false, editOpen:false}" class="cf-page">
+<div x-data="{patientOpen:false, editOpen:false}" class="cf-page" @keydown.escape.window="editOpen=false">
   <div class="cf-page-header">
-    <div><h1 class="ui-page-title">Patients</h1><p class="mt-2 text-sm text-[var(--cf-muted)]">{{ patients|length }} patient records registered</p></div>
-    <div class="flex items-center gap-3">
-      <button hx-get="{% url 'dashboard:find_duplicates' %}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="cf-btn cf-btn-secondary">Check Duplicates</button>
-      <button @click="patientOpen=true" class="cf-btn cf-btn-primary">Add Patient</button>
+    <div><h1 class="cf-page-title ui-page-title">Patients</h1><p class="cf-page-description">{{ patients|length }} patient records registered</p></div>
+    <div class="cf-page-actions">
+      <button type="button" hx-get="{% url 'dashboard:find_duplicates' %}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="cf-btn cf-btn-secondary whitespace-nowrap"><i data-lucide="scan-search" class="h-4 w-4"></i>Check duplicates</button>
+      <button type="button" @click="patientOpen=true" class="cf-btn cf-btn-primary whitespace-nowrap"><i data-lucide="user-plus" class="h-4 w-4"></i>Add patient</button>
     </div>
   </div>
-  <div id="duplicate-panel"></div>
-  <form class="max-w-2xl" method="get">
-    <input name="q" value="{{ query }}" placeholder="Search by name, phone, or email..." class="ui-input"
-           hx-get="{% url 'dashboard:patients' %}"
-           hx-target="#patient-list"
-           hx-swap="innerHTML"
-           hx-trigger="keyup changed delay:300ms, search"
-           hx-push-url="true">
+  <form id="patient-toolbar" class="cf-toolbar" method="get">
+    <div class="cf-field w-80 shrink-0 sm:w-96 lg:w-[28rem]">
+      <label for="patient-search" class="cf-label">Search</label>
+      <input id="patient-search" name="q" value="{{ query }}" placeholder="Search by name, phone, or email..." class="cf-input" data-cf-preserve-focus="true"
+              hx-get="{% url 'dashboard:patients' %}"
+              hx-target="#patient-list"
+              hx-swap="innerHTML"
+              hx-trigger="keyup changed delay:300ms, search"
+              hx-push-url="true">
+    </div>
   </form>
+  <div id="duplicate-panel" class="cf-async-panel"></div>
   <div id="patient-list">
     {% include "dashboard/partials/patient_list.html" %}
   </div>
@@ -25,8 +28,18 @@
 
   <!-- Edit Modal -->
   <div x-show="editOpen" class="cf-modal-backdrop" x-cloak @click.self="editOpen=false">
-    <div class="cf-modal max-w-xl" @click.stop>
-      <div id="edit-modal-body" class="p-6"></div>
+    <div class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="patient-edit-modal-title" @click.stop>
+      <div id="edit-modal-body">
+        <div class="cf-modal-header sr-only">
+          <h2 id="patient-edit-modal-title" class="cf-modal-title">Edit patient</h2>
+        </div>
+        <div class="cf-modal-body">
+          <div class="flex items-center justify-center py-8">
+            <i data-lucide="loader-2" class="h-6 w-6 animate-spin text-[var(--cf-muted)]"></i>
+            <span class="ml-2 text-sm text-[var(--cf-muted)]">Loading patient form...</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

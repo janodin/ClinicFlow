@@ -8,7 +8,7 @@ from clinics.models import Clinic
 
 User = get_user_model()
 
-_INPUT = "w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition"
+_INPUT = "cf-input"
 
 
 class SignUpForm(forms.Form):

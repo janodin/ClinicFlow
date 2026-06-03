@@ -1,25 +1,33 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Profile{% endblock %}
 {% block content %}
-<section class="soft-card overflow-hidden rounded-3xl">
-  <div class="bg-cyan-700 p-8 text-white"><h1 class="text-2xl font-black">{{ request.user.display_name }}</h1><p>{{ request.user.email }} · {{ clinic.name }}</p></div>
-  <div class="grid gap-5 p-8 md:grid-cols-2">
+<div class="cf-page">
+  <div class="cf-page-header">
     <div>
-      <label class="mb-1 block text-sm font-bold text-slate-600">Full Name</label>
-      <input disabled value="{{ request.user.display_name }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
-    </div>
-    <div>
-      <label class="mb-1 block text-sm font-bold text-slate-600">Email Address</label>
-      <input disabled value="{{ request.user.email }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
-    </div>
-    <div>
-      <label class="mb-1 block text-sm font-bold text-slate-600">Clinic Name</label>
-      <input disabled value="{{ clinic.name }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
-    </div>
-    <div>
-      <label class="mb-1 block text-sm font-bold text-slate-600">Timezone</label>
-      <input disabled value="{{ clinic.timezone }}" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 cursor-not-allowed">
+      <h1 class="cf-page-title ui-page-title">Profile</h1>
+      <p class="cf-page-description break-words">{{ request.user.display_name }} · <span class="break-all">{{ request.user.email }}</span> · {{ clinic.name }}</p>
     </div>
   </div>
-</section>
+
+  <section class="cf-card">
+    <div class="grid gap-5 md:grid-cols-2">
+    <div class="cf-field">
+      <label for="profile-display-name" class="cf-label">Full Name</label>
+      <input id="profile-display-name" disabled value="{{ request.user.display_name }}" class="cf-input cursor-not-allowed">
+    </div>
+    <div class="cf-field">
+      <label for="profile-email" class="cf-label">Email Address</label>
+      <input id="profile-email" disabled value="{{ request.user.email }}" class="cf-input cursor-not-allowed">
+    </div>
+    <div class="cf-field">
+      <label for="profile-clinic-name" class="cf-label">Clinic Name</label>
+      <input id="profile-clinic-name" disabled value="{{ clinic.name }}" class="cf-input cursor-not-allowed">
+    </div>
+    <div class="cf-field">
+      <label for="profile-timezone" class="cf-label">Timezone</label>
+      <input id="profile-timezone" disabled value="{{ clinic.timezone }}" class="cf-input cursor-not-allowed">
+    </div>
+    </div>
+  </section>
+</div>
 {% endblock %}

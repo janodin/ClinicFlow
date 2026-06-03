@@ -1,15 +1,21 @@
+import json
 import pytest
 from datetime import time, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
+from django.contrib import messages
+from django.contrib.auth import get_user_model
+from django.contrib.messages.storage.fallback import FallbackStorage
+from django.http import HttpResponse
+from django.test import RequestFactory
 from django.urls import reverse
 
 from clinics.models import Clinic, ClinicGroup, ClinicMembership
 from patients.models import Patient
 from services.models import Service
 from appointments.models import Appointment
-from django.contrib.auth import get_user_model
 from django.utils import timezone
 from scheduling.models import ClinicBusinessHour, UnavailableDate
+from dashboard.middleware import HtmxMessagesMiddleware
 
 
 @pytest.fixture
@@ -121,6 +127,57 @@ def test_calendar_events_title_shows_time_and_patient_only(calendar_setup, clien
 
 
 @pytest.mark.django_db
+def test_calendar_events_use_neon_aqua_status_colors(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    pending_start = appointment.starts_at + timedelta(hours=1)
+    no_show_start = appointment.starts_at + timedelta(hours=2)
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=pending_start,
+        ends_at=pending_start + timedelta(minutes=30),
+        status=Appointment.STATUS_PENDING,
+    )
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=no_show_start,
+        ends_at=no_show_start + timedelta(minutes=30),
+        status=Appointment.STATUS_NO_SHOW,
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events"))
+
+    assert response.status_code == 200
+    data = response.json()
+
+    def contrast_ratio(foreground, background):
+        def luminance(hex_color):
+            channels = [int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+            adjusted = [channel / 12.92 if channel <= 0.03928 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+            return 0.2126 * adjusted[0] + 0.7152 * adjusted[1] + 0.0722 * adjusted[2]
+
+        lighter, darker = sorted([luminance(foreground), luminance(background)], reverse=True)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    events_by_status = {event["className"].replace("status-", "", 1): event for event in data}
+    expected_colors = {
+        Appointment.STATUS_PENDING: {"backgroundColor": "#fff6e7", "borderColor": "#80531f", "textColor": "#80531f"},
+        Appointment.STATUS_CONFIRMED: {"backgroundColor": "#ecfeff", "borderColor": "#06b6d4", "textColor": "#0e7490"},
+        Appointment.STATUS_NO_SHOW: {"backgroundColor": "#edf2f7", "borderColor": "#4a5870", "textColor": "#4a5870"},
+    }
+    for status, expected in expected_colors.items():
+        event = events_by_status[status]
+        assert event["backgroundColor"] == expected["backgroundColor"]
+        assert event["borderColor"] == expected["borderColor"]
+        assert event["textColor"] == expected["textColor"]
+        assert contrast_ratio(event["textColor"], event["backgroundColor"]) >= 4.5
+
+
+@pytest.mark.django_db
 def test_calendar_page_uses_event_title_time_only(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     client.force_login(user)
@@ -129,6 +186,148 @@ def test_calendar_page_uses_event_title_time_only(calendar_setup, client):
 
     assert response.status_code == 200
     assert b"displayEventTime: false" in response.content
+
+
+@pytest.mark.django_db
+def test_appointments_page_uses_html_safe_alpine_focus_selector(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:appointments"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'tabindex=\\"-1\\"' not in content
+    assert "[tabindex]:not([tabindex='-1'])" in content
+
+
+@pytest.mark.django_db
+def test_appointments_page_uses_status_dropdown_instead_of_inline_status_links(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:appointments") + f"?status={Appointment.STATUS_CONFIRMED}")
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert '<label for="filter-status" class="cf-label">Status</label>' in content
+    assert '<select id="filter-status" name="status"' in content
+    assert '<option value="">All Statuses</option>' in content
+    assert '<option value="confirmed" selected>Confirmed</option>' in content
+    assert '<input type="hidden" name="status"' not in content
+    assert ':href="statusHref(' not in content
+    assert ">All Status</a>" not in content
+
+
+@pytest.mark.django_db
+def test_appointments_page_search_filters_by_appointment_fields(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    target_date = timezone.localdate() + timedelta(days=1)
+    base_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)))
+    root_canal = Service.objects.create(clinic=clinic, name="Root Canal", duration_minutes=45)
+    name_patient = Patient.objects.create(clinic=clinic, full_name="Mina Santos", phone="09170003333")
+    phone_patient = Patient.objects.create(clinic=clinic, full_name="Phone Match", phone="09171234567")
+    service_patient = Patient.objects.create(clinic=clinic, full_name="Service Match", phone="09170004444")
+    reference_patient = Patient.objects.create(clinic=clinic, full_name="Reference Match", phone="09170005555")
+    other_patient = Patient.objects.create(clinic=clinic, full_name="Unrelated Patient", phone="09170006666")
+    name_match = Appointment.objects.create(
+        clinic=clinic,
+        patient=name_patient,
+        service=service,
+        starts_at=base_start,
+        ends_at=base_start + timedelta(minutes=30),
+    )
+    phone_match = Appointment.objects.create(
+        clinic=clinic,
+        patient=phone_patient,
+        service=service,
+        starts_at=base_start + timedelta(hours=1),
+        ends_at=base_start + timedelta(hours=1, minutes=30),
+    )
+    service_match = Appointment.objects.create(
+        clinic=clinic,
+        patient=service_patient,
+        service=root_canal,
+        starts_at=base_start + timedelta(hours=2),
+        ends_at=base_start + timedelta(hours=2, minutes=45),
+    )
+    reference_match = Appointment.objects.create(
+        clinic=clinic,
+        patient=reference_patient,
+        service=service,
+        starts_at=base_start + timedelta(hours=3),
+        ends_at=base_start + timedelta(hours=3, minutes=30),
+        reference_code="CF-LOOKUP1",
+    )
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=other_patient,
+        service=service,
+        starts_at=base_start + timedelta(hours=4),
+        ends_at=base_start + timedelta(hours=4, minutes=30),
+    )
+    other_group = ClinicGroup.objects.create(name="Other Clinic Group", owner=user)
+    other_clinic = Clinic.objects.create(group=other_group, name="Other Clinic", slug="other-clinic")
+    other_service = Service.objects.create(clinic=other_clinic, name="Other Root Canal", duration_minutes=30)
+    other_clinic_patient = Patient.objects.create(clinic=other_clinic, full_name="Mina Outside", phone="09170007777")
+    Appointment.objects.create(
+        clinic=other_clinic,
+        patient=other_clinic_patient,
+        service=other_service,
+        starts_at=base_start,
+        ends_at=base_start + timedelta(minutes=30),
+    )
+
+    for query, expected in [
+        ("mina", name_match),
+        ("1234567", phone_match),
+        ("root", service_match),
+        ("lookup1", reference_match),
+    ]:
+        response = client.get(reverse("dashboard:appointments"), {"q": query})
+
+        assert response.status_code == 200
+        assert response.context["search_query"] == query
+        assert list(response.context["appointments"]) == [expected]
+
+
+@pytest.mark.django_db
+def test_appointments_page_paginates_ten_appointments(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    patient = Patient.objects.create(clinic=clinic, full_name="Paged Patient", phone="09170005555")
+    starts_at = timezone.now() + timedelta(days=1)
+    for index in range(11):
+        appointment_start = starts_at + timedelta(hours=index)
+        Appointment.objects.create(
+            clinic=clinic,
+            patient=patient,
+            service=service,
+            starts_at=appointment_start,
+            ends_at=appointment_start + timedelta(minutes=30),
+        )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:appointments"))
+    page_obj = response.context["page_obj"]
+
+    assert response.status_code == 200
+    assert page_obj.paginator.per_page == 10
+    assert len(page_obj.object_list) == 10
+    assert page_obj.paginator.num_pages == 2
+
+
+@pytest.mark.django_db
+def test_calendar_page_uses_html_safe_alpine_focus_selector(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'tabindex=\\"-1\\"' not in content
+    assert "[tabindex]:not([tabindex='-1'])" in content
 
 
 @pytest.mark.django_db
@@ -143,6 +342,110 @@ def test_calendar_events_filters_by_service(calendar_setup, client):
     data = response.json()
     assert len(data) == 1
     assert data[0]["id"] == appointment.id
+
+
+@pytest.mark.django_db
+def test_calendar_events_rejects_invalid_service_filter(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events") + "?service=not-a-number")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid service filter."
+
+
+@pytest.mark.django_db
+def test_calendar_events_rejects_out_of_range_service_filter(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events") + "?service=999999999999999999999999999999")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid service filter."
+
+
+@pytest.mark.django_db
+def test_calendar_events_filters_by_status(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    other_start = appointment.starts_at + timedelta(hours=1)
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=other_start,
+        ends_at=other_start + timedelta(minutes=30),
+        status=Appointment.STATUS_PENDING,
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events") + f"?status={Appointment.STATUS_CONFIRMED}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == appointment.id
+
+
+@pytest.mark.django_db
+def test_calendar_events_detail_url_marks_calendar_source(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events"))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "source=calendar" in data[0]["url"]
+
+
+@pytest.mark.django_db
+def test_calendar_cancel_triggers_refetch_without_table_row_target(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_cancel", args=[appointment.id]),
+        {"modal_source": "calendar"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    trigger = response.headers["HX-Trigger"]
+    assert "calendar-refetch" in trigger
+    assert "close-calendar-modal" in trigger
+    assert "HX-Retarget" not in response.headers
+
+
+@pytest.mark.django_db
+def test_calendar_edit_triggers_refetch_without_table_row_target(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_edit", args=[appointment.id]),
+        {
+            "patient_name": patient.full_name,
+            "patient_phone": patient.phone,
+            "patient_email": patient.email,
+            "service": service.id,
+            "date": target_date.isoformat(),
+            "time": "10:00",
+            "status": Appointment.STATUS_CONFIRMED,
+            "payment_state": Appointment.PAYMENT_UNPAID,
+            "source": Appointment.SOURCE_STAFF,
+            "reason": "",
+            "modal_source": "calendar",
+        },
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    trigger = response.headers["HX-Trigger"]
+    assert "calendar-refetch" in trigger
+    assert "HX-Retarget" not in response.headers
+    assert b"Appointment Details" in response.content
 
 
 @pytest.mark.django_db
@@ -209,6 +512,75 @@ def test_appointment_detail_returns_partial(calendar_setup, client):
     assert response.status_code == 200
     assert b"Appointment Details" in response.content
     assert b"Test Patient" in response.content
+
+
+@pytest.mark.django_db
+def test_appointment_detail_rejects_unsafe_mode(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:appointment_detail", args=[appointment.id]) + "?mode='};alert(1);//")
+
+    assert response.status_code == 200
+    assert b"alert(1)" not in response.content
+    assert b"mode: 'detail'" in response.content
+
+
+@pytest.mark.django_db
+def test_htmx_status_update_shows_errors_without_success_toast(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    appointment.status = Appointment.STATUS_COMPLETED
+    appointment.save(update_fields=["status"])
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:update_appointment", args=[appointment.id]),
+        {"status": Appointment.STATUS_PENDING, "payment_state": Appointment.PAYMENT_UNPAID},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"Cannot change status" in response.content
+    assert "Appointment updated." not in response.headers.get("HX-Trigger", "")
+
+
+@pytest.mark.django_db
+def test_htmx_invalid_note_submission_keeps_errors_without_success_toast(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:add_appointment_note", args=[appointment.id]),
+        {"body": "", "modal_source": ""},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert appointment.notes.count() == 0
+    assert b"This field is required" in response.content
+    assert "Note added." not in response.headers.get("HX-Trigger", "")
+
+
+def _htmx_request_with_message_storage():
+    request = RequestFactory().get("/hx/", HTTP_HX_REQUEST="true")
+    request.session = {}
+    request._messages = FallbackStorage(request)
+    return request
+
+
+def test_htmx_messages_middleware_preserves_message_types_and_all_messages():
+    def get_response(request):
+        messages.warning(request, "Slots almost full.")
+        messages.info(request, "Schedule refreshed.")
+        return HttpResponse("")
+
+    response = HtmxMessagesMiddleware(get_response)(_htmx_request_with_message_storage())
+
+    payload = json.loads(response.headers["HX-Trigger"])
+    assert payload["toast-message"] == [
+        {"message": "Slots almost full.", "type": "warning"},
+        {"message": "Schedule refreshed.", "type": "info"},
+    ]
 
 
 @pytest.mark.django_db
@@ -594,6 +966,23 @@ def test_completed_appointment_cannot_be_cancelled_directly(calendar_setup, clie
 
 
 @pytest.mark.django_db
+def test_htmx_cancel_error_stays_visible_without_success_trigger(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    appointment.status = Appointment.STATUS_COMPLETED
+    appointment.save(update_fields=["status", "updated_at"])
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_cancel", args=[appointment.id]),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"Cannot cancel this appointment" in response.content
+    assert "Appointment cancelled." not in response.headers.get("HX-Trigger", "")
+
+
+@pytest.mark.django_db
 def test_cancelled_appointment_cannot_be_rescheduled_directly(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     original_start = appointment.starts_at
@@ -664,4 +1053,7 @@ def test_widget_embed_iframe_uses_embed_source_and_responsive_dimensions(clinic_
 
     assert response.status_code == 200
     assert "?source=embed" in content
-    assert "max-width:calc(100vw - 24px)" in content
+    assert "bottom:max(16px, env(safe-area-inset-bottom))" in content
+    assert "right:max(16px, env(safe-area-inset-right))" in content
+    assert "max-width:calc(100vw - 32px - env(safe-area-inset-right))" in content
+    assert "max-height:calc(100dvh - 32px - env(safe-area-inset-bottom))" in content

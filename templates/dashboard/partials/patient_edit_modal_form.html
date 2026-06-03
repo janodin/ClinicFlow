@@ -1,36 +1,37 @@
 <div>
-  <div class="flex items-center justify-between mb-4 pb-4 border-b border-[var(--cf-line-soft)]">
-    <h2 class="text-[var(--cf-section-title-size)] font-[850] text-[var(--cf-ink)]">Edit Patient</h2>
-    <button type="button" @click="editOpen=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0">
+  <div class="cf-modal-header flex items-center justify-between">
+    <h2 id="patient-edit-modal-title" class="cf-modal-title">Edit Patient</h2>
+    <button type="button" @click="editOpen=false" class="cf-icon-btn" aria-label="Close">
       <i data-lucide="x" class="h-5 w-5"></i>
     </button>
   </div>
   <form method="post" action="{% url 'dashboard:patient_edit' patient.id %}"
         hx-post="{% url 'dashboard:patient_edit' patient.id %}"
         hx-target="#edit-modal-body"
-        x-on:patient-saved.camel="editOpen=false"
-        class="space-y-4">
+        x-on:patient-saved.camel="editOpen=false">
     {% csrf_token %}
-    {% for field in form %}
-      <div class="cf-field {% if field.name == 'notes' %}md:col-span-2{% endif %}">
-        <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
-        {% if field.field.widget.input_type == 'checkbox' %}
-          <label class="flex items-center gap-2 cursor-pointer">
+    <div class="cf-modal-body grid gap-4 md:grid-cols-2">
+      {% for field in form %}
+        <div class="cf-field {% if field.name == 'notes' %}md:col-span-2{% endif %}">
+          <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
+          {% if field.field.widget.input_type == 'checkbox' %}
+            <label class="flex items-center gap-2 cursor-pointer">
+              {{ field }}
+              <span class="text-sm text-[var(--cf-muted)]">{{ field.label }}</span>
+            </label>
+          {% else %}
             {{ field }}
-            <span class="text-sm text-[var(--cf-muted)]">{{ field.label }}</span>
-          </label>
-        {% else %}
-          {{ field }}
-        {% endif %}
-        {% if field.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ field.errors.0 }}</p>{% endif %}
-      </div>
-    {% endfor %}
-    <div class="flex gap-3 pt-4 border-t border-[var(--cf-line-soft)]">
+          {% endif %}
+          {% if field.errors %}<p class="cf-error">{{ field.errors.0 }}</p>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <div class="cf-modal-footer">
       <button type="submit" class="cf-btn cf-btn-primary flex-1">
-        <i data-lucide="check" class="h-4 w-4"></i>
+        <i data-lucide="save" class="h-4 w-4"></i>
         Save Changes
       </button>
-      <button type="button" @click="editOpen=false" class="cf-btn cf-btn-secondary flex-1">Cancel</button>
+      <button type="button" @click="editOpen=false" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="x-circle" class="h-4 w-4"></i>Cancel</button>
     </div>
   </form>
 </div>

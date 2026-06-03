@@ -8,11 +8,11 @@ from django.utils.text import slugify
 from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
 
 
-DEFAULT_WIDGET_ACCENT_COLOR = "#0891b2"
+DEFAULT_WIDGET_ACCENT_COLOR = "#06b6d4"
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 hex_color_validator = RegexValidator(
     regex=HEX_COLOR_RE.pattern,
-    message="Enter a valid hex color such as #0891b2.",
+    message="Enter a valid hex color such as #06b6d4.",
 )
 
 

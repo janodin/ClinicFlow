@@ -1,68 +1,79 @@
 <div x-data="{mode: '{{ init_mode|default:'detail' }}'}">
+  <h2 id="appointment-detail-title" class="sr-only" x-text="mode === 'cancel' ? 'Cancel appointment' : (mode === 'reschedule' ? 'Reschedule appointment' : 'Appointment Details')">Appointment Details</h2>
   <!-- Detail Mode -->
-  <div x-show="mode === 'detail'" x-cloak class="space-y-4">
-    <div class="flex items-center justify-between mb-4 pb-4 border-b border-[var(--cf-line-soft)]">
-      <h2 class="text-[var(--cf-section-title-size)] font-[850] text-[var(--cf-ink)]">Appointment Details</h2>
-      <button type="button" @click="detailOpen=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0">
+  <div x-show="mode === 'detail'" x-cloak>
+    <div class="cf-modal-header flex items-center justify-between">
+      <h2 class="cf-modal-title">Appointment Details</h2>
+      <button type="button" @click="detailOpen=false" class="cf-icon-btn" aria-label="Close">
         <i data-lucide="x" class="h-5 w-5"></i>
       </button>
     </div>
-    <div class="grid gap-4 md:grid-cols-2">
-      <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
-        <p class="cf-label mb-1">Patient</p>
-        <p class="text-[var(--cf-ink)] font-[700]">{{ appointment.patient.full_name }}</p>
-        <p class="text-sm text-[var(--cf-muted)]">{{ appointment.patient.phone }}</p>
-        {% if appointment.patient.email %}<p class="text-sm text-[var(--cf-muted)]">{{ appointment.patient.email }}</p>{% endif %}
+    <div class="cf-modal-body space-y-5">
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="cf-label mb-1">Patient</p>
+          <p class="break-words text-[var(--cf-ink)] font-[700]">{{ appointment.patient.full_name }}</p>
+          <p class="break-words text-sm text-[var(--cf-muted)]">{{ appointment.patient.phone }}</p>
+          {% if appointment.patient.email %}<p class="break-all text-sm text-[var(--cf-muted)]">{{ appointment.patient.email }}</p>{% endif %}
+        </div>
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="cf-label mb-1">Service</p>
+          <p class="break-words text-[var(--cf-ink)] font-[700]">{{ appointment.service.name }}</p>
+          <p class="text-sm text-[var(--cf-muted)]">{{ appointment.service.effective_duration }} min</p>
+        </div>
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="cf-label mb-1">Date & Time</p>
+          <p class="text-[var(--cf-ink)] font-[700]">{{ appointment.starts_at|date:"M j, Y" }}</p>
+          <p class="text-sm text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }} - {{ appointment.ends_at|time:"g:i A" }}</p>
+        </div>
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="cf-label mb-1">Status</p>
+          <span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span>
+        </div>
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="cf-label mb-1">Payment</p>
+          <span class="cf-badge cf-badge-info">{{ appointment.get_payment_state_display }}</span>
+        </div>
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="cf-label mb-1">Source</p>
+          <span class="cf-badge cf-badge-info">{{ appointment.get_source_display }}</span>
+        </div>
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="cf-label mb-1">Reference</p>
+          <p class="break-all text-sm font-mono text-[var(--cf-muted)]">{{ appointment.reference_code }}</p>
+        </div>
       </div>
-      <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
-        <p class="cf-label mb-1">Service</p>
-        <p class="text-[var(--cf-ink)] font-[700]">{{ appointment.service.name }}</p>
-        <p class="text-sm text-[var(--cf-muted)]">{{ appointment.service.effective_duration }} min</p>
-      </div>
-      <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
-        <p class="cf-label mb-1">Date & Time</p>
-        <p class="text-[var(--cf-ink)] font-[700]">{{ appointment.starts_at|date:"M j, Y" }}</p>
-        <p class="text-sm text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }} - {{ appointment.ends_at|time:"g:i A" }}</p>
-      </div>
-      <div>
-        <p class="cf-label mb-1">Status</p>
-        <span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span>
-      </div>
-      <div>
-        <p class="cf-label mb-1">Payment</p>
-        <span class="cf-badge cf-badge-info">{{ appointment.get_payment_state_display }}</span>
-      </div>
-      <div>
-        <p class="cf-label mb-1">Source</p>
-        <span class="cf-badge cf-badge-info">{{ appointment.get_source_display }}</span>
-      </div>
-      <div>
-        <p class="cf-label mb-1">Reference</p>
-        <p class="text-sm font-mono text-[var(--cf-muted)]">{{ appointment.reference_code }}</p>
-      </div>
-    </div>
 
     {% if appointment.reason %}
-    <div class="border-t border-[var(--cf-line-soft)] pt-4">
+    <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
       <p class="cf-label mb-1">Reason / Notes</p>
-      <p class="text-sm text-[var(--cf-muted)]">{{ appointment.reason }}</p>
+      <p class="break-words text-sm text-[var(--cf-muted)]">{{ appointment.reason }}</p>
     </div>
     {% endif %}
 
     {% if appointment.status == 'cancelled' and appointment.cancellation_reason %}
     <div class="border-t border-[var(--cf-line-soft)] pt-4">
       <p class="cf-label mb-1">Cancellation Reason</p>
-      <p class="text-sm text-[var(--cf-muted)]">{{ appointment.cancellation_reason }}</p>
+      <p class="break-words text-sm text-[var(--cf-muted)]">{{ appointment.cancellation_reason }}</p>
     </div>
     {% endif %}
 
     <div class="border-t border-[var(--cf-line-soft)] pt-5">
       <h3 class="cf-label mb-3">Update Status</h3>
-      <form method="post" action="{% url 'dashboard:update_appointment' appointment.id %}" class="flex flex-wrap items-end gap-3" hx-post="{% url 'dashboard:update_appointment' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
+      <form method="post" action="{% url 'dashboard:update_appointment' appointment.id %}" class="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end" hx-post="{% url 'dashboard:update_appointment' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
         {% csrf_token %}
-        <div class="min-w-[200px] flex-1">{{ status_form.status }}</div>
-        <div class="min-w-[200px] flex-1">{{ status_form.payment_state }}</div>
-        <button type="submit" class="cf-btn cf-btn-primary">Update</button>
+        {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+        <div class="cf-field">
+          <label for="{{ status_form.status.id_for_label }}" class="cf-label">{{ status_form.status.label }}</label>
+          {{ status_form.status }}
+          {% if status_form.status.errors %}<p class="cf-error">{{ status_form.status.errors.0 }}</p>{% endif %}
+        </div>
+        <div class="cf-field">
+          <label for="{{ status_form.payment_state.id_for_label }}" class="cf-label">{{ status_form.payment_state.label }}</label>
+          {{ status_form.payment_state }}
+          {% if status_form.payment_state.errors %}<p class="cf-error">{{ status_form.payment_state.errors.0 }}</p>{% endif %}
+        </div>
+        <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Update</button>
       </form>
     </div>
 
@@ -70,8 +81,13 @@
       <h3 class="cf-label mb-3">Add Internal Note</h3>
       <form method="post" action="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-post="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
         {% csrf_token %}
-        {{ note_form.body }}
-        <button type="submit" class="cf-btn cf-btn-secondary mt-3">Add Note</button>
+        {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+        <div class="cf-field">
+          <label for="{{ note_form.body.id_for_label }}" class="cf-label">{{ note_form.body.label }}</label>
+          {{ note_form.body }}
+          {% if note_form.body.errors %}<p class="cf-error">{{ note_form.body.errors.0 }}</p>{% endif %}
+        </div>
+        <button type="submit" class="cf-btn cf-btn-secondary mt-3"><i data-lucide="message-square-plus" class="h-4 w-4"></i>Add Note</button>
       </form>
     </div>
 
@@ -81,94 +97,101 @@
       {% for note in appointment.notes.all %}
         <div class="rounded-[var(--cf-radius)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
           <p class="text-xs text-[var(--cf-faint)]">{{ note.author }} &middot; {{ note.created_at|date:"M j, Y g:i A" }}</p>
-          <p class="mt-1 text-sm text-[var(--cf-ink)]">{{ note.body }}</p>
+          <p class="mt-1 break-words text-sm text-[var(--cf-ink)]">{{ note.body }}</p>
         </div>
       {% endfor %}
     </div>
     {% endif %}
+
+    </div>
   </div>
 
   <!-- Cancel Mode -->
-  <div x-show="mode === 'cancel'" x-cloak class="space-y-4">
-    <div class="flex items-center justify-between mb-4 pb-4 border-b border-[var(--cf-line-soft)]">
+  <div x-show="mode === 'cancel'" x-cloak>
+    <div class="cf-modal-header flex items-center justify-between">
       <div class="flex items-center gap-3">
         <div class="cf-icon-box h-10 w-10 rounded-full">
           <i data-lucide="alert-triangle" class="h-5 w-5"></i>
         </div>
         <div>
-          <h3 class="text-[var(--cf-section-title-size)] font-[850] text-[var(--cf-ink)]">Cancel Appointments</h3>
+          <h3 id="cancel-appointment-title" class="cf-modal-title">Cancel appointment</h3>
           <p class="text-sm text-[var(--cf-muted)]">This action cannot be undone</p>
         </div>
       </div>
-      <button type="button" @click="detailOpen=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0">
+      <button type="button" @click="detailOpen=false" class="cf-icon-btn" aria-label="Close">
         <i data-lucide="x" class="h-5 w-5"></i>
       </button>
     </div>
-    <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
-      <p class="text-sm text-[var(--cf-muted)]">Patient: <strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></p>
-      <p class="text-sm text-[var(--cf-muted)]">Service: <strong class="text-[var(--cf-ink)]">{{ appointment.service.name }}</strong></p>
-      <p class="text-sm text-[var(--cf-muted)]">Date: <strong class="text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</strong></p>
-    </div>
     <form method="post" action="{% url 'dashboard:appointment_cancel' appointment.id %}"
           hx-post="{% url 'dashboard:appointment_cancel' appointment.id %}"
-          hx-target="#appointment-row-{{ appointment.id }}"
-          hx-swap="outerHTML"
-          @htmx:after-request="detailOpen = false"
-          class="space-y-4">
+          hx-target="#cancel-error"
+          hx-swap="innerHTML"
+          @htmx:after-request="if ($event.detail.xhr.getResponseHeader('HX-Trigger')) detailOpen = false">
       {% csrf_token %}
-      <div class="cf-field">
-        <label for="cancellation_reason" class="cf-label">Cancellation Reason (optional)</label>
-        <textarea id="cancellation_reason" name="cancellation_reason" rows="3" placeholder="Enter reason..." class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition resize-y"></textarea>
+      {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+      <div class="cf-modal-body space-y-4">
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="break-words text-sm text-[var(--cf-muted)]">Patient: <strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></p>
+          <p class="break-words text-sm text-[var(--cf-muted)]">Service: <strong class="text-[var(--cf-ink)]">{{ appointment.service.name }}</strong></p>
+          <p class="break-words text-sm text-[var(--cf-muted)]">Date: <strong class="text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</strong></p>
+        </div>
+        <div class="cf-field">
+          <label for="cancellation_reason" class="cf-label">Cancellation Reason (optional)</label>
+          <textarea id="cancellation_reason" name="cancellation_reason" rows="3" placeholder="Enter reason..." class="cf-textarea"></textarea>
+        </div>
+        <div id="cancel-error" class="cf-error"></div>
       </div>
-      <div class="flex gap-3 pt-4 border-t border-[var(--cf-line-soft)]">
-        <button type="submit" class="cf-btn cf-btn-danger flex-1">Confirm Cancel</button>
-        <button type="button" @click="mode = 'detail'" class="cf-btn cf-btn-secondary flex-1">Back</button>
+      <div class="cf-modal-footer">
+        <button type="submit" class="cf-btn cf-btn-danger flex-1"><i data-lucide="ban" class="h-4 w-4"></i>Confirm Cancel</button>
+        <button type="button" @click="mode = 'detail'" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="arrow-left" class="h-4 w-4"></i>Back</button>
       </div>
     </form>
   </div>
 
   <!-- Reschedule Mode -->
-  <div x-show="mode === 'reschedule'" x-cloak class="space-y-4">
-    <div class="flex items-center justify-between mb-4 pb-4 border-b border-[var(--cf-line-soft)]">
+  <div x-show="mode === 'reschedule'" x-cloak>
+    <div class="cf-modal-header flex items-center justify-between">
       <div class="flex items-center gap-3">
         <div class="cf-icon-box h-10 w-10 rounded-full">
           <i data-lucide="calendar-clock" class="h-5 w-5"></i>
         </div>
         <div>
-          <h3 class="text-[var(--cf-section-title-size)] font-[850] text-[var(--cf-ink)]">Reschedule Appointments</h3>
+          <h3 id="reschedule-appointment-title" class="cf-modal-title">Reschedule appointment</h3>
           <p class="text-sm text-[var(--cf-muted)]">Select a new date and time</p>
         </div>
       </div>
-      <button type="button" @click="detailOpen=false" class="cf-btn cf-btn-ghost p-1.5 h-auto min-h-0">
+      <button type="button" @click="detailOpen=false" class="cf-icon-btn" aria-label="Close">
         <i data-lucide="x" class="h-5 w-5"></i>
       </button>
-    </div>
-    <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
-      <p class="text-sm text-[var(--cf-muted)]">Patient: <strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></p>
-      <p class="text-sm text-[var(--cf-muted)]">Service: <strong class="text-[var(--cf-ink)]">{{ appointment.service.name }}</strong></p>
-      <p class="text-sm text-[var(--cf-muted)]">Current: <strong class="text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</strong></p>
     </div>
     <form method="post" action="{% url 'dashboard:appointment_reschedule' appointment.id %}"
           hx-post="{% url 'dashboard:appointment_reschedule' appointment.id %}"
           hx-target="#reschedule-error"
           hx-swap="innerHTML"
-          @htmx:after-request="if ($event.detail.successful) detailOpen = false"
-          class="space-y-4">
+          @htmx:after-request="if ($event.detail.xhr.getResponseHeader('HX-Trigger')) detailOpen = false">
       {% csrf_token %}
-      <div class="grid gap-4 md:grid-cols-2">
-        <div class="cf-field">
-          <label for="new_date" class="cf-label">New Date</label>
-          <input id="new_date" type="date" name="new_date" required value="{{ appointment.starts_at|date:'Y-m-d' }}" class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition">
+      {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+      <div class="cf-modal-body space-y-4">
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="break-words text-sm text-[var(--cf-muted)]">Patient: <strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></p>
+          <p class="break-words text-sm text-[var(--cf-muted)]">Service: <strong class="text-[var(--cf-ink)]">{{ appointment.service.name }}</strong></p>
+          <p class="break-words text-sm text-[var(--cf-muted)]">Current: <strong class="text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</strong></p>
         </div>
-        <div class="cf-field">
-          <label for="new_time" class="cf-label">New Time</label>
-          <input id="new_time" type="time" name="new_time" required value="{{ appointment.starts_at|time:'H:i' }}" class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition">
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="cf-field">
+            <label for="new_date" class="cf-label">New Date</label>
+            <input id="new_date" type="date" name="new_date" required value="{{ appointment.starts_at|date:'Y-m-d' }}" class="cf-input">
+          </div>
+          <div class="cf-field">
+            <label for="new_time" class="cf-label">New Time</label>
+            <input id="new_time" type="time" name="new_time" required value="{{ appointment.starts_at|time:'H:i' }}" class="cf-input">
+          </div>
         </div>
+        <div id="reschedule-error" class="cf-error"></div>
       </div>
-      <div id="reschedule-error"></div>
-      <div class="flex gap-3 pt-4 border-t border-[var(--cf-line-soft)]">
-        <button type="submit" class="cf-btn cf-btn-primary flex-1">Reschedule</button>
-        <button type="button" @click="mode = 'detail'" class="cf-btn cf-btn-secondary flex-1">Back</button>
+      <div class="cf-modal-footer">
+        <button type="submit" class="cf-btn cf-btn-primary flex-1"><i data-lucide="calendar-clock" class="h-4 w-4"></i>Reschedule</button>
+        <button type="button" @click="mode = 'detail'" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="arrow-left" class="h-4 w-4"></i>Back</button>
       </div>
     </form>
   </div>
