@@ -944,6 +944,8 @@ def test_task_3_appointment_rows_surface_inline_actions():
     assert "data-lucide=\"pencil\"" in template
     assert "data-lucide=\"calendar-clock\"" in template
     assert "data-lucide=\"x-circle\"" in template
+    for icon in ["eye", "pencil", "calendar-clock", "x-circle"]:
+        assert f'data-lucide="{icon}" class="h-4 w-4 shrink-0" aria-hidden="true"' in template
     assert "View</a>" in template
     assert "Edit</a>" in template
     assert "Reschedule</a>" in template
