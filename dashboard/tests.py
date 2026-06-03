@@ -760,8 +760,10 @@ def test_assistant_settings_page_explains_launcher_first_embed_options(clinic_se
     assert response.status_code == 200
     assert "previewOpen: false" in content
     assert "@click=\"previewOpen = true\"" in content
-    assert "@click=\"previewOpen = false\"" in content
+    assert "window.addEventListener('message'" in content
     assert "clinicflow-minimize" in content
+    assert "x-show=\"previewOpen\" x-transition x-cloak" in content
+    assert "Minimize preview" not in content
     assert "Click the launcher to preview how patients open the widget." in content
     assert "aria-label=\"Open booking widget preview\"" in content
     assert "Book an appointment" in content
