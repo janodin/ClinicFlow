@@ -48,7 +48,7 @@
         {% endif %}
         <div class="mt-4 grid gap-3 md:grid-cols-2" role="radiogroup" aria-label="{{ ai_form.messenger_response_mode.label }}">
           <label class="cf-choice-card">
-            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="quick_replies" class="cf-choice-card-input" {% if ai_form.messenger_response_mode.value == "quick_replies" %}checked{% endif %}>
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="quick_replies" class="cf-choice-card-input" onchange="this.form.requestSubmit()" {% if ai_form.messenger_response_mode.value == "quick_replies" %}checked{% endif %}>
             <span class="cf-choice-card-mark" aria-hidden="true"></span>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">Quick replies</span>
@@ -56,7 +56,7 @@
             </span>
           </label>
           <label class="cf-choice-card">
-            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="ai" class="cf-choice-card-input" {% if ai_form.messenger_response_mode.value == "ai" %}checked{% endif %}>
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="ai" class="cf-choice-card-input" onchange="this.form.requestSubmit()" {% if ai_form.messenger_response_mode.value == "ai" %}checked{% endif %}>
             <span class="cf-choice-card-mark" aria-hidden="true"></span>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">AI mode</span>

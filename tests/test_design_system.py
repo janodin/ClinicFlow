@@ -1284,6 +1284,7 @@ def test_assistant_page_messenger_mode_uses_readable_radio_cards():
     assert "name=\"{{ ai_form.messenger_response_mode.html_name }}\"" in template
     assert "value=\"quick_replies\"" in template
     assert "value=\"ai\"" in template
+    assert template.count('onchange="this.form.requestSubmit()"') == 2
     assert "No AI tokens are consumed" in template
     assert "No quick-reply buttons are shown" in template
     assert "Messenger AI mode is independent from the website Assistant switch" in template
