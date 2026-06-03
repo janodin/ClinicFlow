@@ -960,11 +960,15 @@ def test_dashboard_tables_use_bounded_mobile_scroll_regions():
 
 def test_responsive_table_css_uses_inner_scroll_and_mobile_width_variants():
     css = css_text()
+    page = css_rule_block(".cf-page")
+    page_children = css_rule_block(".cf-page > *")
     wrap = css_rule_block(".cf-table-wrap")
     scroll = css_rule_block(".cf-table-scroll")
     table = css_rule_block(".cf-table")
     mobile = re.search(r"@media \(max-width: 640px\) \{(?P<body>.*?)^\}", css, re.DOTALL | re.MULTILINE).group("body")
 
+    assert "min-width: 0;" in page
+    assert "min-width: 0;" in page_children
     assert "overflow: hidden;" in wrap
     assert "width: 100%;" in scroll
     assert "max-width: 100%;" in scroll
@@ -972,6 +976,7 @@ def test_responsive_table_css_uses_inner_scroll_and_mobile_width_variants():
     assert "overflow-x: auto;" in scroll
     assert "-webkit-overflow-scrolling: touch;" in scroll
     assert "overscroll-behavior-inline: contain;" in scroll
+    assert "contain: layout paint;" in scroll
     assert "min-width: max(100%, 44rem);" in table
     assert "cf-table-compact" in css
     assert "cf-table-form" in css
@@ -1281,7 +1286,28 @@ def test_assistant_page_messenger_mode_uses_readable_radio_cards():
     assert "value=\"ai\"" in template
     assert "No AI tokens are consumed" in template
     assert "No quick-reply buttons are shown" in template
-    assert "AI mode only takes over when AI replies are enabled" in template
+    assert "Messenger AI mode is independent from the website Assistant switch" in template
+    assert "AI mode only takes over when AI replies are enabled" not in template
+
+
+def test_assistant_page_messenger_mode_uses_custom_aqua_radio_cards():
+    template = source_text("templates/dashboard/assistant_settings.html")
+
+    assert template.count('class="cf-choice-card"') == 2
+    assert template.count('class="cf-choice-card-input"') == 2
+    assert template.count('class="cf-choice-card-mark"') == 2
+
+    choice_card = css_rule_block(".cf-choice-card")
+    selected_card = css_rule_block(".cf-choice-card:has(.cf-choice-card-input:checked)")
+    mark = css_rule_block(".cf-choice-card-mark")
+    selected_mark = css_rule_block(".cf-choice-card:has(.cf-choice-card-input:checked) .cf-choice-card-mark::after")
+
+    assert "border: 1px solid var(--cf-line);" in choice_card
+    assert "border-color: var(--cf-brand);" in selected_card
+    assert "background: linear-gradient(180deg, var(--cf-surface) 0%, var(--cf-brand-soft) 100%);" in selected_card
+    assert "border-radius: var(--cf-radius-pill);" in mark
+    assert "background: var(--cf-brand);" in selected_mark
+    assert "transform: scale(1);" in selected_mark
 
 
 def test_faq_summary_metrics_use_aqua_soft_pills():

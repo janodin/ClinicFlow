@@ -39,7 +39,7 @@
         <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h3 class="cf-section-title text-lg">Messenger Response Mode</h3>
-            <p class="mt-1 text-sm text-[var(--cf-muted)]">This affects Facebook Messenger only. AI mode only takes over when AI replies are enabled.</p>
+            <p class="mt-1 text-sm text-[var(--cf-muted)]">This affects Facebook Messenger only. Messenger AI mode is independent from the website Assistant switch.</p>
           </div>
           <span class="cf-badge cf-badge-active self-start">Messenger only</span>
         </div>
@@ -47,15 +47,17 @@
           <p class="mt-3 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface)] px-3 py-2 text-xs text-[var(--cf-muted)]">You can choose a Messenger mode now. It will apply after Facebook Messenger is connected.</p>
         {% endif %}
         <div class="mt-4 grid gap-3 md:grid-cols-2" role="radiogroup" aria-label="{{ ai_form.messenger_response_mode.label }}">
-          <label class="group flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface)] p-4 transition hover:border-[var(--cf-brand)] hover:shadow-sm">
-            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="quick_replies" class="mt-1" {% if ai_form.messenger_response_mode.value == "quick_replies" %}checked{% endif %}>
+          <label class="cf-choice-card">
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="quick_replies" class="cf-choice-card-input" {% if ai_form.messenger_response_mode.value == "quick_replies" %}checked{% endif %}>
+            <span class="cf-choice-card-mark" aria-hidden="true"></span>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">Quick replies</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Use guided buttons for Messenger booking. No AI tokens are consumed.</span>
             </span>
           </label>
-          <label class="group flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface)] p-4 transition hover:border-[var(--cf-brand)] hover:shadow-sm">
-            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="ai" class="mt-1" {% if ai_form.messenger_response_mode.value == "ai" %}checked{% endif %}>
+          <label class="cf-choice-card">
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="ai" class="cf-choice-card-input" {% if ai_form.messenger_response_mode.value == "ai" %}checked{% endif %}>
+            <span class="cf-choice-card-mark" aria-hidden="true"></span>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">AI mode</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Use AI for Messenger conversations and booking. No quick-reply buttons are shown.</span>

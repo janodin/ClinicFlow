@@ -2,7 +2,6 @@ import {
   workflow,
   node,
   trigger,
-  ifElse,
   switchCase,
   languageModel,
   memory,
@@ -12,8 +11,8 @@ import {
   expr,
 } from '@n8n/workflow-sdk';
 
-const DJANGO_BASE_URL = 'https://clinic.example.com';
-const N8N_WEBHOOK_CREDENTIAL_ID = 'replace-with-n8n-http-header-credential-id';
+const DJANGO_BASE_URL = 'https://178-105-83-211.nip.io';
+const N8N_WEBHOOK_CREDENTIAL_ID = 'PJHqVMwE3qU58s9E';
 const MESSENGER_FALLBACK = 'Thanks for your message. Please contact the clinic directly for help.';
 const WIDGET_FALLBACK = 'Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.';
 
@@ -82,10 +81,10 @@ const metaMessengerEvents = trigger({
       httpMethod: 'POST',
       path: 'clinicflow-messenger',
       responseMode: 'responseNode',
-      options: {},
+      options: { rawBody: true },
     },
   },
-  output: [{ body: { entry: [{ id: 'PAGE123', messaging: [{ sender: { id: 'PSID123' }, recipient: { id: 'PAGE123' }, message: { text: 'Can I book cleaning tomorrow?' } }] }] } }],
+  output: [{ headers: { 'X-Hub-Signature-256': 'sha256=abc123' }, body: { entry: [{ id: 'PAGE123', messaging: [{ sender: { id: 'PSID123' }, recipient: { id: 'PAGE123' }, message: { text: 'Can I book cleaning tomorrow?' } }] }] } }],
 });
 
 const acknowledgeMetaMessengerEvent = node({
@@ -103,7 +102,7 @@ const acknowledgeMetaMessengerEvent = node({
       },
     },
   },
-  output: [{ body: { entry: [{ id: 'PAGE123', messaging: [{ sender: { id: 'PSID123' }, recipient: { id: 'PAGE123' }, message: { text: 'Can I book cleaning tomorrow?' } }] }] } }],
+  output: [{ headers: { 'X-Hub-Signature-256': 'sha256=abc123' }, body: { entry: [{ id: 'PAGE123', messaging: [{ sender: { id: 'PSID123' }, recipient: { id: 'PAGE123' }, message: { text: 'Can I book cleaning tomorrow?' } }] }] } }],
 });
 
 const normalizeMessengerRequest = node({
@@ -115,28 +114,114 @@ const normalizeMessengerRequest = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const input = $input.first().json;
-const body = input.body || input;
+const rawBodySource = input.rawBody ?? input.body ?? input;
+const rawBody = typeof rawBodySource === 'string' ? rawBodySource : JSON.stringify(rawBodySource);
+let body = input.body || input;
+if (typeof body === 'string') {
+  try {
+    body = JSON.parse(body);
+  } catch (error) {
+    return [];
+  }
+}
+const headers = input.headers || {};
+const signature = String(headers['X-Hub-Signature-256'] || headers['x-hub-signature-256'] || '').trim();
 const entry = body.entry?.[0] || {};
 const messaging = entry.messaging?.[0] || {};
 const pageId = String(entry.id || messaging.recipient?.id || '').trim();
 const psid = String(messaging.sender?.id || '').trim();
 const message = String(messaging.message?.text || '').trim();
-if (!pageId || !psid || !message) {
+const postback = String(messaging.postback?.payload || messaging.message?.quick_reply?.payload || '').trim();
+if (!pageId || !psid || (!message && !postback)) {
   return [];
 }
 return [{ json: {
   channel: 'messenger',
   message,
+  postback,
   page_id: pageId,
   psid,
   clinic_slug: '',
   session_id: '',
   session_key: 'messenger:' + pageId + ':' + psid,
-  output_mode: 'facebook'
+  output_mode: 'facebook',
+  raw_body: rawBody,
+  signature
 } }];`,
     },
   },
-  output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', page_id: 'PAGE123', psid: 'PSID123', clinic_slug: '', session_id: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook' }],
+  output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', postback: '', page_id: 'PAGE123', psid: 'PSID123', clinic_slug: '', session_id: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook', raw_body: '{"entry":[{"id":"PAGE123"}]}', signature: 'sha256=abc123' }],
+});
+
+const verifyMetaSignature = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Verify Meta Signature',
+    position: [688, 560],
+    parameters: {
+      method: 'POST',
+      url: `${DJANGO_BASE_URL}/messenger/meta/verify-signature/`,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $json.page_id, raw_body: $json.raw_body, signature: $json.signature } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ verified: true }],
+});
+
+const routeMetaSignature = switchCase({
+  version: 3.4,
+  config: {
+    name: 'Route Meta Signature',
+    position: [912, 560],
+    parameters: {
+      mode: 'rules',
+      rules: {
+        values: [
+          {
+            renameOutput: true,
+            outputKey: 'signature_verified',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.verified ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+          {
+            renameOutput: true,
+            outputKey: 'signature_invalid',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.verified ? "true" : "false" }}'), rightValue: 'false', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+        ],
+      },
+      options: { fallbackOutput: 'none' },
+    },
+  },
+});
+
+const ignoreInvalidMetaSignature = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Ignore Invalid Meta Signature',
+    position: [1136, 432],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: 'return [];',
+    },
+  },
+  output: [],
 });
 
 const widgetAssistantWebhook = trigger({
@@ -200,7 +285,7 @@ const getMessengerClinicContext = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id } }}'),
+      jsonBody: expr('{{ { page_id: $("Normalize Messenger Request").item.json.page_id } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
@@ -277,21 +362,68 @@ const sharedAiInput = node({
   output: [{ channel: 'widget', message: 'Can I book tomorrow?', clinic_slug: 'demo-clinic', session_key: 'widget:demo-clinic:SESSION123', output_mode: 'widget_json', fallback_message: WIDGET_FALLBACK, context: { found: true, ai: { is_ai_enabled: true } } }],
 });
 
-const checkSharedAiEnabled = ifElse({
-  version: 2.3,
+const resolveAssistantMode = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
   config: {
-    name: 'Check Shared AI Enabled',
+    name: 'Resolve Assistant Mode',
     position: [1360, 800],
     parameters: {
-      conditions: {
-        options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
-        conditions: [
-          { leftValue: expr('{{ $json.context?.found }}'), rightValue: true, operator: { type: 'boolean', operation: 'equals' } },
-          { leftValue: expr('{{ $json.context?.ai?.is_ai_enabled }}'), rightValue: true, operator: { type: 'boolean', operation: 'equals' } },
-          { leftValue: expr('{{ !!$json.message }}'), rightValue: true, operator: { type: 'boolean', operation: 'equals' } },
+      mode: 'runOnceForAllItems',
+      jsCode: `return $input.all().map((input) => {
+  const item = input.json || {};
+  const channel = item.channel || 'widget';
+  const messengerMode = item.context?.ai?.messenger_response_mode || 'quick_replies';
+  // Messenger must use messenger_response_mode. Widget keeps is_ai_enabled.
+  const useAi = channel === 'messenger' ? messengerMode === 'ai' : item.context?.ai?.is_ai_enabled === true;
+  const useQuickReplies = channel === 'messenger' && messengerMode !== 'ai';
+  const assistantRoute = useAi ? 'ai' : (useQuickReplies ? 'quick_replies' : 'fallback');
+  return { json: { ...item, messenger_response_mode: messengerMode, should_use_ai: useAi, should_use_quick_replies: useQuickReplies, assistant_route: assistantRoute } };
+});`,
+    },
+  },
+  output: [{ channel: 'messenger', messenger_response_mode: 'quick_replies', should_use_ai: false, should_use_quick_replies: true, assistant_route: 'quick_replies' }],
+});
+
+const routeAssistantMode = switchCase({
+  version: 3.4,
+  config: {
+    name: 'Route Assistant Mode',
+    position: [1488, 800],
+    parameters: {
+      mode: 'rules',
+      rules: {
+        values: [
+          {
+            renameOutput: true,
+            outputKey: 'ai',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.assistant_route }}'), rightValue: 'ai', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+          {
+            renameOutput: true,
+            outputKey: 'quick_replies',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.assistant_route }}'), rightValue: 'quick_replies', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+          {
+            renameOutput: true,
+            outputKey: 'fallback',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.assistant_route }}'), rightValue: 'fallback', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
         ],
-        combinator: 'and',
       },
+      options: { fallbackOutput: 'none' },
     },
   },
 });
@@ -303,7 +435,7 @@ const sharedChatModel = languageModel({
     name: 'Shared Chat Model',
     position: [1536, 1040],
     parameters: {
-      model: { __rl: true, value: 'openai/gpt-oss-120b', mode: 'list', cachedResultName: 'openai/gpt-oss-120b' },
+      model: { __rl: true, value: 'deepseek-ai/DeepSeek-V4-Flash', mode: 'list', cachedResultName: 'deepseek-ai/DeepSeek-V4-Flash' },
       responsesApiEnabled: false,
       options: { temperature: 0.2 },
     },
@@ -335,7 +467,7 @@ const matchServicesTool = tool({
     position: [1792, 1040],
     parameters: {
       method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://clinic.example.com/messenger/ai/services/" : "https://clinic.example.com/messenger/ai/widget/services/" }}'),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/services/" : "${DJANGO_BASE_URL}/messenger/ai/widget/services/" }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -363,7 +495,7 @@ const checkAvailabilityTool = tool({
     position: [1920, 1040],
     parameters: {
       method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://clinic.example.com/messenger/ai/availability/" : "https://clinic.example.com/messenger/ai/widget/availability/" }}'),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/availability/" : "${DJANGO_BASE_URL}/messenger/ai/widget/availability/" }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -393,7 +525,7 @@ const bookConfirmedAppointmentTool = tool({
     position: [2048, 1040],
     parameters: {
       method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://clinic.example.com/messenger/ai/book/" : "https://clinic.example.com/messenger/ai/widget/book/" }}'),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/book/" : "${DJANGO_BASE_URL}/messenger/ai/widget/book/" }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -417,6 +549,61 @@ const bookConfirmedAppointmentTool = tool({
     credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ created: false, error: 'Appointment creation requires explicit user confirmation.' }],
+});
+
+const getMessengerQuickReplies = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Get Messenger Quick Replies',
+    position: [1744, 520],
+    parameters: {
+      method: 'POST',
+      url: `${DJANGO_BASE_URL}/messenger/n8n-webhook/`,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, text: $json.message, postback: $json.postback || "" } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }], page_token: 'PAGE_TOKEN' }],
+});
+
+const prepareMessengerQuickReplies = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Prepare Messenger Quick Replies',
+    position: [1968, 520],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const input = $input.first().json || {};
+const source = $items('Resolve Assistant Mode')[0].json || {};
+const actions = Array.isArray(input.replies) ? input.replies : [];
+const pageToken = input.page_token || source.context?.page_token || '';
+const psid = source.psid || '';
+const items = [];
+for (const action of actions) {
+  if (action.type === 'text') {
+    items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: String(action.text || '') } } } });
+  }
+  if (action.type === 'quick_replies') {
+    items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: String(action.text || ''), quick_replies: (action.options || []).map((option) => ({ content_type: 'text', title: option.title, payload: option.payload })) } } } });
+  }
+}
+if (!items.length) {
+  const fallback = source.fallback_message || '${MESSENGER_FALLBACK}';
+  items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: fallback } } } });
+}
+return items;`,
+    },
+  },
+  output: [{ access_token: 'PAGE_TOKEN', facebook_body: { recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } } }],
 });
 
 const clinicFlowSharedAiAgent = node({
@@ -580,16 +767,21 @@ export default workflow('ZTBqwEzdll6TZsUU', 'ClinicFlow Messenger + Widget AI Br
   .add(metaMessengerEvents)
   .to(acknowledgeMetaMessengerEvent)
   .to(normalizeMessengerRequest)
-  .to(getMessengerClinicContext)
-  .to(buildMessengerSharedInput)
-  .to(sharedAiInput)
-  .to(checkSharedAiEnabled
-    .onTrue(clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
-      .onCase(0, sendFacebookReply)
-      .onCase(1, returnWidgetReply)))
-    .onFalse(prepareSharedFallback.to(prepareChannelReply).to(routeChannelReply
-      .onCase(0, sendFacebookReply)
-      .onCase(1, returnWidgetReply))))
+  .to(verifyMetaSignature)
+  .to(routeMetaSignature
+    .onCase(0, getMessengerClinicContext
+      .to(buildMessengerSharedInput)
+      .to(sharedAiInput)
+      .to(resolveAssistantMode)
+      .to(routeAssistantMode
+        .onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
+          .onCase(0, sendFacebookReply)
+          .onCase(1, returnWidgetReply)))
+        .onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))
+        .onCase(2, prepareSharedFallback.to(prepareChannelReply).to(routeChannelReply
+          .onCase(0, sendFacebookReply)
+          .onCase(1, returnWidgetReply)))))
+    .onCase(1, ignoreInvalidMetaSignature))
   .add(widgetAssistantWebhook)
   .to(normalizeWidgetRequest)
   .to(getWidgetClinicContext)

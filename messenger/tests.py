@@ -1083,9 +1083,9 @@ def test_ai_book_endpoint_accepts_string_true_confirmation():
 
 
 @pytest.mark.django_db
-def test_ai_tools_return_disabled_when_ai_settings_disabled():
+def test_widget_ai_tools_return_disabled_when_website_ai_settings_disabled():
     from clinics.models import ClinicAISettings
-    from messenger.ai_tools import book_confirmed_appointment, build_ai_context, check_availability, match_services
+    from messenger.ai_tools import book_widget_confirmed_appointment, build_ai_context, check_widget_availability, match_widget_services
 
     clinic, connection = _create_messenger_clinic("owner_ai_disabled", "PAGEAI11")
     service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
@@ -1096,9 +1096,9 @@ def test_ai_tools_return_disabled_when_ai_settings_disabled():
     )
 
     context = build_ai_context("PAGEAI11")
-    services = match_services("PAGEAI11", "consultation")
-    availability = check_availability("PAGEAI11", service.id, preferred_date=(timezone.localdate() + timedelta(days=1)).isoformat())
-    booking = book_confirmed_appointment("PAGEAI11", service.id, timezone.now().isoformat(), "Name", "0917", confirmed=True)
+    services = match_widget_services(clinic.slug, "consultation")
+    availability = check_widget_availability(clinic.slug, service.id, preferred_date=(timezone.localdate() + timedelta(days=1)).isoformat())
+    booking = book_widget_confirmed_appointment(clinic.slug, service.id, timezone.now().isoformat(), "Name", "0917", confirmed=True)
 
     assert context["ai"]["is_ai_enabled"] is False
     assert services["disabled"] is True
@@ -1106,6 +1106,44 @@ def test_ai_tools_return_disabled_when_ai_settings_disabled():
     assert booking["created"] is False
     assert booking["disabled"] is True
     assert booking["fallback_message"] == "Please call the clinic."
+
+
+@pytest.mark.django_db
+def test_messenger_ai_tools_work_when_messenger_mode_is_ai_and_website_ai_disabled():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import book_confirmed_appointment, check_availability, match_services
+
+    clinic, _connection = _create_messenger_clinic("owner_messenger_ai_independent", "PAGEAI-INDEPENDENT")
+    service = Service.objects.create(clinic=clinic, name="Consultation", description="General consult", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=False,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="Please call the clinic.",
+    )
+
+    services = match_services("PAGEAI-INDEPENDENT", "consult")
+    availability = check_availability("PAGEAI-INDEPENDENT", service.id, preferred_date=target_date.isoformat())
+
+    assert services.get("disabled") is not True
+    assert [match["name"] for match in services["matches"]] == ["Consultation"]
+    assert availability.get("disabled") is not True
+    assert availability["available"] is True
+
+    booking = book_confirmed_appointment(
+        "PAGEAI-INDEPENDENT",
+        service.id,
+        availability["alternatives"][0]["starts_at"],
+        "Maria Santos",
+        "09175551234",
+        confirmed=True,
+    )
+
+    assert services["found"] is True
+    assert booking["created"] is True
+    assert Appointment.objects.filter(clinic=clinic, source=Appointment.SOURCE_MESSENGER).count() == 1
 
 
 @pytest.mark.django_db

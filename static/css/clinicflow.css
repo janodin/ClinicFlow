@@ -248,6 +248,93 @@ input[type="radio"] {
   accent-color: var(--cf-brand);
 }
 
+input[type="radio"] { border-radius: var(--cf-radius-pill); }
+
+.cf-choice-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  margin: 0;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-lg);
+  background: var(--cf-surface);
+  color: var(--cf-ink);
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: normal;
+  line-height: inherit;
+  padding: 1rem;
+  text-transform: none;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.cf-choice-card:hover {
+  border-color: var(--cf-brand);
+  box-shadow: var(--cf-shadow-subtle);
+}
+
+.cf-choice-card:has(.cf-choice-card-input:checked) {
+  border-color: var(--cf-brand);
+  background: linear-gradient(180deg, var(--cf-surface) 0%, var(--cf-brand-soft) 100%);
+  box-shadow: inset 0 0 0 1px rgba(6, 182, 212, .22), 0 8px 24px rgba(8, 51, 68, .08);
+}
+
+.cf-choice-card:has(.cf-choice-card-input:focus-visible) {
+  border-color: var(--cf-brand);
+  box-shadow: 0 0 0 3px var(--cf-focus), var(--cf-shadow-subtle);
+}
+
+.cf-choice-card-input {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  min-height: 1px;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  border: 0;
+  opacity: 0;
+  padding: 0;
+}
+
+.cf-choice-card-input:focus { box-shadow: none; }
+
+.cf-choice-card-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: .125rem;
+  border: 1.5px solid var(--cf-input-line);
+  border-radius: var(--cf-radius-pill);
+  background: var(--cf-surface);
+  box-shadow: inset 0 0 0 3px var(--cf-surface);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.cf-choice-card-mark::after {
+  content: "";
+  width: .5rem;
+  height: .5rem;
+  border-radius: inherit;
+  background: var(--cf-brand);
+  transform: scale(0);
+  transition: transform .15s ease;
+}
+
+.cf-choice-card:has(.cf-choice-card-input:checked) .cf-choice-card-mark {
+  border-color: var(--cf-brand);
+  box-shadow: 0 0 0 4px var(--cf-brand-soft), inset 0 0 0 3px var(--cf-surface);
+}
+
+.cf-choice-card:has(.cf-choice-card-input:checked) .cf-choice-card-mark::after {
+  background: var(--cf-brand);
+  transform: scale(1);
+}
+
 label,
 .cf-label {
   display: block;
@@ -287,7 +374,13 @@ code,
 
 [x-cloak] { display: none !important; }
 
-.cf-page { display: grid; gap: 1.25rem; }
+.cf-page {
+  display: grid;
+  min-width: 0;
+  gap: 1.25rem;
+}
+
+.cf-page > * { min-width: 0; }
 
 .cf-page-header {
   display: flex;
@@ -961,6 +1054,7 @@ code,
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-inline: contain;
+  contain: layout paint;
 }
 
 .cf-table-scroll:focus-visible {

@@ -745,7 +745,8 @@ def test_assistant_settings_page_shows_messenger_response_mode_control(clinic_se
     assert b'value="ai"' in response.content
     assert b"Use guided buttons for Messenger booking. No AI tokens are consumed." in response.content
     assert b"Use AI for Messenger conversations and booking. No quick-reply buttons are shown." in response.content
-    assert b"This affects Facebook Messenger only. AI mode only takes over when AI replies are enabled." in response.content
+    assert b"This affects Facebook Messenger only. Messenger AI mode is independent from the website Assistant switch." in response.content
+    assert b"AI mode only takes over when AI replies are enabled" not in response.content
     assert b"You can choose a Messenger mode now. It will apply after Facebook Messenger is connected." in response.content
 
 

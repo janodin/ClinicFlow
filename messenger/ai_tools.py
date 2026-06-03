@@ -36,7 +36,7 @@ def _ai_payload_for_clinic(clinic):
     }
 
 
-def _ai_disabled_response_for_clinic(clinic):
+def _website_ai_disabled_response_for_clinic(clinic):
     ai_settings = get_or_create_clinic_ai_settings(clinic)
     if not ai_settings.is_ai_enabled:
         return {
@@ -160,9 +160,6 @@ def match_services(page_id, query):
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"found": False, "matches": []}
-    disabled = _ai_disabled_response_for_clinic(connection.clinic)
-    if disabled:
-        return {**disabled, "matches": []}
     query_text = (query or "").strip().lower()
     services = connection.clinic.services.filter(is_active=True, is_archived=False).order_by("name")
     if query_text:
@@ -179,7 +176,7 @@ def match_widget_services(clinic_slug, query):
     clinic = get_clinic_for_slug(clinic_slug)
     if not clinic:
         return {"found": False, "matches": []}
-    disabled = _ai_disabled_response_for_clinic(clinic)
+    disabled = _website_ai_disabled_response_for_clinic(clinic)
     if disabled:
         return {**disabled, "matches": []}
     query_text = (query or "").strip().lower()
@@ -202,10 +199,6 @@ def check_availability(page_id, service_id, preferred_starts_at=None, preferred_
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"found": False, "available": False, "alternatives": []}
-    disabled = _ai_disabled_response_for_clinic(connection.clinic)
-    if disabled:
-        return {**disabled, "available": False, "alternatives": []}
-
     return _check_availability_for_clinic(connection.clinic, service_id, preferred_starts_at, preferred_date)
 
 
@@ -251,7 +244,7 @@ def check_widget_availability(clinic_slug, service_id, preferred_starts_at=None,
     clinic = get_clinic_for_slug(clinic_slug)
     if not clinic:
         return {"found": False, "available": False, "alternatives": []}
-    disabled = _ai_disabled_response_for_clinic(clinic)
+    disabled = _website_ai_disabled_response_for_clinic(clinic)
     if disabled:
         return {**disabled, "available": False, "alternatives": []}
     return _check_availability_for_clinic(clinic, service_id, preferred_starts_at, preferred_date)
@@ -261,10 +254,6 @@ def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone,
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"created": False, "error": "Messenger connection not found."}
-    disabled = _ai_disabled_response_for_clinic(connection.clinic)
-    if disabled:
-        return {**disabled, "created": False, "error": "Messenger AI is disabled for this clinic."}
-
     return _book_confirmed_appointment_for_clinic(
         connection.clinic,
         Appointment.SOURCE_MESSENGER,
@@ -325,7 +314,7 @@ def book_widget_confirmed_appointment(clinic_slug, service_id, starts_at, full_n
     clinic = get_clinic_for_slug(clinic_slug)
     if not clinic:
         return {"created": False, "error": "Clinic not found."}
-    disabled = _ai_disabled_response_for_clinic(clinic)
+    disabled = _website_ai_disabled_response_for_clinic(clinic)
     if disabled:
         return {**disabled, "created": False, "error": "AI is disabled for this clinic."}
     return _book_confirmed_appointment_for_clinic(
