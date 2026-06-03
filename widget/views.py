@@ -69,9 +69,13 @@ def _booking_context(clinic, request):
     }
 
 
+def _get_public_clinic_or_404(clinic_slug):
+    return get_object_or_404(Clinic, slug=clinic_slug, is_active=True, requires_onboarding=False)
+
+
 @xframe_options_exempt
 def widget_book(request, clinic_slug):
-    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    clinic = _get_public_clinic_or_404(clinic_slug)
     if request.method == "POST":
         appointment, error = _process_guest_booking(clinic, request.POST, _public_booking_source(request))
         if request.headers.get("HX-Request"):
@@ -86,7 +90,7 @@ def widget_book(request, clinic_slug):
 
 @xframe_options_exempt
 def widget_home(request, clinic_slug):
-    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    clinic = _get_public_clinic_or_404(clinic_slug)
     context = _booking_context(clinic, request)
     context["faqs"] = clinic.faqs.filter(is_active=True)
     context["widget_source"] = _public_booking_source(request)
@@ -94,7 +98,7 @@ def widget_home(request, clinic_slug):
 
 
 def widget_slots(request, clinic_slug):
-    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    clinic = _get_public_clinic_or_404(clinic_slug)
     return render(request, "widget/partials/slots.html", _booking_context(clinic, request))
 
 
@@ -136,6 +140,8 @@ def _process_guest_booking(clinic, data, source):
 
     with transaction.atomic():
         locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+        if locked_clinic.requires_onboarding or not locked_clinic.is_active:
+            return None, "Online booking is not available for this clinic yet."
         service = locked_clinic.services.filter(is_active=True, is_archived=False, pk=data.get("service")).first()
         if service is None:
             return None, "Please choose a valid service."
@@ -173,7 +179,7 @@ def _process_guest_booking(clinic, data, source):
 
 
 def embed_js(request, clinic_slug):
-    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    clinic = _get_public_clinic_or_404(clinic_slug)
     src = request.build_absolute_uri(reverse("widget:home", args=[clinic.slug])) + "?source=embed"
     accent = clinic.safe_widget_accent_color
     body = f"""
@@ -182,11 +188,15 @@ def embed_js(request, clinic_slug):
   var src = {json.dumps(src)};
   var iframe;
   var launcher = document.createElement('button');
+  launcher.setAttribute('type', 'button');
   launcher.setAttribute('aria-label', 'Open booking widget');
-  launcher.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-  launcher.style.cssText = 'position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:60px;height:60px;border-radius:50%;border:none;z-index:9999;background:' + accent + ';color:white;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;transition:transform .2s;';
+  launcher.setAttribute('title', 'Book an appointment');
+  launcher.innerHTML = '<svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/></svg>';
+  launcher.style.cssText = 'position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:60px;height:60px;border-radius:50%;border:none;z-index:9999;background:' + accent + ';color:white;cursor:pointer;box-shadow:0 10px 24px rgba(8,51,68,0.22);display:flex;align-items:center;justify-content:center;transition:transform .2s, box-shadow .2s;outline:3px solid transparent;outline-offset:3px;';
   launcher.addEventListener('mouseenter', function() {{ launcher.style.transform = 'scale(1.05)'; }});
   launcher.addEventListener('mouseleave', function() {{ launcher.style.transform = 'scale(1)'; }});
+  launcher.addEventListener('focus', function() {{ launcher.style.outlineColor = 'rgba(8,51,68,0.35)'; }});
+  launcher.addEventListener('blur', function() {{ launcher.style.outlineColor = 'transparent'; }});
   launcher.addEventListener('click', function() {{
     if (!iframe) {{
       iframe = document.createElement('iframe');
@@ -218,7 +228,7 @@ def embed_js(request, clinic_slug):
 
 
 def chat_api(request, clinic_slug):
-    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    clinic = _get_public_clinic_or_404(clinic_slug)
     services = list(
         clinic.services.filter(is_active=True, is_archived=False).values(
             "id", "name", "duration_minutes", "price", "display_price"
@@ -296,7 +306,7 @@ def _assistant_message_with_widget_context(clinic, message, state, data):
 
 @require_POST
 def chat_step(request, clinic_slug):
-    clinic = get_object_or_404(Clinic, slug=clinic_slug, is_active=True)
+    clinic = _get_public_clinic_or_404(clinic_slug)
     session_key = f"widget_chat_{clinic.id}"
     data = request.session.get(session_key, {"state": "greeting"})
     action = request.POST.get("action", "")

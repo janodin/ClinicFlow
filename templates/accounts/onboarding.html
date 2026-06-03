@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Complete clinic setup{% endblock %}
+{% block body %}
+<div class="cf-auth-panel min-h-screen px-4 py-8">
+  <div class="mx-auto w-full max-w-5xl">
+    <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <div class="inline-flex items-center gap-3 text-xl font-black text-[var(--cf-ink)]">
+          <span class="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]">
+            <i data-lucide="activity" class="h-5 w-5"></i>
+          </span>
+          ClinicFlow
+        </div>
+        <h1 class="mt-6 text-3xl font-light leading-tight text-[var(--cf-ink)]">Complete {{ clinic.name }} setup</h1>
+        <p class="mt-3 max-w-2xl text-base leading-7 text-[var(--cf-muted)]">Confirm your contact details, first service, booking behavior, and weekly business hours before opening bookings.</p>
+      </div>
+    </div>
+
+    <form method="post" class="space-y-6">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="cf-card border-[var(--cf-status-cancelled-border)] bg-[var(--cf-status-cancelled-bg)] p-4 text-sm text-[var(--cf-status-cancelled-text)]">{{ form.non_field_errors.0 }}</div>
+      {% endif %}
+
+      <section class="cf-card bg-[var(--cf-bg)] p-6">
+        <h2 class="text-xl font-light text-[var(--cf-ink)]">Clinic Details</h2>
+        <div class="mt-5 grid gap-4 md:grid-cols-2">
+          <div class="md:col-span-2">
+            <label for="{{ form.address.id_for_label }}" class="cf-label">Address</label>
+            {{ form.address }}
+            {% if form.address.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.address.errors.0 }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.phone.id_for_label }}" class="cf-label">Phone</label>
+            {{ form.phone }}
+            {% if form.phone.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.phone.errors.0 }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.email.id_for_label }}" class="cf-label">Email</label>
+            {{ form.email }}
+            {% if form.email.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.email.errors.0 }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.timezone.id_for_label }}" class="cf-label">Timezone</label>
+            {{ form.timezone }}
+            {% if form.timezone.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.timezone.errors.0 }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.default_appointment_duration.id_for_label }}" class="cf-label">Default Appointment Duration</label>
+            {{ form.default_appointment_duration }}
+            {% if form.default_appointment_duration.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.default_appointment_duration.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+      </section>
+
+      <section class="cf-card bg-[var(--cf-bg)] p-6">
+        <h2 class="text-xl font-light text-[var(--cf-ink)]">First Service</h2>
+        <div class="mt-5 grid gap-4 md:grid-cols-3">
+          <div>
+            <label for="{{ form.service_name.id_for_label }}" class="cf-label">Service Name</label>
+            {{ form.service_name }}
+            {% if form.service_name.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.service_name.errors.0 }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.service_duration_minutes.id_for_label }}" class="cf-label">Duration Minutes</label>
+            {{ form.service_duration_minutes }}
+            {% if form.service_duration_minutes.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.service_duration_minutes.errors.0 }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.service_price.id_for_label }}" class="cf-label">Price</label>
+            {{ form.service_price }}
+            {% if form.service_price.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.service_price.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+      </section>
+
+      <section class="cf-card bg-[var(--cf-bg)] p-6">
+        <h2 class="text-xl font-light text-[var(--cf-ink)]">Booking Behavior</h2>
+        <div class="mt-5 max-w-md">
+          <label for="{{ form.booking_approval_mode.id_for_label }}" class="cf-label">Booking Approval Mode</label>
+          {{ form.booking_approval_mode }}
+          {% if form.booking_approval_mode.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.booking_approval_mode.errors.0 }}</p>{% endif %}
+        </div>
+      </section>
+
+      <section class="cf-card bg-[var(--cf-bg)] p-6">
+        <h2 class="text-xl font-light text-[var(--cf-ink)]">Business Hours</h2>
+        <div class="mt-5 cf-table-wrap">
+          <div class="cf-table-scroll" tabindex="0" aria-label="Weekly business hours">
+            <table class="cf-table cf-table-form">
+              <thead>
+                <tr><th scope="col" class="p-4">Day</th><th scope="col">Open</th><th scope="col">Hours</th><th scope="col">Break</th></tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--cf-line-soft)]">
+                {% for row in weekday_rows %}
+                  <tr>
+                    <th scope="row" class="p-4 font-semibold text-[var(--cf-ink)]">{{ row.label }}</th>
+                    <td class="p-4">{{ row.is_open }}</td>
+                    <td class="p-4">
+                      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        {{ row.open_time }}
+                        <span class="text-sm text-[var(--cf-muted)]">to</span>
+                        {{ row.close_time }}
+                      </div>
+                      {% if row.open_time.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ row.open_time.errors.0 }}</p>{% endif %}
+                      {% if row.close_time.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ row.close_time.errors.0 }}</p>{% endif %}
+                    </td>
+                    <td class="p-4">
+                      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        {{ row.break_start }}
+                        <span class="text-sm text-[var(--cf-muted)]">to</span>
+                        {{ row.break_end }}
+                      </div>
+                      {% if row.break_start.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ row.break_start.errors.0 }}</p>{% endif %}
+                      {% if row.break_end.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ row.break_end.errors.0 }}</p>{% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <div class="flex justify-end">
+        <button class="cf-btn cf-btn-primary"><i data-lucide="check" class="h-4 w-4"></i>Finish Setup</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

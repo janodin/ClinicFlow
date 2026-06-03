@@ -1,3 +1,409 @@
-from django.test import TestCase
+from decimal import Decimal
+from datetime import time
 
-# Create your tests here.
+import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+
+from clinics.models import Clinic, ClinicGroup, ClinicMembership
+from scheduling.models import ClinicBusinessHour
+from services.models import Service
+
+
+def _onboarding_post_data():
+    data = {
+        "address": "123 Demo Street",
+        "phone": "09170001111",
+        "email": "frontdesk@example.com",
+        "timezone": "Asia/Manila",
+        "default_appointment_duration": "45",
+        "booking_approval_mode": Clinic.APPROVAL_MANUAL,
+        "service_name": "Dental Cleaning",
+        "service_duration_minutes": "45",
+        "service_price": "800.00",
+    }
+    for weekday in range(7):
+        data[f"open_time_{weekday}"] = "09:00"
+        data[f"close_time_{weekday}"] = "17:00"
+        if weekday < 5:
+            data[f"is_open_{weekday}"] = "on"
+            data[f"break_start_{weekday}"] = "12:00"
+            data[f"break_end_{weekday}"] = "13:00"
+    return data
+
+
+@pytest.mark.django_db
+def test_signup_requires_password_confirmation(client):
+    response = client.post(
+        reverse("accounts:signup"),
+        {
+            "full_name": "Demo User",
+            "email": "demo@example.com",
+            "clinic_name": "Demo Clinic",
+            "timezone": "Asia/Manila",
+            "password": "password12345",
+            "password_confirm": "different12345",
+            "terms_accepted": "on",
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"Passwords do not match." in response.content
+    assert get_user_model().objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_signup_requires_terms_acceptance(client):
+    response = client.post(
+        reverse("accounts:signup"),
+        {
+            "full_name": "Demo User",
+            "email": "demo@example.com",
+            "clinic_name": "Demo Clinic",
+            "timezone": "Asia/Manila",
+            "password": "Str0ngSignupPass!2026",
+            "password_confirm": "Str0ngSignupPass!2026",
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"You must accept the terms and privacy policy." in response.content
+    assert get_user_model().objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_signup_saves_timezone_consent_and_requires_onboarding(client):
+    response = client.post(
+        reverse("accounts:signup"),
+        {
+            "full_name": "Demo User",
+            "email": "Demo@Example.com",
+            "clinic_name": "Demo Clinic",
+            "timezone": "Pacific/Kiritimati",
+            "password": "Str0ngSignupPass!2026",
+            "password_confirm": "Str0ngSignupPass!2026",
+            "terms_accepted": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.url == reverse("accounts:onboarding")
+    user = get_user_model().objects.get(email="demo@example.com")
+    assert user.terms_accepted_at is not None
+    clinic = Clinic.objects.get(slug="demo-clinic")
+    assert clinic.timezone == "Pacific/Kiritimati"
+    assert clinic.requires_onboarding is True
+
+
+@pytest.mark.django_db
+def test_onboarding_requires_login(client):
+    response = client.get(reverse("accounts:onboarding"))
+
+    assert response.status_code == 302
+    assert reverse("accounts:login") in response.url
+
+
+@pytest.mark.django_db
+def test_onboarding_requires_owner_role(client):
+    User = get_user_model()
+    owner = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    staff_user = User.objects.create_user(
+        username="staff@example.com",
+        email="staff@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=owner)
+    clinic = Clinic.objects.create(group=group, name="Demo Clinic", slug="demo-clinic")
+    ClinicMembership.objects.create(clinic=clinic, user=staff_user, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff_user)
+
+    response = client.get(reverse("accounts:onboarding"))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_onboarding_saves_clinic_service_hours_and_clears_flag(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        requires_onboarding=True,
+    )
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    client.force_login(user)
+
+    response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
+
+    assert response.status_code == 302
+    assert response.url == reverse("dashboard:home")
+    clinic.refresh_from_db()
+    assert clinic.requires_onboarding is False
+    assert clinic.address == "123 Demo Street"
+    assert clinic.phone == "09170001111"
+    assert clinic.email == "frontdesk@example.com"
+    assert clinic.timezone == "Asia/Manila"
+    assert clinic.default_appointment_duration == 45
+    assert clinic.booking_approval_mode == Clinic.APPROVAL_MANUAL
+    service = clinic.services.get(name="Dental Cleaning")
+    assert service.name == "Dental Cleaning"
+    assert service.duration_minutes == 45
+    assert service.price == Decimal("800.00")
+    assert not clinic.services.filter(name="General Consultation").exists()
+    business_hours = {
+        business_hour.weekday: business_hour
+        for business_hour in ClinicBusinessHour.objects.filter(clinic=clinic)
+    }
+    assert set(business_hours) == set(range(7))
+    for weekday in range(5):
+        business_hour = business_hours[weekday]
+        assert business_hour.is_open is True
+        assert business_hour.open_time == time(9, 0)
+        assert business_hour.close_time == time(17, 0)
+        assert business_hour.break_start == time(12, 0)
+        assert business_hour.break_end == time(13, 0)
+    for weekday in range(5, 7):
+        assert business_hours[weekday].is_open is False
+
+
+@pytest.mark.django_db
+def test_onboarding_business_hours_table_uses_scoped_headers(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        requires_onboarding=True,
+    )
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    client.force_login(user)
+
+    response = client.get(reverse("accounts:onboarding"))
+
+    assert response.status_code == 200
+    assert b'<th scope="col" class="p-4">Day</th>' in response.content
+    assert b'<th scope="col">Open</th>' in response.content
+    assert b'<th scope="col">Hours</th>' in response.content
+    assert b'<th scope="col">Break</th>' in response.content
+    assert b'<th scope="row" class="p-4 font-semibold text-[var(--cf-ink)]">Monday</th>' in response.content
+
+
+@pytest.mark.django_db
+def test_completed_onboarding_post_redirects_without_overwriting_clinic_data(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        address="Existing address",
+        phone="09998887777",
+        email="existing@example.com",
+        timezone="Pacific/Kiritimati",
+        default_appointment_duration=30,
+        booking_approval_mode=Clinic.APPROVAL_AUTO,
+        requires_onboarding=False,
+    )
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    service = Service.objects.create(clinic=clinic, name="Existing Service", duration_minutes=30, price=Decimal("100.00"))
+    client.force_login(user)
+
+    response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
+
+    assert response.status_code == 302
+    assert response.url == reverse("dashboard:home")
+    clinic.refresh_from_db()
+    service.refresh_from_db()
+    assert clinic.address == "Existing address"
+    assert clinic.phone == "09998887777"
+    assert clinic.email == "existing@example.com"
+    assert clinic.timezone == "Pacific/Kiritimati"
+    assert clinic.default_appointment_duration == 30
+    assert clinic.booking_approval_mode == Clinic.APPROVAL_AUTO
+    assert clinic.requires_onboarding is False
+    assert service.name == "Existing Service"
+    assert service.duration_minutes == 30
+    assert service.price == Decimal("100.00")
+
+
+@pytest.mark.django_db
+def test_onboarding_duplicate_service_name_returns_form_error_without_clearing_flag(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        requires_onboarding=True,
+    )
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=60, price=Decimal("1200.00"))
+    client.force_login(user)
+
+    response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
+
+    assert response.status_code == 200
+    assert b"A service with this name already exists." in response.content
+    clinic.refresh_from_db()
+    assert clinic.requires_onboarding is True
+
+
+@pytest.mark.django_db
+def test_onboarding_archived_duplicate_service_name_returns_form_error_without_clearing_flag(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        requires_onboarding=True,
+    )
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(
+        clinic=clinic,
+        name="Dental Cleaning",
+        duration_minutes=60,
+        price=Decimal("1200.00"),
+        is_archived=True,
+    )
+    client.force_login(user)
+
+    response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
+
+    assert response.status_code == 200
+    assert b"A service with this name already exists." in response.content
+    clinic.refresh_from_db()
+    assert clinic.requires_onboarding is True
+
+
+@pytest.mark.django_db
+def test_onboarding_allows_duplicate_service_name_in_another_clinic(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    other_owner = User.objects.create_user(
+        username="other@example.com",
+        email="other@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        requires_onboarding=True,
+    )
+    other_group = ClinicGroup.objects.create(name="Other Clinic", owner=other_owner)
+    other_clinic = Clinic.objects.create(group=other_group, name="Other Clinic", slug="other-clinic")
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(clinic=other_clinic, name="Dental Cleaning", duration_minutes=60, price=Decimal("1200.00"))
+    client.force_login(user)
+
+    response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
+
+    assert response.status_code == 302
+    assert response.url == reverse("dashboard:home")
+    clinic.refresh_from_db()
+    assert clinic.requires_onboarding is False
+    service = clinic.services.get(name="Dental Cleaning")
+    assert service.duration_minutes == 45
+    assert service.price == Decimal("800.00")
+
+
+@pytest.mark.django_db
+def test_onboarding_rejects_close_time_before_open_time_without_clearing_flag(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        requires_onboarding=True,
+    )
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    client.force_login(user)
+    data = _onboarding_post_data()
+    data["open_time_0"] = "17:00"
+    data["close_time_0"] = "09:00"
+
+    response = client.post(reverse("accounts:onboarding"), data)
+
+    assert response.status_code == 200
+    assert b"Close time must be after open time." in response.content
+    clinic.refresh_from_db()
+    assert clinic.requires_onboarding is True
+
+
+@pytest.mark.django_db
+def test_onboarding_rejects_unpaired_break_time_without_clearing_flag(client):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="password123",
+    )
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="Demo Clinic",
+        slug="demo-clinic",
+        requires_onboarding=True,
+    )
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    client.force_login(user)
+    data = _onboarding_post_data()
+    data.pop("break_end_0")
+
+    response = client.post(reverse("accounts:onboarding"), data)
+
+    assert response.status_code == 200
+    assert b"Break start and end times must be provided together." in response.content
+    clinic.refresh_from_db()
+    assert clinic.requires_onboarding is True

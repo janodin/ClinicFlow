@@ -60,6 +60,14 @@ class ServiceTests(TestCase):
 
         self.assertEqual(service.color, "#06b6d4")
 
+    def test_services_page_places_status_tabs_before_primary_action(self):
+        response = self.client.get(reverse("dashboard:services"))
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(content.index('class="cf-page-actions"'), content.index('class="cf-tabs"'))
+        self.assertLess(content.index('class="cf-tabs"'), content.index("Add service"))
+
     def test_service_archive_hides_from_active_lists(self):
         self.assertIn(self.service, self.clinic.services.filter(is_archived=False))
         url = reverse("dashboard:archive_service", args=[self.service.id])

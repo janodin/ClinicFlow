@@ -7,24 +7,27 @@
       <h1 class="cf-page-title ui-page-title">Services</h1>
       <p class="cf-page-description">{{ active_services|length }} active · {{ archived_services|length }} archived</p>
     </div>
-    {% if can_manage %}
-      <div class="cf-page-actions">
-        <button @click="open=true" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add service</button>
+    <div class="cf-page-actions">
+      <div class="cf-tabs" aria-label="Service status filter">
+        <button
+          type="button"
+          @click="tab='active'"
+          :class="tab==='active' ? 'cf-tab-active' : ''"
+          :aria-pressed="tab==='active'"
+          class="cf-tab"
+        ><i data-lucide="check-circle-2" class="h-3.5 w-3.5" aria-hidden="true"></i>Active</button>
+        <button
+          type="button"
+          @click="tab='archived'"
+          :class="tab==='archived' ? 'cf-tab-active' : ''"
+          :aria-pressed="tab==='archived'"
+          class="cf-tab"
+        ><i data-lucide="archive" class="h-3.5 w-3.5" aria-hidden="true"></i>Archived</button>
       </div>
-    {% endif %}
-  </div>
-
-  <div class="cf-tabs">
-    <button
-      @click="tab='active'"
-      :class="tab==='active' ? 'cf-tab-active' : ''"
-      class="cf-tab"
-    ><i data-lucide="check-circle-2" class="h-3.5 w-3.5" aria-hidden="true"></i>Active</button>
-    <button
-      @click="tab='archived'"
-      :class="tab==='archived' ? 'cf-tab-active' : ''"
-      class="cf-tab"
-    >Archived</button>
+      {% if can_manage %}
+        <button @click="open=true" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add service</button>
+      {% endif %}
+    </div>
   </div>
 
   <div id="services-list-container">

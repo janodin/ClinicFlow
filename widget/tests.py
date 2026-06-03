@@ -44,6 +44,38 @@ class WidgetTests(TestCase):
         self.assertEqual(resp["Content-Type"], "application/javascript")
         self.assertIn("clinicflow-minimize", resp.content.decode())
 
+    def test_embed_js_uses_accessible_icon_only_calendar_launcher(self):
+        response = self.client.get(reverse("widget:embed_js", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        self.assertIn("var launcher = document.createElement('button');", content)
+        self.assertIn("launcher.setAttribute('type', 'button');", content)
+        self.assertIn("launcher.setAttribute('aria-label', 'Open booking widget');", content)
+        self.assertIn("launcher.setAttribute('title', 'Book an appointment');", content)
+        self.assertIn('aria-hidden="true"', content)
+        self.assertIn("M8 2v4", content)
+        self.assertNotIn("M21 15a2", content)
+        self.assertNotIn("Book now", content)
+        self.assertIn("outlineColor", content)
+
+    def test_embed_js_opens_iframe_from_launcher_click_path(self):
+        response = self.client.get(reverse("widget:embed_js", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        click_index = content.index("launcher.addEventListener('click'")
+        iframe_create_index = content.index("iframe = document.createElement('iframe');")
+        iframe_append_index = content.index("document.body.appendChild(iframe);")
+        launcher_append_index = content.index("document.body.appendChild(launcher);")
+
+        self.assertGreater(iframe_create_index, click_index)
+        self.assertGreater(iframe_append_index, click_index)
+        self.assertGreater(launcher_append_index, iframe_append_index)
+        self.assertIn("?source=embed", content)
+        self.assertIn("launcher.style.display = 'none';", content)
+        self.assertIn("clinicflow-minimize", content)
+        self.assertIn("iframe.style.display = 'none';", content)
+        self.assertIn("launcher.style.display = 'flex';", content)
+
     def test_embed_js_uses_safe_accent_color_for_invalid_stored_value(self):
         Clinic.objects.filter(pk=self.clinic.pk).update(widget_accent_color='";alert(1)//')
 
@@ -69,6 +101,22 @@ class WidgetTests(TestCase):
         self.assertContains(resp, self.service.name)
         self.assertNotContains(resp, "Doctor")
         self.assertNotContains(resp, "First available")
+
+    def test_onboarding_clinic_public_widget_endpoints_are_unavailable(self):
+        Clinic.objects.filter(pk=self.clinic.pk).update(requires_onboarding=True)
+
+        cases = [
+            ("get", reverse("widget:home", args=[self.clinic.slug]), {}),
+            ("get", reverse("widget:slots", args=[self.clinic.slug]), {}),
+            ("get", reverse("widget:embed_js", args=[self.clinic.slug]), {}),
+            ("get", reverse("widget:chat_api", args=[self.clinic.slug]), {}),
+            ("post", reverse("widget:chat_step", args=[self.clinic.slug]), {"action": "init"}),
+            ("post", reverse("widget:book", args=[self.clinic.slug]), {}),
+        ]
+        for method, url, data in cases:
+            with self.subTest(url=url):
+                response = getattr(self.client, method)(url, data)
+                self.assertEqual(response.status_code, 404)
 
     def test_widget_home_uses_plain_preview_background(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))

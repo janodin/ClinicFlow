@@ -21,10 +21,14 @@ def test_signup_creates_usable_clinic(client):
             "full_name": "Demo User",
             "email": "demo@example.com",
             "clinic_name": "Demo Clinic",
-            "password": "password123",
+            "timezone": "Asia/Manila",
+            "password": "Str0ngSignupPass!2026",
+            "password_confirm": "Str0ngSignupPass!2026",
+            "terms_accepted": "on",
         },
     )
     assert response.status_code == 302
+    assert response.url == reverse("accounts:onboarding")
     clinic = Clinic.objects.get(slug="demo-clinic")
     assert clinic.services.filter(name="General Consultation").exists()
     assert clinic.business_hours.count() == 5

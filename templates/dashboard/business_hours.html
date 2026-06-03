@@ -10,40 +10,42 @@
     {% csrf_token %}
     <div class="cf-table-wrap">
       <div class="cf-table-header">Weekly Schedule</div>
-      <table class="cf-table">
-        <thead>
-          <tr><th class="p-4">Day</th><th>Open</th><th>Hours</th><th>Break</th></tr>
-        </thead>
-        <tbody class="divide-y divide-[var(--cf-line-soft)]">
-        {% for weekday in weekdays %}
-          {% with h=hours|get_item:weekday %}
-          <tr>
-            <td class="p-4 font-semibold">
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" name="is_open_{{ weekday }}" {% if h and h.is_open or not h %}checked{% endif %} class="cf-checkbox">
-                <span>
-                  {% if weekday == 0 %}Monday{% elif weekday == 1 %}Tuesday{% elif weekday == 2 %}Wednesday{% elif weekday == 3 %}Thursday{% elif weekday == 4 %}Friday{% elif weekday == 5 %}Saturday{% else %}Sunday{% endif %}
-                </span>
-              </label>
-            </td>
-            <td class="p-4">
-              <input type="time" name="open_time_{{ weekday }}" value="{% if h %}{{ h.open_time|time:'H:i' }}{% else %}{{ default_open|time:'H:i' }}{% endif %}" class="cf-input">
-            </td>
-            <td class="p-4">
-              <input type="time" name="close_time_{{ weekday }}" value="{% if h %}{{ h.close_time|time:'H:i' }}{% else %}{{ default_close|time:'H:i' }}{% endif %}" class="cf-input">
-            </td>
-            <td class="p-4 flex gap-2">
-              <input type="time" name="break_start_{{ weekday }}" value="{% if h and h.break_start %}{{ h.break_start|time:'H:i' }}{% else %}{{ default_break_start|time:'H:i' }}{% endif %}" class="cf-input">
-              <span class="self-center text-[var(--cf-muted)]">to</span>
-              <input type="time" name="break_end_{{ weekday }}" value="{% if h and h.break_end %}{{ h.break_end|time:'H:i' }}{% else %}{{ default_break_end|time:'H:i' }}{% endif %}" class="cf-input">
-            </td>
-          </tr>
-          {% endwith %}
-        {% endfor %}
-        </tbody>
-      </table>
+      <div class="cf-table-scroll" tabindex="0" aria-label="Weekly schedule table">
+        <table class="cf-table cf-table-form">
+          <thead>
+            <tr><th class="p-4">Day</th><th>Open</th><th>Hours</th><th>Break</th></tr>
+          </thead>
+          <tbody class="divide-y divide-[var(--cf-line-soft)]">
+          {% for weekday in weekdays %}
+            {% with h=hours|get_item:weekday %}
+            <tr>
+              <td class="p-4 font-semibold">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="is_open_{{ weekday }}" {% if h and h.is_open or not h %}checked{% endif %} class="cf-checkbox">
+                  <span>
+                    {% if weekday == 0 %}Monday{% elif weekday == 1 %}Tuesday{% elif weekday == 2 %}Wednesday{% elif weekday == 3 %}Thursday{% elif weekday == 4 %}Friday{% elif weekday == 5 %}Saturday{% else %}Sunday{% endif %}
+                  </span>
+                </label>
+              </td>
+              <td class="p-4">
+                <input type="time" name="open_time_{{ weekday }}" value="{% if h %}{{ h.open_time|time:'H:i' }}{% else %}{{ default_open|time:'H:i' }}{% endif %}" class="cf-input">
+              </td>
+              <td class="p-4">
+                <input type="time" name="close_time_{{ weekday }}" value="{% if h %}{{ h.close_time|time:'H:i' }}{% else %}{{ default_close|time:'H:i' }}{% endif %}" class="cf-input">
+              </td>
+              <td class="p-4 flex gap-2">
+                <input type="time" name="break_start_{{ weekday }}" value="{% if h and h.break_start %}{{ h.break_start|time:'H:i' }}{% else %}{{ default_break_start|time:'H:i' }}{% endif %}" class="cf-input">
+                <span class="self-center text-[var(--cf-muted)]">to</span>
+                <input type="time" name="break_end_{{ weekday }}" value="{% if h and h.break_end %}{{ h.break_end|time:'H:i' }}{% else %}{{ default_break_end|time:'H:i' }}{% endif %}" class="cf-input">
+              </td>
+            </tr>
+            {% endwith %}
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-    <div class="mt-6 border-t border-[var(--cf-line)] pt-4">
+    <div class="mt-6 flex justify-end border-t border-[var(--cf-line)] pt-4">
       <button class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Save Business Hours</button>
     </div>
   </form>

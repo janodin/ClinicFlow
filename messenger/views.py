@@ -10,13 +10,17 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from clinics.models import ClinicAISettings
+
 from .ai_tools import (
+    DEFAULT_AI_FALLBACK_MESSAGE,
     build_ai_context,
     build_widget_ai_context,
     book_confirmed_appointment,
     book_widget_confirmed_appointment,
     check_availability,
     check_widget_availability,
+    get_or_create_clinic_ai_settings,
     match_services,
     match_widget_services,
 )
@@ -105,9 +109,25 @@ def _active_connection_for_page(page_id):
             page_id=page_id,
             is_active=True,
             clinic__is_active=True,
+            clinic__requires_onboarding=False,
         )
     except (MessengerConnection.DoesNotExist, MessengerConnection.MultipleObjectsReturned):
         return None
+
+
+def _uses_messenger_ai_mode(connection):
+    if not connection:
+        return False
+    ai_settings = get_or_create_clinic_ai_settings(connection.clinic)
+    return ai_settings.safe_messenger_response_mode == ClinicAISettings.MESSENGER_MODE_AI
+
+
+def _messenger_ai_fallback_action(connection):
+    ai_settings = get_or_create_clinic_ai_settings(connection.clinic)
+    return {
+        "type": "text",
+        "text": ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE,
+    }
 
 
 def _meta_app_secret_for_connection(connection):
@@ -125,6 +145,7 @@ def _verified_messenger_connections_for_request(request):
     connections = MessengerConnection.objects.select_related("clinic").filter(
         is_active=True,
         clinic__is_active=True,
+        clinic__requires_onboarding=False,
     )
     for connection in connections:
         if verify_signature(request.body, signature, _meta_app_secret_for_connection(connection)):
@@ -312,6 +333,11 @@ def n8n_webhook(request):
     connection = _active_connection_for_page(page_id)
     if not connection:
         return JsonResponse({"replies": [], "page_token": ""}, status=200)
+    if _uses_messenger_ai_mode(connection):
+        return JsonResponse({
+            "replies": [_messenger_ai_fallback_action(connection)],
+            "page_token": connection.page_access_token,
+        }, status=200)
 
     session, _ = MessengerSession.objects.get_or_create(
         connection=connection, psid=psid,
@@ -381,6 +407,8 @@ def webhook(request):
 
                 connection = verified_connections.get(recipient_id)
                 if not connection:
+                    continue
+                if _uses_messenger_ai_mode(connection):
                     continue
 
                 session, _ = MessengerSession.objects.get_or_create(

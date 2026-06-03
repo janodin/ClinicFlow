@@ -88,7 +88,7 @@
       <div><h2 class="cf-section-title">Today's schedule</h2><p class="cf-muted">{{ appointments|length }} appointments</p></div>
       <span class="cf-badge cf-badge-info">{{ appointments|length }} appointments</span>
     </div>
-    <div class="overflow-x-auto">
+    <div class="cf-table-scroll" tabindex="0" aria-label="Today's schedule table">
       {% if appointments %}
       <table class="cf-table">
         <thead class="text-xs uppercase tracking-wider text-[var(--cf-faint)]">

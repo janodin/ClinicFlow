@@ -154,6 +154,17 @@ def test_public_auth_and_widget_button_labels_preserve_original_casing():
             assert snippet in template
 
 
+def test_signup_terms_checkbox_uses_inline_soft_consent_row():
+    template = source_text("templates/accounts/signup.html")
+
+    assert "field.name == 'terms_accepted'" in template
+    assert "rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)]" in template
+    assert "m-0 flex items-center gap-3 cursor-pointer" in template
+    assert "grid h-5 shrink-0 place-items-center" in template
+    assert "text-sm font-medium leading-5 text-[var(--cf-muted)]" in template
+    assert "mt-0.5 shrink-0" not in template
+
+
 def css_rule_block(selector):
     css = css_text()
     match = re.search(rf"(?m)^{re.escape(selector)}\s*\{{(?P<body>.*?)^\}}", css, re.DOTALL)
@@ -305,17 +316,20 @@ def test_css_contains_cards_tables_and_badges():
         ".cf-card",
         ".cf-card-muted",
         ".cf-kpi",
-        ".cf-table-wrap",
-        ".cf-table-header",
-        ".cf-table",
+            ".cf-table-wrap",
+            ".cf-table-scroll",
+            ".cf-table-header",
+            ".cf-table",
         ".cf-row-actions",
         ".cf-badge",
     ]:
         assert selector in css
 
     table_wrap = css_rule_block(".cf-table-wrap")
-    assert "overflow-x: auto;" in table_wrap
-    assert "overflow-y: hidden;" in table_wrap
+    table_scroll = css_rule_block(".cf-table-scroll")
+    assert "overflow: hidden;" in table_wrap
+    assert "overflow-x: auto;" in table_scroll
+    assert "overflow-y: hidden;" in table_scroll
 
 
 def test_active_badges_use_electric_aqua_theme_not_completed_status():
@@ -492,7 +506,7 @@ def test_css_scopes_mobile_table_width_and_keeps_slot_text_readable():
     css = css_text()
 
     assert re.search(r"(?m)^\s*table\s*\{\s*min-width:\s*720px;\s*\}", css) is None
-    assert "min-width: 720px;" in css_rule_block(".cf-table")
+    assert "min-width: max(100%, 44rem);" in css_rule_block(".cf-table")
     assert ".cf-slot-button" in css
     slot_button = css_rule_block(".cf-slot-button")
     assert "color: var(--cf-ink);" in slot_button
@@ -907,8 +921,65 @@ def test_task_3_table_partials_use_shared_table_surface():
         assert "cf-table-header" in template
         assert "cf-section-title" in template
         assert "cf-muted" in template
-        assert "overflow-x-auto" in template
+        assert "cf-table-scroll" in template
         assert "cf-table" in template
+
+
+def test_dashboard_tables_use_bounded_mobile_scroll_regions():
+    for relative_path in [
+        "templates/dashboard/home.html",
+        "templates/dashboard/settings.html",
+        "templates/dashboard/business_hours.html",
+        "templates/dashboard/unavailable_dates.html",
+        "templates/dashboard/partials/appointment_list.html",
+        "templates/dashboard/partials/patient_list.html",
+        "templates/dashboard/partials/patient_detail_content.html",
+    ]:
+        template = source_text(relative_path)
+        table_count = template.count('<table class="cf-table')
+        scroll_regions = re.finditer(
+            r'<div class="cf-table-scroll"(?P<attrs>[^>]*)>(?P<body>.*?)(?=<div class="cf-table-scroll"|$)',
+            template,
+            re.DOTALL,
+        )
+
+        assert table_count > 0
+        covered_table_count = 0
+        for region in scroll_regions:
+            attrs = region.group("attrs")
+            table_count_in_region = region.group("body").count('<table class="cf-table')
+            label = re.search(r'aria-label="([^"]+)"', attrs)
+
+            assert 'tabindex="0"' in attrs
+            assert label is not None
+            assert label.group(1).strip()
+            assert table_count_in_region == 1
+            covered_table_count += table_count_in_region
+        assert covered_table_count == table_count
+
+
+def test_responsive_table_css_uses_inner_scroll_and_mobile_width_variants():
+    css = css_text()
+    wrap = css_rule_block(".cf-table-wrap")
+    scroll = css_rule_block(".cf-table-scroll")
+    table = css_rule_block(".cf-table")
+    mobile = re.search(r"@media \(max-width: 640px\) \{(?P<body>.*?)^\}", css, re.DOTALL | re.MULTILINE).group("body")
+
+    assert "overflow: hidden;" in wrap
+    assert "width: 100%;" in scroll
+    assert "max-width: 100%;" in scroll
+    assert "min-width: 0;" in scroll
+    assert "overflow-x: auto;" in scroll
+    assert "-webkit-overflow-scrolling: touch;" in scroll
+    assert "overscroll-behavior-inline: contain;" in scroll
+    assert "min-width: max(100%, 44rem);" in table
+    assert "cf-table-compact" in css
+    assert "cf-table-form" in css
+    assert "cf-table-wide" in css
+    assert ".cf-table { min-width: max(100%, 36rem); }" in mobile
+    assert ".cf-table-compact { min-width: 100%; }" in mobile
+    assert ".cf-table-form { min-width: max(100%, 42rem); }" in mobile
+    assert ".cf-table-wide { min-width: max(100%, 48rem); }" in mobile
 
 
 def test_patient_empty_search_keeps_table_heading_and_columns_visible():
@@ -1082,6 +1153,64 @@ def test_appointment_detail_secondary_metadata_uses_muted_panels():
             assert class_name in block
 
 
+def test_patient_detail_uses_defined_radius_tokens_and_semantic_kpi_icons():
+    template = partial_text("patient_detail_content.html")
+
+    assert "--cf-rounded" not in template
+    assert "rounded-[var(--cf-radius-md)]" in template
+
+    completed_block = div_block_containing(template, '<span class="cf-kpi-label">Completed</span>')
+    cancelled_block = div_block_containing(template, '<span class="cf-kpi-label">Cancelled</span>')
+
+    assert "bg-[var(--cf-status-completed-bg)]" in completed_block
+    assert "text-[var(--cf-status-completed-text)]" in completed_block
+    assert "bg-[var(--cf-status-cancelled-bg)]" in cancelled_block
+    assert "text-[var(--cf-status-cancelled-text)]" in cancelled_block
+
+
+def test_patient_detail_modals_match_dashboard_focus_management():
+    template = partial_text("patient_detail.html")
+
+    assert "trapModalFocus(event, root)" in template
+    assert '@keydown.escape.window="detailOpen=false; editOpen=false"' in template
+    assert template.count('@keydown.tab="trapModalFocus($event, $el)"') == 2
+    assert template.count('tabindex="-1"') == 2
+    assert 'x-effect="if (detailOpen)' in template
+    assert 'x-effect="if (editOpen)' in template
+
+
+def test_patient_detail_visit_history_uses_table_surface_without_nested_card():
+    template = partial_text("patient_detail_content.html")
+
+    assert '<div class="cf-card p-5 lg:p-6">\n    <div class="flex items-center justify-between">\n      <h2 class="cf-section-title">Visit History</h2>' not in template
+    assert '<section class="grid gap-4">\n    <div class="flex items-center justify-between">\n      <h2 class="cf-section-title">Visit History</h2>' in template
+
+
+def test_patient_detail_visit_history_summary_matches_faq_summary_pattern():
+    template = partial_text("patient_detail_content.html")
+    summary = div_block_containing(template, "visit-history-summary")
+
+    assert 'id="visit-history-summary"' in summary
+    assert 'class="cf-faq-summary"' in summary
+    assert 'aria-label="Visit history summary"' in summary
+    assert '<span class="cf-faq-summary-metric">{{ kpi_total }} total</span>' in summary
+    assert 'cf-faq-summary-separator' in summary
+    assert '<span class="cf-faq-summary-metric">Last: {{ last_appointment.starts_at|date:"M j, Y" }}</span>' in summary
+    assert "&middot; Last:" not in summary
+
+
+def test_patient_detail_notes_and_empty_state_use_canonical_tokens():
+    template = partial_text("patient_detail_content.html")
+    notes_block = div_block_containing(template, "No notes added yet.")
+
+    assert "rounded-[var(--cf-radius)]" in notes_block
+    assert "bg-[var(--cf-surface-muted)]" in notes_block
+    assert "rounded-lg" not in notes_block
+    assert "cf-card cf-empty-state" in template
+    assert "text-sm font-semibold" in template
+    assert "text-xl font-bold" not in template
+
+
 def test_task_3_form_widgets_use_design_system_classes():
     expected = {
         "appointments/forms.py": [
@@ -1140,6 +1269,19 @@ def test_faq_section_uses_split_composer_layout():
     assert "cf-faq-summary-pill" not in summary
     assert "Visible to patients" in composer
     assert "Make this FAQ visible" not in composer
+
+
+def test_assistant_page_messenger_mode_uses_readable_radio_cards():
+    template = source_text("templates/dashboard/assistant_settings.html")
+
+    assert "Messenger Response Mode" in template
+    assert "role=\"radiogroup\"" in template
+    assert "name=\"{{ ai_form.messenger_response_mode.html_name }}\"" in template
+    assert "value=\"quick_replies\"" in template
+    assert "value=\"ai\"" in template
+    assert "No AI tokens are consumed" in template
+    assert "No quick-reply buttons are shown" in template
+    assert "AI mode only takes over when AI replies are enabled" in template
 
 
 def test_faq_summary_metrics_use_aqua_soft_pills():
@@ -1864,3 +2006,55 @@ def test_mobile_responsive_dynamic_text_has_wrapping_guards():
     for template in [partial_success, full_success]:
         assert "justify-between gap-3" in template
         assert "min-w-0 text-right break-words" in template
+
+
+def test_settings_page_level_save_buttons_align_right():
+    assistant_settings = source_text("templates/dashboard/assistant_settings.html")
+    settings = source_text("templates/dashboard/settings.html")
+    business_hours = source_text("templates/dashboard/business_hours.html")
+    slot_preview = source_text("templates/dashboard/slot_preview.html")
+
+    page_level_save_blocks = [
+        div_block_containing(assistant_settings, "Save Assistant Settings"),
+        div_block_containing(assistant_settings, "Save Changes"),
+        div_block_containing(settings, "Save Changes"),
+        div_block_containing(settings, "Save Business Hours"),
+        div_block_containing(settings, "Preview Slots"),
+        div_block_containing(business_hours, "Save Business Hours"),
+        div_block_containing(slot_preview, "Preview Slots"),
+    ]
+
+    for block in page_level_save_blocks:
+        assert "justify-end" in block
+
+
+def test_unavailable_date_modals_use_existing_two_action_footer_pattern():
+    templates = [
+        source_text("templates/dashboard/settings.html"),
+        source_text("templates/dashboard/unavailable_dates.html"),
+    ]
+
+    for template in templates:
+        footer = div_block_containing(template, "Save Unavailable Date")
+
+        assert "cf-modal-footer" in footer
+        assert "cf-btn cf-btn-secondary flex-1" in footer
+        assert "Cancel" in footer
+        assert "cf-btn cf-btn-primary flex-1" in footer
+        assert "Save Unavailable Date" in footer
+        assert "cf-btn cf-btn-primary w-full" not in footer
+
+
+def test_unavailable_date_modals_keep_fields_full_width():
+    fields = [
+        (source_text("templates/dashboard/settings.html"), "settings-unavailable-date", "settings-unavailable-reason"),
+        (source_text("templates/dashboard/unavailable_dates.html"), "unavailable-date-date", "unavailable-date-reason"),
+    ]
+
+    for template, date_input_id, reason_input_id in fields:
+        date_field = div_block_containing(template, date_input_id)
+        reason_field = div_block_containing(template, reason_input_id)
+
+        assert "cf-field" in date_field
+        assert "md:col-span-2" in date_field
+        assert "md:col-span-2" in reason_field

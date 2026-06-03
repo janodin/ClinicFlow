@@ -700,6 +700,83 @@ def test_assistant_settings_page_creates_default_shared_ai_settings(clinic_setup
 
 
 @pytest.mark.django_db
+def test_shared_ai_settings_form_exposes_messenger_response_mode(clinic_setup):
+    from clinics.forms import SharedAISettingsForm
+    from clinics.models import ClinicAISettings
+
+    clinic, service, owner = clinic_setup
+    settings = ClinicAISettings.objects.create(clinic=clinic)
+
+    form = SharedAISettingsForm(instance=settings)
+
+    assert "messenger_response_mode" in form.fields
+    assert dict(form.fields["messenger_response_mode"].choices) == {
+        ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES: "Quick replies",
+        ClinicAISettings.MESSENGER_MODE_AI: "AI mode",
+    }
+
+    invalid = SharedAISettingsForm(
+        data={
+            "is_ai_enabled": "on",
+            "messenger_response_mode": "invalid-mode",
+            "instructions": "Use a friendly clinic tone.",
+            "fallback_message": "Please call us.",
+        },
+        instance=settings,
+    )
+    assert not invalid.is_valid()
+    assert "messenger_response_mode" in invalid.errors
+
+
+@pytest.mark.django_db
+def test_assistant_settings_page_shows_messenger_response_mode_control(clinic_setup, client):
+    from clinics.models import ClinicAISettings
+
+    clinic, service, user = clinic_setup
+    ClinicAISettings.objects.create(clinic=clinic)
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:assistant_settings"))
+
+    assert response.status_code == 200
+    assert b"Messenger Response Mode" in response.content
+    assert b'name="messenger_response_mode"' in response.content
+    assert b'value="quick_replies"' in response.content
+    assert b'value="ai"' in response.content
+    assert b"Use guided buttons for Messenger booking. No AI tokens are consumed." in response.content
+    assert b"Use AI for Messenger conversations and booking. No quick-reply buttons are shown." in response.content
+    assert b"This affects Facebook Messenger only. AI mode only takes over when AI replies are enabled." in response.content
+    assert b"You can choose a Messenger mode now. It will apply after Facebook Messenger is connected." in response.content
+
+
+@pytest.mark.django_db
+def test_assistant_settings_page_explains_launcher_first_embed_options(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:assistant_settings"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert "previewOpen: false" in content
+    assert "@click=\"previewOpen = true\"" in content
+    assert "@click=\"previewOpen = false\"" in content
+    assert "clinicflow-minimize" in content
+    assert "Click the launcher to preview how patients open the widget." in content
+    assert "aria-label=\"Open booking widget preview\"" in content
+    assert "Book an appointment" in content
+    assert "Recommended JavaScript launcher" in content
+    assert "Adds a small bottom-right booking button" in content
+    assert "full widget opens after click" in content
+    assert "&lt;script src=" in content
+    assert "Advanced iframe fallback" in content
+    assert "Embeds the full panel directly" in content
+    assert "visible immediately" in content
+    assert "&lt;iframe src=" in content
+    assert "Preview shows the full widget after a visitor opens the bottom-right launcher." not in content
+
+
+@pytest.mark.django_db
 def test_messenger_settings_links_to_assistant_without_ai_prompt_form(clinic_setup, client):
     from clinics.models import ClinicAISettings
     from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
@@ -1004,6 +1081,7 @@ def test_owner_can_save_assistant_ai_settings(clinic_setup, client):
         reverse("dashboard:assistant_settings"),
         {
             "_form": "ai_settings",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
             "instructions": "Answer briefly and ask for confirmation before booking.",
             "fallback_message": "A staff member will help you soon.",
         },
@@ -1013,6 +1091,7 @@ def test_owner_can_save_assistant_ai_settings(clinic_setup, client):
     assert response.url == reverse("dashboard:assistant_settings")
     settings = ClinicAISettings.objects.get(clinic=clinic)
     assert settings.is_ai_enabled is False
+    assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
     assert settings.instructions == "Answer briefly and ask for confirmation before booking."
     assert settings.fallback_message == "A staff member will help you soon."
 
@@ -1029,6 +1108,7 @@ def test_owner_can_enable_assistant_ai_settings(clinic_setup, client):
         {
             "_form": "ai_settings",
             "is_ai_enabled": "on",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
             "instructions": "Use a friendly clinic tone.",
             "fallback_message": "Please call us.",
         },
@@ -1037,6 +1117,32 @@ def test_owner_can_enable_assistant_ai_settings(clinic_setup, client):
     assert response.status_code == 302
     settings = ClinicAISettings.objects.get(clinic=clinic)
     assert settings.is_ai_enabled is True
+    assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_AI
+    assert settings.instructions == "Use a friendly clinic tone."
+    assert settings.fallback_message == "Please call us."
+
+
+@pytest.mark.django_db
+def test_owner_can_save_messenger_ai_mode_independent_from_website_assistant(clinic_setup, client):
+    from clinics.models import ClinicAISettings
+
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:assistant_settings"),
+        {
+            "_form": "ai_settings",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "instructions": "Use a friendly clinic tone.",
+            "fallback_message": "Please call us.",
+        },
+    )
+
+    assert response.status_code == 302
+    settings = ClinicAISettings.objects.get(clinic=clinic)
+    assert settings.is_ai_enabled is False
+    assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_AI
     assert settings.instructions == "Use a friendly clinic tone."
     assert settings.fallback_message == "Please call us."
 
@@ -1052,6 +1158,7 @@ def test_staff_cannot_save_assistant_ai_settings(clinic_setup, client):
     settings = ClinicAISettings.objects.create(
         clinic=clinic,
         is_ai_enabled=False,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
         instructions="Existing owner instructions.",
         fallback_message="Existing fallback.",
     )
@@ -1062,6 +1169,7 @@ def test_staff_cannot_save_assistant_ai_settings(clinic_setup, client):
         {
             "_form": "ai_settings",
             "is_ai_enabled": "on",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
             "instructions": "Staff should not save this.",
             "fallback_message": "Blocked.",
         },
@@ -1070,6 +1178,7 @@ def test_staff_cannot_save_assistant_ai_settings(clinic_setup, client):
     assert response.status_code == 403
     settings.refresh_from_db()
     assert settings.is_ai_enabled is False
+    assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
     assert settings.instructions == "Existing owner instructions."
     assert settings.fallback_message == "Existing fallback."
 
@@ -1086,6 +1195,7 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
     settings_a = ClinicAISettings.objects.create(
         clinic=clinic_a,
         is_ai_enabled=False,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
         instructions="Clinic A original instructions.",
         fallback_message="Clinic A original fallback.",
     )
@@ -1097,6 +1207,7 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
     settings_b = ClinicAISettings.objects.create(
         clinic=clinic_b,
         is_ai_enabled=False,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
         instructions="Clinic B original instructions.",
         fallback_message="Clinic B original fallback.",
     )
@@ -1107,6 +1218,7 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
         {
             "_form": "ai_settings",
             "is_ai_enabled": "on",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
             "instructions": "Clinic B updated instructions.",
             "fallback_message": "Clinic B updated fallback.",
         },
@@ -1116,9 +1228,11 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
     settings_a.refresh_from_db()
     settings_b.refresh_from_db()
     assert settings_a.is_ai_enabled is False
+    assert settings_a.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
     assert settings_a.instructions == "Clinic A original instructions."
     assert settings_a.fallback_message == "Clinic A original fallback."
     assert settings_b.is_ai_enabled is True
+    assert settings_b.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_AI
     assert settings_b.instructions == "Clinic B updated instructions."
     assert settings_b.fallback_message == "Clinic B updated fallback."
 
@@ -1135,6 +1249,7 @@ def test_owner_can_save_assistant_ai_settings_without_messenger_connection(clini
         {
             "_form": "ai_settings",
             "is_ai_enabled": "on",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
             "instructions": "Shared website and Messenger instructions.",
             "fallback_message": "Shared fallback.",
         },
@@ -1143,6 +1258,7 @@ def test_owner_can_save_assistant_ai_settings_without_messenger_connection(clini
     assert response.status_code == 302
     settings = ClinicAISettings.objects.get(clinic=clinic)
     assert settings.is_ai_enabled is True
+    assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_AI
     assert settings.instructions == "Shared website and Messenger instructions."
     assert settings.fallback_message == "Shared fallback."
 
@@ -1320,6 +1436,25 @@ def test_save_business_hours_rejects_close_before_open(clinic_setup, client):
     existing.refresh_from_db()
     assert existing.open_time == time(9)
     assert existing.close_time == time(17)
+
+
+@pytest.mark.django_db
+def test_widget_embed_page_explains_recommended_launcher_and_advanced_iframe(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:widget_embed"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert "Recommended JavaScript launcher" in content
+    assert "Adds a small bottom-right booking button" in content
+    assert "full widget opens after click" in content
+    assert "&lt;script src=" in content
+    assert "Advanced iframe fallback" in content
+    assert "Embeds the full panel directly" in content
+    assert "visible immediately" in content
+    assert "&lt;iframe src=" in content
 
 
 @pytest.mark.django_db

@@ -287,6 +287,48 @@ def test_webhook_post_valid_message():
 
 
 @pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_direct_webhook_does_not_emit_quick_replies_when_messenger_mode_is_ai():
+    from clinics.models import ClinicAISettings
+
+    client = Client()
+    clinic, connection = _create_messenger_clinic("owner_direct_ai_mode", "PAGE-DIRECT-AI-MODE")
+    connection.app_secret = "test_secret"
+    connection.save(update_fields=["app_secret"])
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=False,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="AI mode is unavailable right now.",
+    )
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-DIRECT-AI-MODE",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE-DIRECT-AI-MODE"},
+                "message": {"text": "Book an appointment"},
+            }],
+        }],
+    }).encode()
+    signature = "sha256=" + hmac.new("test_secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    with patch("messenger.views._send_facebook_reply") as mock_send:
+        response = client.post(
+            reverse("messenger:webhook"),
+            data=payload,
+            content_type="application/json",
+            HTTP_X_HUB_SIGNATURE_256=signature,
+        )
+
+    assert response.status_code == 200
+    assert not MessengerSession.objects.filter(connection=connection, psid="PSID1").exists()
+    mock_send.assert_not_called()
+
+
+@pytest.mark.django_db
 def test_webhook_post_uses_connection_app_secret():
     client = Client()
     user = User.objects.create_user(username="owner_wh_app", email="owner_wh_app@test.com", password="pass")
@@ -689,12 +731,26 @@ def test_clinic_ai_settings_defaults_and_unique_clinic():
 
     assert settings.clinic == clinic
     assert settings.is_ai_enabled is True
+    assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
+    assert settings.safe_messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
     assert settings.instructions == DEFAULT_MESSENGER_AI_PROMPT
     assert settings.fallback_message == ""
     assert str(settings) == f"ClinicAISettings({clinic.name})"
 
     with pytest.raises(IntegrityError):
         ClinicAISettings.objects.create(clinic=clinic)
+
+
+@pytest.mark.django_db
+def test_clinic_ai_settings_invalid_messenger_response_mode_fails_closed():
+    from clinics.models import ClinicAISettings
+
+    clinic, _connection = _create_messenger_clinic("owner_clinic_ai_bad_mode", "PAGE-CLINIC-AI-BAD-MODE")
+    settings = ClinicAISettings.objects.create(clinic=clinic)
+
+    settings.messenger_response_mode = "invalid-mode"
+
+    assert settings.safe_messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
 
 
 @pytest.mark.django_db
@@ -729,6 +785,78 @@ def test_build_ai_context_uses_default_prompt_when_settings_missing():
 
     assert result["found"] is True
     assert result["ai"]["instructions"] == DEFAULT_MESSENGER_AI_PROMPT
+
+
+@pytest.mark.django_db
+def test_build_ai_context_marks_messenger_ai_disabled_for_quick_reply_mode():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_quick_mode", "PAGEAI-QUICK-MODE")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
+    )
+
+    result = build_ai_context("PAGEAI-QUICK-MODE")
+
+    assert result["found"] is True
+    assert result["ai"]["messenger_response_mode"] == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
+    assert "is_messenger_ai_enabled" not in result["ai"]
+
+
+@pytest.mark.django_db
+def test_build_ai_context_marks_messenger_ai_enabled_for_ai_mode():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_mode_context", "PAGEAI-MODE-CONTEXT")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+    )
+
+    result = build_ai_context("PAGEAI-MODE-CONTEXT")
+
+    assert result["found"] is True
+    assert result["ai"]["messenger_response_mode"] == ClinicAISettings.MESSENGER_MODE_AI
+    assert "is_messenger_ai_enabled" not in result["ai"]
+
+
+@pytest.mark.django_db
+def test_build_ai_context_returns_messenger_response_mode_independent_from_ai_enabled():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_mode_context", "PAGE-AI-MODE-CONTEXT")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=False,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        instructions="Messenger can use AI while website Assistant is off.",
+    )
+
+    result = build_ai_context("PAGE-AI-MODE-CONTEXT")
+
+    assert result["found"] is True
+    assert result["ai"]["is_ai_enabled"] is False
+    assert result["ai"]["messenger_response_mode"] == ClinicAISettings.MESSENGER_MODE_AI
+    assert "is_messenger_ai_enabled" not in result["ai"]
+
+
+@pytest.mark.django_db
+def test_build_ai_context_defaults_messenger_response_mode_to_quick_replies():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context
+
+    _clinic, _connection = _create_messenger_clinic("owner_ai_mode_default_context", "PAGE-AI-MODE-DEFAULT")
+
+    result = build_ai_context("PAGE-AI-MODE-DEFAULT")
+
+    assert result["found"] is True
+    assert result["ai"]["messenger_response_mode"] == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
 
 
 @pytest.mark.django_db
@@ -1135,6 +1263,117 @@ def test_n8n_webhook_accepts_valid_secret():
 
     assert response.status_code == 200
     assert "replies" in response.json()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_returns_quick_replies_when_messenger_mode_is_quick_replies():
+    from clinics.models import ClinicAISettings
+
+    clinic, _connection = _create_messenger_clinic("owner_n8n_quick_mode", "PAGE-N8N-QUICK-MODE")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES)
+    Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-QUICK-MODE", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["page_token"] == "TOKEN-PAGE-N8N-QUICK-MODE"
+    assert any(reply["type"] == "quick_replies" for reply in response.json()["replies"])
+    assert MessengerSession.objects.filter(connection__page_id="PAGE-N8N-QUICK-MODE", psid="PSID1").exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_does_not_emit_quick_replies_when_messenger_mode_is_ai():
+    from clinics.models import ClinicAISettings
+
+    clinic, _connection = _create_messenger_clinic("owner_n8n_ai_mode", "PAGE-N8N-AI-MODE")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="AI mode is unavailable right now.",
+    )
+    Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-AI-MODE", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "replies": [{"type": "text", "text": "AI mode is unavailable right now."}],
+        "page_token": "TOKEN-PAGE-N8N-AI-MODE",
+    }
+    assert not MessengerSession.objects.filter(connection__page_id="PAGE-N8N-AI-MODE", psid="PSID1").exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_does_not_run_quick_reply_engine_in_ai_mode():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import DEFAULT_AI_FALLBACK_MESSAGE
+
+    clinic, _connection = _create_messenger_clinic("owner_n8n_ai_mode", "PAGE-N8N-AI-MODE")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+    )
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-AI-MODE", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "replies": [{"type": "text", "text": DEFAULT_AI_FALLBACK_MESSAGE}],
+        "page_token": "TOKEN-PAGE-N8N-AI-MODE",
+    }
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_uses_messenger_ai_mode_when_website_ai_is_disabled():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import DEFAULT_AI_FALLBACK_MESSAGE
+
+    clinic, _connection = _create_messenger_clinic("owner_n8n_ai_mode_disabled", "PAGE-N8N-AI-DISABLED")
+    Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=False,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+    )
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-AI-DISABLED", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "replies": [{"type": "text", "text": DEFAULT_AI_FALLBACK_MESSAGE}],
+        "page_token": "TOKEN-PAGE-N8N-AI-DISABLED",
+    }
+    assert not MessengerSession.objects.filter(connection__page_id="PAGE-N8N-AI-DISABLED", psid="PSID1").exists()
 
 
 @pytest.mark.django_db

@@ -5,12 +5,15 @@
   <div class="cf-page-header">
     <div>
       <h1 class="cf-page-title ui-page-title">Widget Embed</h1>
-      <p class="cf-page-description">Copy the code below to embed the booking widget on your website.</p>
+      <p class="cf-page-description">Copy the recommended launcher script or use the advanced iframe fallback for custom placements.</p>
     </div>
   </div>
-  <section class="cf-card p-6">
-    <h2 class="cf-section-title">JavaScript Embed (Recommended)</h2>
-    <p class="cf-muted mt-2 text-sm">Adds a floating launcher button. Click to expand.</p>
+  <section class="cf-card p-6 border border-[var(--cf-brand-soft)]">
+    <div class="flex flex-wrap items-center gap-2">
+      <h2 class="cf-section-title">Recommended JavaScript launcher</h2>
+      <span class="cf-badge cf-badge-info">Recommended</span>
+    </div>
+    <p class="cf-muted mt-2 text-sm">Adds a small bottom-right booking button. The full widget opens after click.</p>
     <div class="relative mt-4">
       <pre class="overflow-x-auto rounded-xl bg-[var(--cf-dashboard-dark)] p-5 text-sm text-white shadow-[var(--cf-shadow-raised)]" id="script-code">&lt;script src="{{ script_url }}"&gt;&lt;/script&gt;</pre>
       <button @click="navigator.clipboard.writeText(document.getElementById('script-code').innerText).then(() => {copied='script'; setTimeout(() => copied='', 2000)})" class="absolute right-3 top-3 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20">Copy</button>
@@ -18,8 +21,8 @@
     </div>
   </section>
   <section class="cf-card p-6">
-    <h2 class="cf-section-title">Iframe Embed</h2>
-    <p class="cf-muted mt-2 text-sm">Embed the widget directly as an iframe.</p>
+    <h2 class="cf-section-title">Advanced iframe fallback</h2>
+    <p class="cf-muted mt-2 text-sm">Embeds the full panel directly and can be visible immediately. Use only for custom placements where you intentionally want the widget panel shown.</p>
     <div class="relative mt-4">
       <pre class="overflow-x-auto rounded-xl bg-[var(--cf-dashboard-dark)] p-5 text-sm text-white shadow-[var(--cf-shadow-raised)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
       <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {copied='iframe'; setTimeout(() => copied='', 2000)})" class="absolute right-3 top-3 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20">Copy</button>
@@ -28,6 +31,7 @@
   </section>
   <section class="cf-card p-6">
     <h2 class="cf-section-title">Preview</h2>
+    <p class="cf-muted mt-2 text-sm">Preview shows the full widget after a visitor opens the bottom-right launcher.</p>
     <div class="mt-4 overflow-hidden rounded-xl border border-[var(--cf-line)] shadow-[var(--cf-shadow-raised)]" style="max-width:420px;">
       <iframe src="{{ iframe_url }}" style="width:100%;height:500px;border:none;" allow="clipboard-write"></iframe>
     </div>

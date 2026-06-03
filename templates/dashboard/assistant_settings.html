@@ -35,6 +35,39 @@
         {% endif %}
       </div>
 
+      <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 class="cf-section-title text-lg">Messenger Response Mode</h3>
+            <p class="mt-1 text-sm text-[var(--cf-muted)]">This affects Facebook Messenger only. AI mode only takes over when AI replies are enabled.</p>
+          </div>
+          <span class="cf-badge cf-badge-active self-start">Messenger only</span>
+        </div>
+        {% if not clinic.messenger_connection or not clinic.messenger_connection.is_active %}
+          <p class="mt-3 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface)] px-3 py-2 text-xs text-[var(--cf-muted)]">You can choose a Messenger mode now. It will apply after Facebook Messenger is connected.</p>
+        {% endif %}
+        <div class="mt-4 grid gap-3 md:grid-cols-2" role="radiogroup" aria-label="{{ ai_form.messenger_response_mode.label }}">
+          <label class="group flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface)] p-4 transition hover:border-[var(--cf-brand)] hover:shadow-sm">
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="quick_replies" class="mt-1" {% if ai_form.messenger_response_mode.value == "quick_replies" %}checked{% endif %}>
+            <span class="min-w-0">
+              <span class="block text-sm font-semibold text-[var(--cf-ink)]">Quick replies</span>
+              <span class="mt-1 block text-sm text-[var(--cf-muted)]">Use guided buttons for Messenger booking. No AI tokens are consumed.</span>
+            </span>
+          </label>
+          <label class="group flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface)] p-4 transition hover:border-[var(--cf-brand)] hover:shadow-sm">
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="ai" class="mt-1" {% if ai_form.messenger_response_mode.value == "ai" %}checked{% endif %}>
+            <span class="min-w-0">
+              <span class="block text-sm font-semibold text-[var(--cf-ink)]">AI mode</span>
+              <span class="mt-1 block text-sm text-[var(--cf-muted)]">Use AI for Messenger conversations and booking. No quick-reply buttons are shown.</span>
+            </span>
+          </label>
+        </div>
+        <p class="mt-3 text-xs text-[var(--cf-muted)]">Quick replies are recommended for clinics that do not include Messenger AI in their plan.</p>
+        {% if ai_form.messenger_response_mode.errors %}
+          <p class="text-sm text-red-600 mt-2">{{ ai_form.messenger_response_mode.errors.0 }}</p>
+        {% endif %}
+      </div>
+
       <div class="cf-field">
         <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
           <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
@@ -62,7 +95,7 @@
         {% endif %}
       </div>
 
-      <div class="pt-2">
+      <div class="flex justify-end pt-2">
         <button type="submit" class="cf-btn cf-btn-primary">
           <i data-lucide="save" class="h-4 w-4"></i> Save Assistant Settings
         </button>
@@ -70,7 +103,7 @@
     </form>
   </section>
 
-  <section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;}">
+  <section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, previewOpen: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;} window.addEventListener('message', event => { if (event.data && event.data.type === 'clinicflow-minimize') { previewOpen = false; } });">
     <h2 class="cf-section-title">Website Booking Widget</h2>
     <p class="mt-2 text-sm text-[var(--cf-muted)]">Customize website-only appearance, preview, and embed settings.</p>
 
@@ -98,17 +131,35 @@
             </label>
             {% if widget_form.show_reason_field.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.show_reason_field.errors.0 }}</p>{% endif %}
           </div>
-          <div class="pt-2">
+          <div class="flex justify-end pt-2">
             <button class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Save Changes</button>
           </div>
         </div>
         <!-- Right: Live Preview exclusively -->
         <div>
           <p class="cf-kpi-label mb-2">Live Preview</p>
-          <div class="overflow-hidden rounded-lg border border-[var(--cf-line)]">
-            <iframe src="{{ iframe_url }}" class="h-[420px] sm:h-[520px]" style="width:100%;border:none;" allow="clipboard-write"></iframe>
+          <div class="relative h-[420px] overflow-hidden rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] sm:h-[520px]">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,.16),transparent_38%),linear-gradient(135deg,#ffffff,#f0fdff)]"></div>
+            <div class="relative z-10 flex h-full flex-col justify-between p-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cf-muted)]">Clinic website preview</p>
+                <div class="mt-3 h-3 w-32 rounded-full bg-[var(--cf-line)]"></div>
+                <div class="mt-2 h-2 w-44 rounded-full bg-[var(--cf-line)]/70"></div>
+              </div>
+
+              <button x-show="!previewOpen" x-transition @click="previewOpen = true" type="button" class="absolute bottom-4 right-4 grid h-[60px] w-[60px] place-items-center rounded-full text-white shadow-[0_10px_24px_rgba(8,51,68,.22)] transition hover:scale-105 focus:outline focus:outline-3 focus:outline-offset-4 focus:outline-[rgba(8,51,68,.35)]" :style="'background-color:' + accentColor" aria-label="Open booking widget preview" title="Book an appointment">
+                <i data-lucide="calendar-days" class="h-7 w-7" aria-hidden="true"></i>
+              </button>
+
+              <div x-show="previewOpen" x-transition class="absolute inset-0 bg-transparent">
+                <button @click="previewOpen = false" type="button" class="absolute right-3 top-3 z-20 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-[var(--cf-ink)] shadow-sm ring-1 ring-[var(--cf-line)] hover:bg-white">
+                  Minimize preview
+                </button>
+                <iframe src="{{ iframe_url }}" class="h-full w-full" style="border:none;" allow="clipboard-write"></iframe>
+              </div>
+            </div>
           </div>
-          <p class="mt-2 text-xs text-[var(--cf-muted)]">This is how patients will see your widget on your website.</p>
+          <p class="mt-2 text-xs text-[var(--cf-muted)]">Click the launcher to preview how patients open the widget.</p>
         </div>
       </div>
     </form>
@@ -136,14 +187,15 @@
     <!-- Embed -->
     <div class="mt-6 border-t border-[var(--cf-line)] pt-6">
       <p class="cf-kpi-label mb-3">Embed on Your Website</p>
-      <div class="grid gap-5 md:grid-cols-2">
+      <div class="grid gap-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
         <!-- JavaScript Embed -->
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <i data-lucide="file-code" class="h-4 w-4 text-[var(--cf-muted)]"></i>
-            <p class="text-sm font-semibold text-[var(--cf-ink)]">JavaScript</p>
+        <div class="rounded-lg border border-[var(--cf-brand-soft)] bg-[var(--cf-surface)] p-4 shadow-sm">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <i data-lucide="file-code" class="h-4 w-4 text-[var(--cf-brand)]"></i>
+            <p class="text-sm font-semibold text-[var(--cf-ink)]">Recommended JavaScript launcher</p>
+            <span class="cf-badge cf-badge-info">Recommended</span>
           </div>
-          <p class="text-xs text-[var(--cf-muted)] mb-3">Paste before the closing <code class="rounded bg-[var(--cf-surface-muted)] px-1 py-0.5 text-[var(--cf-blue)]">&lt;/body&gt;</code> tag. A floating launcher appears automatically.</p>
+          <p class="text-xs text-[var(--cf-muted)] mb-3">Paste before the closing <code class="rounded bg-[var(--cf-surface-muted)] px-1 py-0.5 text-[var(--cf-blue)]">&lt;/body&gt;</code> tag. Adds a small bottom-right booking button. The full widget opens after click.</p>
           <div class="relative">
             <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="script-code">&lt;script src="{{ script_url }}"&gt;&lt;/script&gt;</pre>
             <button @click="navigator.clipboard.writeText(document.getElementById('script-code').innerText).then(() => {scriptCopied=true; setTimeout(() => scriptCopied=false, 2000)})" class="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20" type="button">
@@ -156,12 +208,12 @@
         </div>
 
         <!-- Iframe Embed -->
-        <div>
+        <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
           <div class="flex items-center gap-2 mb-2">
             <i data-lucide="frame" class="h-4 w-4 text-[var(--cf-muted)]"></i>
-            <p class="text-sm font-semibold text-[var(--cf-ink)]">Iframe</p>
+            <p class="text-sm font-semibold text-[var(--cf-ink)]">Advanced iframe fallback</p>
           </div>
-          <p class="text-xs text-[var(--cf-muted)] mb-3">Paste this where you want the widget. It floats fixed in the bottom-right.</p>
+          <p class="text-xs text-[var(--cf-muted)] mb-3">Embeds the full panel directly and can be visible immediately. Use only for custom placements where you intentionally want the widget panel shown.</p>
           <div class="relative">
             <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
             <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {iframeCopied=true; setTimeout(() => iframeCopied=false, 2000)})" class="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20" type="button">

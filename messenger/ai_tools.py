@@ -23,13 +23,14 @@ def get_or_create_clinic_ai_settings(clinic):
 def get_clinic_for_slug(clinic_slug):
     if not clinic_slug:
         return None
-    return Clinic.objects.filter(slug=clinic_slug, is_active=True).first()
+    return Clinic.objects.filter(slug=clinic_slug, is_active=True, requires_onboarding=False).first()
 
 
 def _ai_payload_for_clinic(clinic):
     ai_settings = get_or_create_clinic_ai_settings(clinic)
     return {
         "is_ai_enabled": ai_settings.is_ai_enabled,
+        "messenger_response_mode": ai_settings.safe_messenger_response_mode,
         "instructions": ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT,
         "fallback_message": ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE,
     }
@@ -87,7 +88,7 @@ def get_connection_for_page(page_id):
         return None
     return (
         MessengerConnection.objects.select_related("clinic")
-        .filter(page_id=page_id, is_active=True, clinic__is_active=True)
+        .filter(page_id=page_id, is_active=True, clinic__is_active=True, clinic__requires_onboarding=False)
         .first()
     )
 

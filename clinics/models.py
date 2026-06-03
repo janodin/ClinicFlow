@@ -78,6 +78,7 @@ class Clinic(TimeStampedModel):
     widget_welcome_message = models.TextField(default="Welcome! How can we help you book an appointment today?")
     widget_behavior_instructions = models.TextField(default="Guide patients through booking smoothly. Always suggest the nearest available slot.")
     show_reason_field = models.BooleanField(default=True)
+    requires_onboarding = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
     def save(self, *args, **kwargs):
@@ -108,8 +109,20 @@ class ClinicAISettingsManager(models.Manager):
 
 
 class ClinicAISettings(TimeStampedModel):
+    MESSENGER_MODE_QUICK_REPLIES = "quick_replies"
+    MESSENGER_MODE_AI = "ai"
+    MESSENGER_RESPONSE_MODE_CHOICES = [
+        (MESSENGER_MODE_QUICK_REPLIES, "Quick replies"),
+        (MESSENGER_MODE_AI, "AI mode"),
+    ]
+
     clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="ai_settings")
     is_ai_enabled = models.BooleanField(default=True)
+    messenger_response_mode = models.CharField(
+        max_length=24,
+        choices=MESSENGER_RESPONSE_MODE_CHOICES,
+        default=MESSENGER_MODE_QUICK_REPLIES,
+    )
     instructions = models.TextField(blank=True, default=DEFAULT_MESSENGER_AI_PROMPT)
     fallback_message = models.TextField(blank=True, default="")
 
@@ -118,6 +131,13 @@ class ClinicAISettings(TimeStampedModel):
     class Meta:
         verbose_name = "Clinic AI Settings"
         verbose_name_plural = "Clinic AI Settings"
+
+    @property
+    def safe_messenger_response_mode(self):
+        valid_modes = {choice[0] for choice in self.MESSENGER_RESPONSE_MODE_CHOICES}
+        if self.messenger_response_mode in valid_modes:
+            return self.messenger_response_mode
+        return self.MESSENGER_MODE_QUICK_REPLIES
 
     def __str__(self):
         return f"ClinicAISettings({self.clinic.name})"

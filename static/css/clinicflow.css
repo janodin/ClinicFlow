@@ -943,12 +943,29 @@ code,
 }
 
 .cf-table-wrap {
-  overflow-x: auto;
-  overflow-y: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--cf-line);
   border-radius: var(--cf-radius-lg);
   background: var(--cf-surface);
   box-shadow: var(--cf-shadow-card);
+}
+
+.cf-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+}
+
+.cf-table-scroll:focus-visible {
+  outline: 2px solid var(--cf-brand);
+  outline-offset: -2px;
 }
 
 .cf-table-header {
@@ -962,7 +979,7 @@ code,
 }
 
 .cf-table {
-  min-width: 720px;
+  min-width: max(100%, 44rem);
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -970,6 +987,10 @@ code,
   font-size: .875rem;
   line-height: 1.4;
 }
+
+.cf-table-compact { min-width: max(100%, 32rem); }
+.cf-table-form { min-width: max(100%, 48rem); }
+.cf-table-wide { min-width: max(100%, 56rem); }
 
 .cf-table th,
 .cf-table td {
@@ -1652,6 +1673,12 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
 @media (max-width: 640px) {
   .cf-page { gap: 1rem; }
   .cf-card { padding: 1rem; }
+  .cf-table { min-width: max(100%, 36rem); }
+  .cf-table-compact { min-width: 100%; }
+  .cf-table-form { min-width: max(100%, 42rem); }
+  .cf-table-wide { min-width: max(100%, 48rem); }
+  .cf-table th,
+  .cf-table td { padding: .625rem .75rem; }
   .cf-toolbar > * { width: 100%; }
   .cf-page-actions .cf-btn,
   .cf-toolbar .cf-btn,

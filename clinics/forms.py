@@ -57,9 +57,10 @@ class WidgetSettingsForm(forms.ModelForm):
 class SharedAISettingsForm(forms.ModelForm):
     class Meta:
         model = ClinicAISettings
-        fields = ["is_ai_enabled", "instructions", "fallback_message"]
+        fields = ["is_ai_enabled", "messenger_response_mode", "instructions", "fallback_message"]
         widgets = {
             "is_ai_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
+            "messenger_response_mode": forms.RadioSelect(attrs={"class": _CHECKBOX}),
             "instructions": forms.Textarea(attrs={
                 "class": _TEXTAREA,
                 "placeholder": "Tell the shared assistant how to speak, what clinic policies to follow, and what it should avoid.",
@@ -73,12 +74,13 @@ class SharedAISettingsForm(forms.ModelForm):
         }
         labels = {
             "is_ai_enabled": "Enable AI replies",
+            "messenger_response_mode": "Messenger response mode",
             "instructions": "Prompt / Instructions",
             "fallback_message": "Fallback message",
         }
         help_texts = {
-            "instructions": "Used by both the website Assistant and Facebook Messenger. Services, prices, and availability still come from ClinicFlow.",
-            "fallback_message": "Shown in both channels when AI replies are disabled or unavailable.",
+            "instructions": "Used by the website Assistant and Messenger AI mode. Services, prices, and availability still come from ClinicFlow.",
+            "fallback_message": "Shown when AI replies are disabled or unavailable.",
         }
 
 
