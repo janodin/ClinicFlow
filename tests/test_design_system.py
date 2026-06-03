@@ -701,12 +701,12 @@ def test_dashboard_shell_uses_task_2_navigation_groups_and_labels():
     assert ">Account<" not in template
     assert "label=\"Overview\"" in template
     assert 'label="Services"' in operations_group
-    assert "label=\"Booking Widget\"" in template
+    assert "label=\"Assistant\"" in template
     assert 'url_name="dashboard:billing"' in setup_group
-    assert "icon=\"message-circle\" label=\"Booking Widget\"" in template
+    assert "icon=\"message-circle\" label=\"Assistant\"" in template
     assert "<span>Overview</span>" in template
     assert "label=\"Dashboard\"" not in template
-    assert "label=\"Assistant\"" not in template
+    assert "label=\"Booking Widget\"" not in template
     assert "<span>Home</span>" not in template
     assert ">Main<" not in template
     assert ">Config<" not in template
