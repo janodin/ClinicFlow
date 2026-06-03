@@ -593,7 +593,7 @@ for (const action of actions) {
     items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: String(action.text || '') } } } });
   }
   if (action.type === 'quick_replies') {
-    items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: String(action.text || ''), quick_replies: (action.options || []).map((option) => ({ content_type: 'text', title: option.title, payload: option.payload })) } } } });
+    items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: String(action.text || ''), quick_replies: (action.options || []).slice(0, 13).map((option) => ({ content_type: 'text', title: option.title, payload: option.payload })) } } } });
   }
 }
 if (!items.length) {
@@ -736,7 +736,7 @@ const sendFacebookReply = node({
       sendBody: true,
       specifyBody: 'json',
       jsonBody: expr('{{ $json.facebook_body }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+      options: { response: { response: { responseFormat: 'json' } }, timeout: 15000 },
     },
   },
   output: [{ recipient_id: 'PSID123', message_id: 'mid.123' }],

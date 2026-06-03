@@ -12,8 +12,11 @@ from .faq_matcher import match_faq
 from .models import MessengerSession
 
 
+MESSENGER_QUICK_REPLY_LIMIT = 13
+
+
 def _quick_reply(text, options):
-    return {"type": "quick_replies", "text": text, "options": options}
+    return {"type": "quick_replies", "text": text, "options": list(options or [])[:MESSENGER_QUICK_REPLY_LIMIT]}
 
 
 def _text(text):

@@ -187,6 +187,27 @@ def test_handle_message_greeting_to_select_service():
 
 
 @pytest.mark.django_db
+def test_messenger_quick_reply_date_options_respect_meta_limit():
+    user = User.objects.create_user(username="owner_be_qr_limit", email="owner_be_qr_limit@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEQRLimit", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBEQRLimit")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-QR-LIMIT", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-QR-LIMIT",
+        state=MessengerSession.STATE_SELECT_DATE,
+        data={"service_id": service.id},
+    )
+
+    actions = handle_message(session, "not a date", "")
+
+    quick_reply = next(action for action in actions if action.get("type") == "quick_replies")
+    assert quick_reply["text"] == "What date works for you?"
+    assert len(quick_reply["options"]) == 13
+
+
+@pytest.mark.django_db
 def test_parse_name_phone_valid():
     assert _parse_name_phone("John Doe\n09171234567") == ("John Doe", "09171234567")
 

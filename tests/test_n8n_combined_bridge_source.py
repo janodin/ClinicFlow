@@ -96,6 +96,25 @@ def test_combined_bridge_routes_messenger_quick_replies_without_ai_agent():
     assert ".onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))" in source
 
 
+def test_combined_bridge_facebook_send_errors_are_not_silenced():
+    source = SOURCE.read_text(encoding="utf-8")
+    send_start = source.index("name: 'Send Facebook Reply'")
+    send_end = source.index("const returnWidgetReply")
+    send_block = source[send_start:send_end]
+
+    assert "responseFormat: 'json'" in send_block
+    assert "neverError: true" not in send_block
+
+
+def test_combined_bridge_caps_messenger_quick_replies_for_meta_limit():
+    source = SOURCE.read_text(encoding="utf-8")
+    prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
+    prepare_end = source.index("const clinicFlowSharedAiAgent")
+    prepare_block = source[prepare_start:prepare_end]
+
+    assert ".slice(0, 13).map" in prepare_block
+
+
 def test_combined_bridge_messenger_ai_mode_is_independent_from_widget_ai_switch():
     source = SOURCE.read_text(encoding="utf-8")
 
