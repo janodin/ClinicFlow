@@ -5,7 +5,7 @@
 <div class="cf-page-header">
   <div>
     <h1 class="cf-page-title ui-page-title">Today at {{ clinic.name }}</h1>
-    <p class="cf-page-description">{{ today|date:"F j, Y" }} · {{ clinic.timezone }} · Active clinic: {{ clinic.name }}</p>
+    <p class="cf-page-description">{{ today|date:"F j, Y" }} · {{ clinic.timezone }} · <span class="inline-flex items-center gap-1"><i data-lucide="check-circle-2" class="h-3.5 w-3.5 text-[var(--cf-brand)]" aria-hidden="true"></i>Active clinic: {{ clinic.name }}</span></p>
   </div>
   <div class="cf-page-actions">
     <a href="{% url 'dashboard:appointments' %}" class="cf-btn cf-btn-primary"><i data-lucide="calendar-plus" class="h-4 w-4"></i>New appointment</a>
@@ -65,7 +65,7 @@
   </div>
   <div class="cf-card cf-kpi">
     <div class="flex items-start justify-between">
-      <div><p class="cf-kpi-label">Widget health</p><div class="cf-kpi-value text-xl">Active</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Booking widget active</p></div>
+      <div><p class="cf-kpi-label">Widget health</p><div class="cf-kpi-value flex items-center gap-2 text-xl"><i data-lucide="check-circle-2" class="h-5 w-5 text-[var(--cf-brand)]" aria-hidden="true"></i>Active</div><p class="mt-2 text-sm text-[var(--cf-muted)]">Booking widget active</p></div>
       <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]"><i data-lucide="message-circle" class="h-5 w-5"></i></div>
     </div>
   </div>

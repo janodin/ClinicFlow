@@ -4,14 +4,75 @@
 <div class="cf-page" x-data="{copied: ''}">
   <div class="cf-page-header">
     <div>
-      <h1 class="cf-page-title ui-page-title">Assistant & Widget Settings</h1>
-      <p class="cf-page-description">Embed the booking widget and tune guided booking copy.</p>
+      <h1 class="cf-page-title ui-page-title">Assistant</h1>
+      <p class="cf-page-description">Manage the shared AI prompt, FAQs, and website booking widget experience.</p>
     </div>
   </div>
 
+  <section class="cf-card p-6">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="cf-icon-box p-3">
+        <i data-lucide="bot" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h2 class="cf-section-title">Shared Assistant Settings</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Used by both the website Assistant and Facebook Messenger.</p>
+      </div>
+    </div>
+
+    <form method="post" action="{% url 'dashboard:assistant_settings' %}" class="grid gap-5">
+      {% csrf_token %}
+      <input type="hidden" name="_form" value="ai_settings">
+      <textarea id="default-ai-prompt-value" class="hidden" aria-hidden="true">{{ default_ai_prompt }}</textarea>
+
+      <div>
+        <label class="flex items-center gap-2 cursor-pointer">
+          {{ ai_form.is_ai_enabled }}
+          <span class="text-sm font-semibold text-[var(--cf-ink)]">{{ ai_form.is_ai_enabled.label }}</span>
+        </label>
+        {% if ai_form.is_ai_enabled.errors %}
+          <p class="text-sm text-red-600 mt-1">{{ ai_form.is_ai_enabled.errors.0 }}</p>
+        {% endif %}
+      </div>
+
+      <div class="cf-field">
+        <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
+          <button
+            type="button"
+            class="cf-btn cf-btn-secondary cf-btn-sm"
+            @click="const field = document.getElementById('{{ ai_form.instructions.id_for_label }}'); const source = document.getElementById('default-ai-prompt-value'); if (field && source) { field.value = source.value; field.focus(); }"
+          >
+            <i data-lucide="rotate-ccw" class="h-4 w-4"></i> Restore default prompt
+          </button>
+        </div>
+        {{ ai_form.instructions }}
+        <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the assistant how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from ClinicFlow.</p>
+        {% if ai_form.instructions.errors %}
+          <p class="text-sm text-red-600 mt-1">{{ ai_form.instructions.errors.0 }}</p>
+        {% endif %}
+      </div>
+
+      <div class="cf-field">
+        <label class="cf-label" for="{{ ai_form.fallback_message.id_for_label }}">{{ ai_form.fallback_message.label }}</label>
+        {{ ai_form.fallback_message }}
+        <p class="mt-1 text-xs text-[var(--cf-muted)]">Shown in both channels when AI replies are disabled or unavailable.</p>
+        {% if ai_form.fallback_message.errors %}
+          <p class="text-sm text-red-600 mt-1">{{ ai_form.fallback_message.errors.0 }}</p>
+        {% endif %}
+      </div>
+
+      <div class="pt-2">
+        <button type="submit" class="cf-btn cf-btn-primary">
+          <i data-lucide="save" class="h-4 w-4"></i> Save Assistant Settings
+        </button>
+      </div>
+    </form>
+  </section>
+
   <section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;}">
-    <h2 class="cf-section-title">Widget Settings</h2>
-    <p class="mt-2 text-sm text-[var(--cf-muted)]">Customize appearance, preview, and share your booking widget.</p>
+    <h2 class="cf-section-title">Website Booking Widget</h2>
+    <p class="mt-2 text-sm text-[var(--cf-muted)]">Customize website-only appearance, preview, and embed settings.</p>
 
     <!-- Appearance -->
     <form method="post" action="{% url 'dashboard:assistant_settings' %}" class="mt-6">
@@ -29,11 +90,6 @@
             <label for="{{ widget_form.widget_welcome_message.id_for_label }}" class="cf-label">{{ widget_form.widget_welcome_message.label }}</label>
             {{ widget_form.widget_welcome_message }}
             {% if widget_form.widget_welcome_message.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.widget_welcome_message.errors.0 }}</p>{% endif %}
-          </div>
-          <div class="cf-field">
-            <label for="{{ widget_form.widget_behavior_instructions.id_for_label }}" class="cf-label">{{ widget_form.widget_behavior_instructions.label }}</label>
-            {{ widget_form.widget_behavior_instructions }}
-            {% if widget_form.widget_behavior_instructions.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.widget_behavior_instructions.errors.0 }}</p>{% endif %}
           </div>
           <div>
             <label class="flex items-center gap-2 cursor-pointer">
@@ -120,46 +176,84 @@
     </div>
   </section>
 
-  <section class="cf-card p-6">
-    <h2 class="cf-section-title">FAQ Responses</h2>
-    <form method="post" action="{% url 'dashboard:create_faq' %}" class="mt-4 grid gap-5 md:grid-cols-2">
-      {% csrf_token %}
-      {% for field in faq_form %}
-        <div class="cf-field {% if field.name == 'answer' %}md:col-span-2{% endif %}">
-          <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
-          {% if field.field.widget.input_type == 'checkbox' %}
-            <label class="flex items-center gap-2 cursor-pointer">
-              {{ field }}
-              <span class="text-sm text-[var(--cf-muted)]">{{ field.label }}</span>
-            </label>
-          {% else %}
-            {{ field }}
-          {% endif %}
-          {% if field.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ field.errors.0 }}</p>{% endif %}
-        </div>
-      {% endfor %}
-      <div class="md:col-span-2">
-        <button class="cf-btn cf-btn-primary" type="submit">
-          <i data-lucide="plus-circle" class="h-4 w-4"></i>Add FAQ
-        </button>
+  <section class="cf-card cf-faq-shell">
+    <div class="cf-faq-header">
+      <div class="min-w-0">
+        <p class="cf-eyebrow">
+          <span class="cf-faq-header-icon"><i data-lucide="message-circle-question" class="h-4 w-4" aria-hidden="true"></i></span>
+          Patient-facing assistant copy
+        </p>
+        <h2 class="cf-section-title mt-2">FAQ Responses</h2>
+        <p class="mt-2 text-sm text-[var(--cf-muted)]">Used by both the website Assistant and Facebook Messenger to answer common patient questions.</p>
+        <p class="cf-page-description max-w-2xl">Create short answers that appear in the booking widget and help patients self-serve common questions before booking.</p>
       </div>
-    </form>
+      <div class="cf-faq-summary" aria-label="FAQ response summary">
+        <span class="cf-faq-summary-metric">{{ faq_total_count }} total</span>
+        <span class="cf-faq-summary-separator" aria-hidden="true"></span>
+        <span class="cf-faq-summary-metric">{{ faq_visible_count }} visible</span>
+      </div>
+    </div>
 
-    {% if faqs %}
-    <div class="mt-6 divide-y divide-[var(--cf-line-soft)]">
-      {% for faq in faqs %}
-        {% include "dashboard/partials/faq_row.html" with faq=faq faq_form=None %}
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="cf-empty-state mt-6">
-      <div class="cf-icon-box h-12 w-12 mb-3">
-        <i data-lucide="message-circle-question" class="h-6 w-6"></i>
+    <div class="cf-faq-layout">
+      <form method="post" action="{% url 'dashboard:create_faq' %}" class="cf-faq-composer">
+        {% csrf_token %}
+        <div class="cf-faq-composer-header">
+          <div class="cf-icon-box cf-faq-composer-icon">
+            <i data-lucide="plus-circle" class="h-5 w-5" aria-hidden="true"></i>
+          </div>
+          <div class="min-w-0">
+            <h3 class="text-base font-semibold text-[var(--cf-ink)]">Add FAQ</h3>
+            <p class="text-sm text-[var(--cf-muted)]">Keep answers direct and patient-friendly.</p>
+          </div>
+        </div>
+
+        <div class="cf-field">
+          <label for="{{ faq_form.question.id_for_label }}" class="cf-label">{{ faq_form.question.label }}</label>
+          {{ faq_form.question }}
+          {% if faq_form.question.errors %}<p class="cf-error">{{ faq_form.question.errors.0 }}</p>{% endif %}
+        </div>
+
+        <div class="cf-field">
+          <label for="{{ faq_form.answer.id_for_label }}" class="cf-label">{{ faq_form.answer.label }}</label>
+          {{ faq_form.answer }}
+          {% if faq_form.answer.errors %}<p class="cf-error">{{ faq_form.answer.errors.0 }}</p>{% endif %}
+        </div>
+
+        <div class="cf-faq-composer-footer">
+          <label class="cf-faq-checkbox-row">
+            {{ faq_form.is_active }}
+            <span>Visible to patients</span>
+          </label>
+          {% if faq_form.is_active.errors %}<p class="cf-error">{{ faq_form.is_active.errors.0 }}</p>{% endif %}
+          <button class="cf-btn cf-btn-primary" type="submit">
+            <i data-lucide="plus-circle" class="h-4 w-4" aria-hidden="true"></i>Add FAQ
+          </button>
+        </div>
+      </form>
+
+      <div class="cf-faq-list">
+        <div class="cf-faq-list-header">
+          <p class="cf-kpi-label">Current responses</p>
+          <p class="text-xs text-[var(--cf-muted)]">Inline edit stays in-row.</p>
+        </div>
+
+        {% if faqs %}
+          <div class="grid gap-3">
+            {% for faq in faqs %}
+              {% include "dashboard/partials/faq_row.html" with faq=faq faq_form=None %}
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="cf-empty-state cf-faq-empty-state">
+            <div class="cf-icon-box h-12 w-12 mb-3">
+              <i data-lucide="message-circle-question" class="h-6 w-6" aria-hidden="true"></i>
+            </div>
+            <p class="cf-section-title">No FAQs yet</p>
+            <p class="mt-1 text-sm text-[var(--cf-muted)]">Add common questions above to help patients self-serve before booking.</p>
+          </div>
+        {% endif %}
       </div>
-      <p class="cf-section-title">No FAQs yet</p>
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">Add common questions above to help patients book faster.</p>
     </div>
-    {% endif %}
   </section>
 </div>
 {% endblock %}

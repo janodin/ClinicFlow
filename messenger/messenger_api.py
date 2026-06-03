@@ -18,6 +18,29 @@ def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+def fetch_page_profile(page_access_token):
+    if not page_access_token:
+        return None
+
+    try:
+        response = requests.get(
+            f"{META_API_URL}/me",
+            params={"fields": "id,name", "access_token": page_access_token},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        logger.warning("Failed to refresh Facebook Page profile")
+        return None
+
+    page_id = data.get("id")
+    page_name = data.get("name")
+    if not isinstance(page_id, str) or not isinstance(page_name, str):
+        return None
+    return {"id": page_id, "name": page_name}
+
+
 def _send_message(connection, psid, payload):
     url = f"{META_API_URL}/me/messages"
     params = {"access_token": connection.page_access_token}

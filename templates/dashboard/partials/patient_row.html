@@ -11,11 +11,11 @@
   <td>{{ patient.formatted_phone }}</td>
   <td>{{ patient.email|default:"No email" }}</td>
   <td>{{ patient.created_at|date:"M Y" }}</td>
-  <td><span class="cf-badge cf-status-confirmed">Active</span></td>
+  <td><span class="cf-badge cf-badge-active"><i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active</span></td>
   <td class="pr-5">
-    <div class="flex justify-end gap-2">
-      <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-btn cf-btn-secondary !min-h-0 px-3 py-2 text-xs"><i data-lucide="eye" class="h-4 w-4"></i>View</a>
-      <button @click="editOpen=true" hx-get="{% url 'dashboard:patient_edit' patient.id %}" hx-target="#edit-modal-body" class="cf-btn cf-btn-secondary !min-h-0 px-3 py-2 text-xs"><i data-lucide="pencil" class="h-4 w-4"></i>Edit</button>
+    <div class="cf-row-actions">
+      <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>View</a>
+      <button @click="editOpen=true" hx-get="{% url 'dashboard:patient_edit' patient.id %}" hx-target="#edit-modal-body" class="cf-btn cf-btn-xs cf-btn-secondary cf-service-edit-action"><i data-lucide="pencil" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Edit</button>
     </div>
   </td>
 </tr>

@@ -1,70 +1,81 @@
-<div id="faq-row-{{ faq.id }}" class="py-3"
-     x-data="{ editing: {{ editing|default:False|yesno:'true,false' }}, deleting: false, myId: {{ faq.id }} }"
-     @faq-edit-start.window="if ($event.detail.id !== myId) editing = false">
-  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-    <div class="flex-1 min-w-0">
-      <!-- View Mode -->
-      <div x-show="!editing">
-        <p class="break-words text-sm font-bold text-[var(--cf-ink)]">{{ faq.question }}</p>
-        <p class="mt-1 break-words text-sm text-[var(--cf-muted)] whitespace-pre-wrap">{{ faq.answer }}</p>
+<article id="faq-row-{{ faq.id }}" class="cf-faq-card {% if not faq.is_active %}cf-faq-card-muted{% endif %}"
+         x-data="{ editing: {{ editing|default:False|yesno:'true,false' }}, deleting: false, myId: {{ faq.id }} }"
+         @faq-edit-start.window="if ($event.detail.id !== myId) editing = false">
+  <div class="min-w-0">
+    <!-- View Mode -->
+    <div x-show="!editing">
+      <div class="flex items-start gap-3">
+        <span class="cf-faq-question-icon" aria-hidden="true">Q</span>
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <p class="min-w-0 break-words text-sm font-semibold text-[var(--cf-ink)]">{{ faq.question }}</p>
+            <span class="cf-faq-status {% if faq.is_active %}cf-faq-status-visible{% else %}cf-faq-status-hidden{% endif %}">
+              <i data-lucide="{% if faq.is_active %}eye{% else %}eye-off{% endif %}" class="h-3 w-3 shrink-0" aria-hidden="true"></i>
+              {% if faq.is_active %}Visible{% else %}Hidden{% endif %}
+            </span>
+          </div>
+          <p class="mt-2 break-words text-sm text-[var(--cf-muted)] whitespace-pre-wrap">{{ faq.answer }}</p>
+        </div>
       </div>
-
-      <!-- Edit Mode -->
-      <form x-show="editing"
-            hx-post="{% url 'dashboard:edit_faq' faq.id %}"
-            hx-target="#faq-row-{{ faq.id }}"
-            hx-swap="outerHTML"
-            class="w-full space-y-2">
-        {% csrf_token %}
-        <div class="cf-field">
-          <label for="faq-question-{{ faq.id }}" class="cf-label">Question</label>
-          <input id="faq-question-{{ faq.id }}" type="text" name="question"
-                  value="{% if faq_form %}{{ faq_form.question.value|default:'' }}{% else %}{{ faq.question }}{% endif %}"
-                  class="cf-input"
-                  required>
-          {% if faq_form and faq_form.question.errors %}
-            <p class="cf-error">{{ faq_form.question.errors.0 }}</p>
-          {% endif %}
-        </div>
-
-        <div class="cf-field">
-          <label for="faq-answer-{{ faq.id }}" class="cf-label">Answer</label>
-          <textarea id="faq-answer-{{ faq.id }}" name="answer" rows="3"
-                    class="cf-textarea"
-                    required>{% if faq_form %}{{ faq_form.answer.value|default:'' }}{% else %}{{ faq.answer }}{% endif %}</textarea>
-          {% if faq_form and faq_form.answer.errors %}
-            <p class="cf-error">{{ faq_form.answer.errors.0 }}</p>
-          {% endif %}
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <button class="cf-btn cf-btn-sm cf-btn-primary" type="submit">
-            <i data-lucide="save" class="h-4 w-4"></i> Save Changes
-          </button>
-          <button @click.prevent="editing = false" class="cf-btn cf-btn-sm cf-btn-ghost text-[var(--cf-muted)]" type="button">
-            <i data-lucide="x-circle" class="h-4 w-4"></i>Cancel
-          </button>
-        </div>
-      </form>
     </div>
 
-    <!-- Actions (View Mode) -->
-    <div class="flex flex-wrap items-center gap-1 shrink-0" x-show="!editing">
-      <button hx-post="{% url 'dashboard:toggle_faq' faq.id %}"
-              hx-target="#faq-row-{{ faq.id }}"
-              hx-swap="outerHTML"
-               hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-               class="cf-btn cf-btn-sm cf-btn-ghost {% if faq.is_active %}text-[var(--cf-brand)]{% else %}text-[var(--cf-muted)]{% endif %}"
-               type="button"
-               aria-label="{% if faq.is_active %}Deactivate FAQ{% else %}Activate FAQ{% endif %}"
-               title="{% if faq.is_active %}Active — visible to patients{% else %}Inactive — hidden from patients{% endif %}">
-        <i data-lucide="{% if faq.is_active %}eye{% else %}eye-off{% endif %}" class="h-4 w-4"></i>
+    <!-- Edit Mode -->
+    <form x-show="editing"
+          hx-post="{% url 'dashboard:edit_faq' faq.id %}"
+          hx-target="#faq-row-{{ faq.id }}"
+          hx-swap="outerHTML"
+          class="w-full space-y-3">
+      {% csrf_token %}
+      <div class="cf-field">
+        <label for="faq-question-{{ faq.id }}" class="cf-label">Question</label>
+        <input id="faq-question-{{ faq.id }}" type="text" name="question"
+               value="{% if faq_form %}{{ faq_form.question.value|default:'' }}{% else %}{{ faq.question }}{% endif %}"
+               class="cf-input"
+               required>
+        {% if faq_form and faq_form.question.errors %}
+          <p class="cf-error">{{ faq_form.question.errors.0 }}</p>
+        {% endif %}
+      </div>
+
+      <div class="cf-field">
+        <label for="faq-answer-{{ faq.id }}" class="cf-label">Answer</label>
+        <textarea id="faq-answer-{{ faq.id }}" name="answer" rows="3"
+                  class="cf-textarea"
+                  required>{% if faq_form %}{{ faq_form.answer.value|default:'' }}{% else %}{{ faq.answer }}{% endif %}</textarea>
+        {% if faq_form and faq_form.answer.errors %}
+          <p class="cf-error">{{ faq_form.answer.errors.0 }}</p>
+        {% endif %}
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button class="cf-btn cf-btn-sm cf-btn-primary" type="submit">
+          <i data-lucide="save" class="h-4 w-4" aria-hidden="true"></i>Save Changes
+        </button>
+        <button @click.prevent="editing = false" class="cf-btn cf-btn-sm cf-btn-ghost text-[var(--cf-muted)]" type="button">
+          <i data-lucide="x-circle" class="h-4 w-4" aria-hidden="true"></i>Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Actions (View Mode) -->
+  <div class="cf-row-actions cf-row-actions-start cf-faq-card-actions" x-show="!editing">
+    <button hx-post="{% url 'dashboard:toggle_faq' faq.id %}"
+            hx-target="#faq-row-{{ faq.id }}"
+            hx-swap="outerHTML"
+            hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+            class="cf-btn cf-btn-xs {% if faq.is_active %}cf-btn-muted{% else %}cf-btn-secondary{% endif %}"
+            type="button"
+            aria-label="{% if faq.is_active %}Hide FAQ from patients{% else %}Show FAQ to patients{% endif %}"
+            title="{% if faq.is_active %}Hide from patients{% else %}Show to patients{% endif %}">
+      <i data-lucide="{% if faq.is_active %}eye-off{% else %}eye{% endif %}" class="h-3 w-3 shrink-0" aria-hidden="true"></i>{% if faq.is_active %}Hide{% else %}Show{% endif %}
+    </button>
+    <div class="cf-faq-icon-actions">
+      <button @click="$dispatch('faq-edit-start', {id: myId}); editing = true" class="cf-icon-btn cf-faq-icon-action cf-faq-edit-action" type="button" aria-label="Edit FAQ" title="Edit FAQ">
+        <i data-lucide="pencil" class="h-3 w-3 shrink-0" aria-hidden="true"></i>
       </button>
-      <button @click="$dispatch('faq-edit-start', {id: myId}); editing = true" class="cf-btn cf-btn-sm cf-btn-ghost text-[var(--cf-brand)]" type="button" aria-label="Edit FAQ" title="Edit">
-        <i data-lucide="pencil" class="h-4 w-4"></i>
-      </button>
-      <button @click="deleting = true" class="cf-btn cf-btn-sm cf-btn-ghost text-[var(--cf-red)]" type="button" aria-label="Delete FAQ" title="Delete">
-        <i data-lucide="trash-2" class="h-4 w-4"></i>
+      <button @click="deleting = true" class="cf-icon-btn cf-faq-icon-action cf-faq-delete-action" type="button" aria-label="Delete FAQ" title="Delete FAQ">
+        <i data-lucide="trash-2" class="h-3 w-3 shrink-0" aria-hidden="true"></i>
       </button>
     </div>
   </div>
@@ -115,4 +126,4 @@
       </div>
     </div>
   </div>
-</div>
+</article>

@@ -75,8 +75,8 @@
       </div>
     </div>
     <div class="cf-modal-footer">
+      <button type="button" @click="detailOpen=false" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="x-circle" class="h-4 w-4"></i>Cancel</button>
       <button type="submit" class="cf-btn cf-btn-primary flex-1"><i data-lucide="{% if appointment %}save{% else %}calendar-plus{% endif %}" class="h-4 w-4"></i>{% if appointment %}Save Changes{% else %}Create Appointment{% endif %}</button>
-      <button type="button" @click="detailOpen=false" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="x-circle" class="h-4 w-4"></i>Close</button>
     </div>
   </form>
 </div>

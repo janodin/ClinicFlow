@@ -31,9 +31,9 @@ class MessengerConnectionAdminForm(forms.ModelForm):
 @admin.register(MessengerConnection)
 class MessengerConnectionAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
     form = MessengerConnectionAdminForm
-    list_display = ["clinic", "app_id", "page_id", "is_active", "created_at"]
+    list_display = ["clinic", "app_id", "page_name", "page_id", "is_active", "created_at"]
     list_filter = ["is_active"]
-    search_fields = ["clinic__name", "app_id", "page_id"]
+    search_fields = ["clinic__name", "app_id", "page_name", "page_id"]
 
 
 @admin.register(MessengerAISettings)

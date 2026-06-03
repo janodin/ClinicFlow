@@ -140,8 +140,8 @@
                   <td><span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span></td>
                   <td class="text-[var(--cf-muted)] text-xs">{{ appointment.get_source_display }}</td>
                   <td class="pr-5">
-                    <div class="flex justify-end gap-2">
-                      <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-btn cf-btn-sm cf-btn-secondary"><i data-lucide="eye" class="h-4 w-4"></i>View</button>
+                    <div class="cf-row-actions">
+                      <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>View</button>
                     </div>
                   </td>
                 </tr>

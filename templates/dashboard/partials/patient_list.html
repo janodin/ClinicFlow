@@ -32,11 +32,11 @@
             <td class="whitespace-nowrap text-[var(--cf-muted)]">{{ patient.formatted_phone }}</td>
             <td class="max-w-[14rem] break-all text-[var(--cf-muted)]">{{ patient.email|default:"No email" }}</td>
             <td class="text-[var(--cf-muted)]">{{ patient.created_at|date:"M Y" }}</td>
-            <td><span class="cf-badge cf-status-confirmed">Active</span></td>
+            <td><span class="cf-badge cf-badge-active"><i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active</span></td>
             <td class="pr-5">
-              <div class="flex justify-end gap-2">
-                <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-btn cf-btn-sm cf-btn-secondary"><i data-lucide="eye" class="h-4 w-4"></i>View</a>
-                <button @click="editOpen=true" hx-get="{% url 'dashboard:patient_edit' patient.id %}" hx-target="#edit-modal-body" class="cf-btn cf-btn-sm cf-btn-secondary"><i data-lucide="pencil" class="h-4 w-4"></i>Edit</button>
+              <div class="cf-row-actions">
+                <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>View</a>
+                <button @click="editOpen=true" hx-get="{% url 'dashboard:patient_edit' patient.id %}" hx-target="#edit-modal-body" class="cf-btn cf-btn-xs cf-btn-secondary cf-service-edit-action"><i data-lucide="pencil" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Edit</button>
               </div>
             </td>
           </tr>
@@ -56,3 +56,48 @@
     </table>
   </div>
 </section>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="flex flex-col gap-3 px-5 py-4 border-t border-[var(--cf-line)] sm:flex-row sm:items-center sm:justify-between">
+  <p class="cf-muted">
+    Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }}
+  </p>
+  <div class="flex flex-wrap justify-center gap-1 sm:justify-end">
+    {% if page_obj.has_previous %}
+      <a href="?page=1{% if query %}&q={{ query|urlencode }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="?page=1{% if query %}&q={{ query|urlencode }}{% endif %}"
+         hx-target="#patient-list"
+         hx-push-url="true"><i data-lucide="chevrons-left" class="h-4 w-4"></i>First</a>
+      <a href="?page={{ page_obj.previous_page_number }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="?page={{ page_obj.previous_page_number }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+         hx-target="#patient-list"
+         hx-push-url="true"><i data-lucide="chevron-left" class="h-4 w-4"></i>Previous</a>
+    {% endif %}
+    {% for num in page_obj.paginator.page_range %}
+      {% if page_obj.number == num %}
+        <span class="cf-btn cf-btn-primary px-3 py-1.5 text-sm">{{ num }}</span>
+      {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+         <a href="?page={{ num }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+            class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+            hx-get="?page={{ num }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+            hx-target="#patient-list"
+            hx-push-url="true">{{ num }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+      <a href="?page={{ page_obj.next_page_number }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="?page={{ page_obj.next_page_number }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+         hx-target="#patient-list"
+         hx-push-url="true"><i data-lucide="chevron-right" class="h-4 w-4"></i>Next</a>
+      <a href="?page={{ page_obj.paginator.num_pages }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+         class="cf-btn cf-btn-secondary px-3 py-1.5 text-sm"
+         hx-get="?page={{ page_obj.paginator.num_pages }}{% if query %}&q={{ query|urlencode }}{% endif %}"
+         hx-target="#patient-list"
+         hx-push-url="true"><i data-lucide="chevrons-right" class="h-4 w-4"></i>Last</a>
+    {% endif %}
+  </div>
+</nav>
+{% endif %}

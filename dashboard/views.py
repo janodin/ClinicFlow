@@ -12,14 +12,16 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 from django.conf import settings as django_settings
 
 from appointments.forms import AppointmentNoteForm, AppointmentStatusForm, StaffAppointmentForm
 from appointments.models import Appointment
-from clinics.forms import ClinicFAQForm, ClinicSettingsForm, WidgetSettingsForm
-from clinics.models import Clinic, ClinicMembership
+from clinics.forms import ClinicFAQForm, ClinicSettingsForm, SharedAISettingsForm, WidgetSettingsForm
+from clinics.models import Clinic, ClinicAISettings, ClinicMembership
 from clinics.tenant import current_clinic, get_active_membership, user_can_manage_daily_ops, user_can_manage_settings
+from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from scheduling.models import ClinicBusinessHour, UnavailableDate
 from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots, get_working_window, validate_slot
@@ -668,11 +670,20 @@ def add_appointment_note(request, pk):
 @login_required
 def patients(request):
     clinic = _clinic_or_redirect(request)
-    query = request.GET.get("q", "")
+    query = request.GET.get("q", "").strip()
     qs = clinic.patients.order_by("-created_at", "-id")
     if query:
         qs = qs.filter(Q(full_name__icontains=query) | Q(phone__icontains=query) | Q(email__icontains=query))
-    context = {"clinic": clinic, "patients": qs, "patient_form": PatientForm(clinic=clinic), "query": query}
+    paginator = Paginator(qs, 10)
+    page_number = request.GET.get("page", 1)
+    page_obj = paginator.get_page(page_number)
+    context = {
+        "clinic": clinic,
+        "patients": page_obj,
+        "page_obj": page_obj,
+        "patient_form": PatientForm(clinic=clinic),
+        "query": query,
+    }
     if request.headers.get("HX-Request"):
         return render(request, "dashboard/partials/patient_list.html", context)
     return render(request, "dashboard/patients.html", context)
@@ -1100,34 +1111,52 @@ def settings(request):
     })
 
 
+def _assistant_settings_context(request, clinic, *, widget_form=None, ai_form=None, faq_form=None):
+    ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
+    faqs = clinic.faqs.all()
+    iframe_url = _embedded_iframe_url(request, clinic)
+    script_url = request.build_absolute_uri(reverse("widget:embed_js", args=[clinic.slug]))
+    return {
+        "clinic": clinic,
+        "widget_form": widget_form or WidgetSettingsForm(instance=clinic),
+        "ai_form": ai_form or SharedAISettingsForm(instance=ai_settings),
+        "faq_form": faq_form or ClinicFAQForm(),
+        "faqs": faqs,
+        "faq_total_count": faqs.count(),
+        "faq_visible_count": faqs.filter(is_active=True).count(),
+        "iframe_url": iframe_url,
+        "script_url": script_url,
+        "default_ai_prompt": DEFAULT_MESSENGER_AI_PROMPT,
+    }
+
+
 @login_required
 def assistant_settings(request):
     clinic = _clinic_or_redirect(request)
     _require_settings_permission(request.user)
 
-    if request.method == "POST" and request.POST.get("_form") == "widget_settings":
+    ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
+    widget_form = WidgetSettingsForm(instance=clinic)
+    ai_form = SharedAISettingsForm(instance=ai_settings)
+    post_form = request.POST.get("_form")
+
+    if request.method == "POST" and post_form == "ai_settings":
+        ai_form = SharedAISettingsForm(request.POST, instance=ai_settings)
+        if ai_form.is_valid():
+            ai_form.save()
+            messages.success(request, "Shared assistant settings saved.")
+            return redirect("dashboard:assistant_settings")
+    elif request.method == "POST" and post_form == "widget_settings":
         widget_form = WidgetSettingsForm(request.POST, instance=clinic)
         if widget_form.is_valid():
             widget_form.save()
             messages.success(request, "Widget settings saved.")
             return redirect("dashboard:assistant_settings")
-    else:
-        widget_form = WidgetSettingsForm(instance=clinic)
 
-    faq_form = ClinicFAQForm()
-    iframe_url = _embedded_iframe_url(request, clinic)
-    script_url = request.build_absolute_uri(reverse("widget:embed_js", args=[clinic.slug]))
     return render(
         request,
         "dashboard/assistant_settings.html",
-        {
-            "clinic": clinic,
-            "widget_form": widget_form,
-            "faq_form": faq_form,
-            "faqs": clinic.faqs.all(),
-            "iframe_url": iframe_url,
-            "script_url": script_url,
-        },
+        _assistant_settings_context(request, clinic, widget_form=widget_form, ai_form=ai_form),
     )
 
 
@@ -1152,7 +1181,11 @@ def create_faq(request):
         messages.success(request, "FAQ added.")
         return redirect("dashboard:assistant_settings")
     messages.error(request, "Please correct the errors below.")
-    return render(request, "dashboard/assistant_settings.html", {"clinic": clinic, "faq_form": form, "faqs": clinic.faqs.all()})
+    return render(
+        request,
+        "dashboard/assistant_settings.html",
+        _assistant_settings_context(request, clinic, faq_form=form),
+    )
 
 
 @login_required
@@ -1161,7 +1194,10 @@ def edit_faq(request, pk):
     clinic = _clinic_or_redirect(request)
     _require_settings_permission(request.user)
     faq = get_object_or_404(clinic.faqs, pk=pk)
-    form = ClinicFAQForm(request.POST, instance=faq)
+    is_active = faq.is_active
+    post_data = request.POST.copy()
+    post_data["is_active"] = "true" if is_active else "false"
+    form = ClinicFAQForm(post_data, instance=faq)
     if form.is_valid():
         form.save()
         if request.headers.get("HX-Request"):
@@ -1361,45 +1397,72 @@ def messenger_settings(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_settings(membership):
         raise PermissionDenied
-    from clinics.models import ClinicAISettings
-    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
-    from messenger.forms import MessengerAISettingsForm, MessengerConnectionForm
+    from messenger.forms import MessengerConnectionForm
+    from messenger.messenger_api import fetch_page_profile
 
     connection = getattr(clinic, "messenger_connection", None)
-    ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
     post_form = request.POST.get("_form")
 
-    if request.method == "POST" and post_form in {None, "", "connection_settings"}:
-        form = MessengerConnectionForm(request.POST, instance=connection)
-        ai_form = MessengerAISettingsForm(instance=ai_settings)
-        if form.is_valid():
-            connection = form.save(commit=False)
-            connection.clinic = clinic
-            connection.is_active = True
-            connection.save()
+    if request.method == "POST" and post_form not in {None, "", "connection_settings"}:
+        messages.error(request, "Shared assistant settings are managed from Assistant.")
+        return redirect("dashboard:assistant_settings")
 
-            messages.success(request, "Messenger settings saved. Remember to configure the webhook in your Meta Developer Dashboard.")
-            return redirect("dashboard:messenger_settings")
-    elif request.method == "POST" and request.POST.get("_form") == "ai_settings":
-        form = MessengerConnectionForm(instance=connection)
-        ai_form = MessengerAISettingsForm(request.POST, instance=ai_settings)
-        if ai_form.is_valid():
-            ai_form.save()
-            messages.success(request, "Shared AI prompt settings saved.")
-            return redirect("dashboard:messenger_settings")
+    if request.method == "POST":
+        form = MessengerConnectionForm(request.POST, instance=connection)
+        if form.is_valid():
+            candidate = form.save(commit=False)
+            candidate.clinic = clinic
+            candidate.is_active = True
+            page_name_warning = False
+
+            profile = fetch_page_profile(candidate.page_access_token)
+            if profile:
+                meta_page_id = profile.get("id", "")
+                if candidate.page_id and meta_page_id and candidate.page_id != meta_page_id:
+                    form.add_error("page_id", "The Facebook Page ID does not match the Page Access Token.")
+                else:
+                    if meta_page_id and not candidate.page_id:
+                        candidate.page_id = meta_page_id
+                    candidate.page_name = profile.get("name", "")
+            elif candidate.page_access_token:
+                page_name_warning = True
+
+            if not form.errors:
+                connection = candidate
+                connection.save()
+
+                if page_name_warning:
+                    messages.warning(request, "Messenger settings saved, but the Facebook Page name could not be refreshed.")
+                else:
+                    messages.success(request, "Messenger settings saved. Remember to configure the webhook in your Meta Developer Dashboard.")
+                return redirect("dashboard:messenger_settings")
     else:
         form = MessengerConnectionForm(instance=connection)
-        ai_form = MessengerAISettingsForm(instance=ai_settings)
 
     n8n_webhook_url = request.build_absolute_uri(reverse("messenger:n8n_webhook"))
     return render(request, "dashboard/messenger_settings.html", {
         "clinic": clinic,
         "connection": connection,
         "form": form,
-        "ai_form": ai_form,
-        "default_ai_prompt": DEFAULT_MESSENGER_AI_PROMPT,
         "n8n_webhook_url": n8n_webhook_url,
     })
+
+@login_required
+@require_POST
+@never_cache
+def messenger_secret_reveal(request):
+    clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_settings(membership):
+        raise PermissionDenied
+
+    field = request.POST.get("field")
+    if field not in {"app_secret", "page_access_token"}:
+        return JsonResponse({"error": "Invalid secret field."}, status=400)
+
+    connection = getattr(clinic, "messenger_connection", None)
+    return JsonResponse({"value": getattr(connection, field, "") if connection else ""})
+
 
 @login_required
 @require_POST

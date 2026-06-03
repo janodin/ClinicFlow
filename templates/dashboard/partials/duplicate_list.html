@@ -5,14 +5,14 @@
       <button hx-get="{% url 'dashboard:find_duplicates' %}" hx-target="#duplicate-panel" hx-swap="innerHTML" hx-disabled-elt="this"
               hx-on::before-request="this.querySelector('.refresh-icon').style.display='none'; this.querySelector('.refresh-spinner').style.display='inline-flex'; this.querySelector('.refresh-text').style.display='none';"
               hx-on::after-request="this.querySelector('.refresh-icon').style.display='inline-flex'; this.querySelector('.refresh-spinner').style.display='none'; this.querySelector('.refresh-text').style.display='inline';"
-               class="cf-btn cf-btn-sm cf-btn-secondary">
+               class="cf-btn cf-btn-sm cf-btn-primary">
         <i data-lucide="refresh-cw" class="refresh-icon h-4 w-4"></i>
         <span class="refresh-spinner" style="display:none">
           <i data-lucide="loader-2" class="h-3 w-3 animate-spin"></i>
         </span>
         <span class="refresh-text">Refresh</span>
       </button>
-      <button onclick="document.getElementById('duplicate-panel').innerHTML=''" class="cf-btn cf-btn-sm cf-btn-ghost"><i data-lucide="x-circle" class="h-4 w-4"></i>Close</button>
+      <button onclick="document.getElementById('duplicate-panel').innerHTML=''" class="cf-btn cf-btn-sm cf-btn-secondary"><i data-lucide="x-circle" class="h-4 w-4"></i>Close</button>
     </div>
   </div>
   {% if duplicates %}
@@ -23,7 +23,9 @@
             <p class="font-semibold text-[var(--cf-ink)]">{{ duplicate.full_name }} <span class="cf-muted">matches</span> {{ primary.full_name }}</p>
             <p class="cf-muted">{{ duplicate.formatted_phone }} · {{ duplicate.email|default:"No email" }}</p>
           </div>
-          <button hx-get="{% url 'dashboard:patient_merge' %}?primary_id={{ primary.id }}&duplicate_id={{ duplicate.id }}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="cf-btn cf-btn-sm cf-btn-primary shrink-0"><i data-lucide="git-merge" class="h-4 w-4"></i>Merge</button>
+          <div class="cf-row-actions shrink-0">
+            <button hx-get="{% url 'dashboard:patient_merge' %}?primary_id={{ primary.id }}&duplicate_id={{ duplicate.id }}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="cf-btn cf-btn-xs cf-btn-primary"><i data-lucide="git-merge" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Merge</button>
+          </div>
         </div>
       {% endfor %}
     </div>

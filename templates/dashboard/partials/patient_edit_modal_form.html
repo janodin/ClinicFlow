@@ -27,11 +27,11 @@
       {% endfor %}
     </div>
     <div class="cf-modal-footer">
+      <button type="button" @click="editOpen=false" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="x-circle" class="h-4 w-4"></i>Cancel</button>
       <button type="submit" class="cf-btn cf-btn-primary flex-1">
         <i data-lucide="save" class="h-4 w-4"></i>
         Save Changes
       </button>
-      <button type="button" @click="editOpen=false" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="x-circle" class="h-4 w-4"></i>Cancel</button>
     </div>
   </form>
 </div>

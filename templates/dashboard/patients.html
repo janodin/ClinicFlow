@@ -3,7 +3,7 @@
 {% block content %}
 <div x-data="{patientOpen:false, editOpen:false}" class="cf-page" @keydown.escape.window="editOpen=false">
   <div class="cf-page-header">
-    <div><h1 class="cf-page-title ui-page-title">Patients</h1><p class="cf-page-description">{{ patients|length }} patient records registered</p></div>
+    <div><h1 class="cf-page-title ui-page-title">Patients</h1><p class="cf-page-description">{{ page_obj.paginator.count }} patient records registered</p></div>
     <div class="cf-page-actions">
       <button type="button" hx-get="{% url 'dashboard:find_duplicates' %}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="cf-btn cf-btn-secondary whitespace-nowrap"><i data-lucide="scan-search" class="h-4 w-4"></i>Check duplicates</button>
       <button type="button" @click="patientOpen=true" class="cf-btn cf-btn-primary whitespace-nowrap"><i data-lucide="user-plus" class="h-4 w-4"></i>Add patient</button>

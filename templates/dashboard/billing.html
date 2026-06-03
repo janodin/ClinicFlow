@@ -26,7 +26,7 @@
       </div>
       <div class="flex items-center gap-3">
         {% if clinic.group.status == "active" %}
-          <span class="inline-flex items-center gap-2 rounded-full bg-[var(--cf-status-completed-bg)] px-4 py-2 text-sm font-bold text-[var(--cf-status-completed-text)] border border-[var(--cf-brand)]/20"><i data-lucide="check-circle-2" class="h-5 w-5"></i>{{ clinic.group.get_status_display }}</span>
+          <span class="inline-flex items-center gap-2 rounded-full cf-badge-active px-4 py-2 text-sm font-bold border border-[var(--cf-brand)]/20"><i data-lucide="check-circle-2" class="h-5 w-5" aria-hidden="true"></i>{{ clinic.group.get_status_display }}</span>
         {% elif clinic.group.status == "trial" %}
           <span class="inline-flex items-center gap-2 rounded-full bg-[var(--cf-status-pending-bg)] px-4 py-2 text-sm font-bold text-[var(--cf-status-pending-text)] border border-[var(--cf-amber)]/20"><i data-lucide="clock" class="h-5 w-5"></i>{{ clinic.group.get_status_display }}</span>
         {% elif clinic.group.status == "past_due" %}

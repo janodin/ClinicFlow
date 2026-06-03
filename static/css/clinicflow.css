@@ -100,6 +100,22 @@ a:hover { color: var(--cf-brand-strong); }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 
+.cf-secret-toggle {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cf-secret-toggle:hover,
+.cf-secret-toggle:focus-visible {
+  background-color: var(--cf-brand-soft);
+}
+
+.cf-secret-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--cf-focus);
+}
+
 a:focus-visible,
 button:focus-visible,
 .cf-btn:focus-visible,
@@ -389,6 +405,55 @@ code,
   color: var(--cf-brand);
 }
 
+.cf-messenger-page-strip {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  gap: .25rem;
+  margin-top: .5rem;
+  margin-bottom: 0;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-sm);
+  background: var(--cf-brand-soft);
+  padding: .45rem .65rem;
+  color: var(--cf-muted);
+  font-size: .8125rem;
+}
+
+.cf-messenger-page-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .35rem;
+  min-width: 0;
+}
+
+.cf-messenger-page-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .8rem;
+}
+
+.cf-messenger-page-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .3rem;
+  min-width: 0;
+}
+
+.cf-messenger-page-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cf-ink);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-messenger-page-strip code {
+  color: var(--cf-brand-strong);
+}
+
 .cf-btn,
 .ui-button {
   display: inline-flex;
@@ -469,6 +534,30 @@ code,
   color: #fff;
 }
 
+.cf-service-activate-action {
+  border-color: rgba(15, 118, 110, .38);
+  background: var(--cf-surface);
+  color: var(--cf-lemon);
+}
+
+.cf-service-activate-action:hover {
+  background: var(--cf-lemon);
+  border-color: var(--cf-lemon);
+  color: #fff;
+}
+
+.cf-appointment-reschedule-action {
+  border-color: rgba(155, 104, 41, .34);
+  background: var(--cf-warning-soft);
+  color: var(--cf-warning);
+}
+
+.cf-appointment-reschedule-action:hover {
+  background: var(--cf-warning);
+  border-color: var(--cf-warning);
+  color: #fff;
+}
+
 .cf-appointment-view-action {
   border-color: var(--cf-muted);
   background: var(--cf-surface);
@@ -521,15 +610,38 @@ code,
 }
 
 .cf-btn-xs {
-  min-height: 2.5rem;
+  min-height: 1.75rem;
   gap: .35rem;
-  padding: .3rem .65rem;
-  font-size: .75rem;
+  padding: .25rem .55rem;
+  font-size: .6875rem;
 }
 
 .cf-btn-xs svg {
-  width: .875rem;
-  height: .875rem;
+  width: .75rem;
+  height: .75rem;
+}
+
+.cf-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+}
+
+.cf-row-actions-start {
+  justify-content: flex-start;
+}
+
+.cf-row-actions .cf-btn-xs {
+  min-height: 1.625rem;
+  padding: .2rem .45rem;
+  font-size: .6875rem;
+}
+
+.cf-row-actions .cf-btn-xs svg {
+  width: .7rem;
+  height: .7rem;
 }
 
 .cf-btn-lg {
@@ -578,6 +690,225 @@ code,
   background: var(--cf-danger-soft);
   color: var(--cf-danger);
   padding: .75rem .875rem;
+}
+
+.cf-faq-shell {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.cf-faq-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cf-faq-header-icon {
+  display: inline-grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-pill);
+  background: var(--cf-brand-soft);
+  color: var(--cf-brand);
+}
+
+.cf-faq-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .45rem;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-pill);
+  background: var(--cf-surface);
+  padding: .3rem;
+  box-shadow: var(--cf-shadow-card);
+}
+
+.cf-faq-summary-metric,
+.cf-faq-status {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  border-radius: var(--cf-radius-pill);
+  padding: .4rem .65rem;
+  font-size: .75rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cf-faq-summary-metric {
+  border: 1px solid var(--cf-brand-soft);
+  border-radius: var(--cf-radius-pill);
+  background: var(--cf-brand-soft);
+  color: var(--cf-brand-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-faq-summary-separator {
+  width: .25rem;
+  height: .25rem;
+  border-radius: var(--cf-radius-pill);
+  background: var(--cf-input-line);
+}
+
+.cf-faq-status-visible {
+  border: 1px solid var(--cf-brand-soft);
+  background: var(--cf-brand-soft);
+  color: var(--cf-brand-strong);
+}
+
+.cf-faq-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, .82fr) minmax(0, 1.18fr);
+  align-items: flex-start;
+  gap: 1.125rem;
+}
+
+.cf-faq-composer {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-lg);
+  background: var(--cf-bg-strong);
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85);
+}
+
+.cf-faq-composer-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.cf-faq-composer-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-lg);
+  flex-shrink: 0;
+}
+
+.cf-faq-composer-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.cf-faq-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  color: var(--cf-ink-secondary);
+  font-size: .875rem;
+  cursor: pointer;
+}
+
+.cf-faq-list {
+  display: grid;
+  min-width: 0;
+  gap: .75rem;
+}
+
+.cf-faq-list-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+
+.cf-faq-card {
+  display: grid;
+  min-width: 0;
+  gap: .75rem;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-lg);
+  background: var(--cf-surface);
+  padding: .875rem;
+  box-shadow: var(--cf-shadow-card);
+}
+
+.cf-faq-question-icon {
+  display: inline-grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border-radius: var(--cf-radius-pill);
+  background: var(--cf-brand-soft);
+  color: var(--cf-brand);
+  font-size: .8125rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.cf-faq-card-muted .cf-faq-question-icon,
+.cf-faq-status-hidden {
+  background: var(--cf-status-no-show-bg);
+  color: var(--cf-status-no-show-text);
+}
+
+.cf-faq-card-actions {
+  justify-content: space-between;
+  border-top: 1px solid var(--cf-line-soft);
+  padding-top: .75rem;
+}
+
+.cf-faq-icon-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.cf-faq-icon-action {
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--cf-radius-pill);
+}
+
+.cf-faq-icon-action svg {
+  width: .95rem;
+  height: .95rem;
+}
+
+.cf-faq-edit-action {
+  border-color: var(--cf-line);
+  color: var(--cf-brand);
+}
+
+.cf-faq-edit-action:hover {
+  border-color: var(--cf-brand);
+  background: var(--cf-brand);
+  color: #fff;
+}
+
+.cf-faq-delete-action {
+  border-color: rgba(179, 25, 74, .22);
+  color: var(--cf-danger);
+}
+
+.cf-faq-delete-action:hover {
+  border-color: var(--cf-danger);
+  background: var(--cf-danger);
+  color: #fff;
+}
+
+.cf-faq-empty-state {
+  min-height: 16rem;
+  border: 1px dashed var(--cf-line);
+  border-radius: var(--cf-radius-lg);
+  background: var(--cf-surface);
+}
+
+@media (max-width: 1024px) {
+  .cf-faq-layout { grid-template-columns: 1fr; }
 }
 
 .cf-tabs {
@@ -653,8 +984,6 @@ code,
 
 .cf-table tbody tr:hover { background: var(--cf-bg-strong); }
 .cf-table tbody tr:last-child td { border-bottom: 0; }
-.cf-row-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-
 .cf-badge {
   display: inline-flex;
   align-items: center;
@@ -682,7 +1011,7 @@ code,
 .cf-status-no_show,
 .status-no-show,
 .status-no_show { background: var(--cf-status-no-show-bg); color: var(--cf-status-no-show-text); }
-.cf-badge-active { background: var(--cf-status-completed-bg); color: var(--cf-status-completed-text); }
+.cf-badge-active { background: var(--cf-brand); color: #fff; }
 .cf-badge-inactive { background: var(--cf-status-no-show-bg); color: var(--cf-status-no-show-text); }
 
 .cf-sidebar {
@@ -1363,4 +1692,18 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
   .cf-page-title,
   .ui-page-title { font-size: 2rem; }
   .cf-slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cf-faq-header,
+  .cf-faq-list-header,
+  .cf-faq-card-actions {
+    align-items: stretch;
+  }
+  .cf-faq-icon-actions {
+    justify-content: flex-start;
+  }
+  .cf-faq-composer-footer {
+    align-items: stretch;
+  }
+  .cf-faq-composer-footer .cf-btn {
+    width: 100%;
+  }
 }

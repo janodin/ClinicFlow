@@ -318,6 +318,67 @@ def test_css_contains_cards_tables_and_badges():
     assert "overflow-y: hidden;" in table_wrap
 
 
+def test_active_badges_use_electric_aqua_theme_not_completed_status():
+    css = css_text()
+    active_badge = css_rule_block(".cf-badge-active")
+
+    assert "background: var(--cf-brand);" in active_badge
+    assert "color: #fff;" in active_badge
+    assert "var(--cf-brand-strong)" not in active_badge
+    assert "var(--cf-status-completed-bg)" not in active_badge
+    assert "var(--cf-status-completed-text)" not in active_badge
+
+    active_badge_template_paths = [
+        "templates/dashboard/billing.html",
+        "templates/dashboard/partials/service_row.html",
+        "templates/dashboard/partials/patient_row.html",
+        "templates/dashboard/partials/patient_list.html",
+        "templates/dashboard/slot_preview.html",
+        "dashboard/templates/dashboard/messenger_settings.html",
+    ]
+    for relative_path in active_badge_template_paths:
+        template = source_text(relative_path)
+        assert "cf-badge-active" in template
+
+    assert "cf-status-confirmed\">Active" not in source_text("templates/dashboard/partials/patient_row.html")
+    assert "cf-status-confirmed\">Active" not in source_text("templates/dashboard/partials/patient_list.html")
+    assert "bg-[var(--cf-status-completed-bg)]" not in source_text("templates/dashboard/billing.html")
+    assert "bg-[var(--cf-status-completed-bg)]" not in source_text("templates/dashboard/partials/service_row.html")
+
+
+def test_visible_active_labels_include_check_circle_icon():
+    expected_snippets = {
+        "templates/dashboard/billing.html": [
+            '<i data-lucide="check-circle-2" class="h-5 w-5" aria-hidden="true"></i>{{ clinic.group.get_status_display }}',
+        ],
+        "templates/dashboard/partials/service_row.html": [
+            '<i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active',
+            '<i data-lucide="x-circle" class="h-3 w-3" aria-hidden="true"></i> Inactive',
+        ],
+        "templates/dashboard/partials/patient_row.html": [
+            '<i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active',
+        ],
+        "templates/dashboard/partials/patient_list.html": [
+            '<i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active',
+        ],
+        "dashboard/templates/dashboard/messenger_settings.html": [
+            '<i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Connected',
+        ],
+        "templates/dashboard/services.html": [
+            '<i data-lucide="check-circle-2" class="h-3.5 w-3.5" aria-hidden="true"></i>Active</button>',
+        ],
+        "templates/dashboard/home.html": [
+            '<i data-lucide="check-circle-2" class="h-3.5 w-3.5 text-[var(--cf-brand)]" aria-hidden="true"></i>Active clinic:',
+            '<i data-lucide="check-circle-2" class="h-5 w-5 text-[var(--cf-brand)]" aria-hidden="true"></i>Active</div>',
+        ],
+    }
+
+    for relative_path, snippets in expected_snippets.items():
+        template = source_text(relative_path)
+        for snippet in snippets:
+            assert snippet in template
+
+
 def test_css_contains_readable_dropdown_select_rules():
     css = css_text()
 
@@ -523,6 +584,88 @@ def test_dashboard_pages_use_canonical_page_header_anatomy():
         assert "text-sm text-[var(--cf-muted)]" not in header_region
 
 
+def test_messenger_connection_left_with_setup_and_webhook_stacked_on_right():
+    template = source_text("dashboard/templates/dashboard/messenger_settings.html")
+    css = css_text()
+
+    setup_row_start = template.index("<!-- Messenger Setup Row -->")
+    ai_prompt_heading_start = template.index("Shared Assistant")
+    ai_prompt_start = template.rindex('<section class="cf-card p-6">', 0, ai_prompt_heading_start)
+    setup_row = template[setup_row_start:ai_prompt_start]
+
+    assert 'class="grid gap-5 lg:grid-cols-2"' in setup_row
+    assert '<div class="grid gap-5">\n  <!-- Instructions Card -->' in setup_row
+    assert setup_row.index("Facebook Page Connection") < setup_row.index("Setup Instructions")
+    assert setup_row.index("Setup Instructions") < setup_row.index("n8n Webhook")
+    assert setup_row.count("cf-card p-6") == 3
+
+    connection_start = setup_row.index("<!-- Connection Status Card -->")
+    right_column_start = setup_row.index('<div class="grid gap-5">')
+    connection_card = setup_row[connection_start:right_column_start]
+    header_start = connection_card.index("cf-messenger-connection-header")
+    header_end = connection_card.index('<form id="messenger-connection-form"')
+    connection_header = connection_card[header_start:header_end]
+
+    assert "sm:justify-between" in connection_header
+    assert "Facebook Page Connection" in connection_header
+    assert "Enter your Facebook Page details for the n8n workflow." in connection_header
+    assert "{% if not connection or not connection.is_active %}" in connection_header
+    assert "cf-messenger-page-strip" in connection_header
+    assert "cf-messenger-page-summary" in connection_header
+    assert "cf-messenger-page-details" in connection_header
+    assert "cf-messenger-page-item" in connection_header
+    assert "cf-messenger-page-name" in connection_header
+    assert "cf-messenger-page-icon" not in connection_header
+    assert connection_header.index("Facebook Page Connection") < connection_header.index("cf-messenger-page-strip")
+    assert connection_header.index("cf-messenger-page-strip") < connection_header.index("cf-badge-active")
+    assert connection_header.index("cf-messenger-page-summary") < connection_header.index("cf-messenger-page-details")
+    assert "Facebook Page:" in connection_header
+    assert "App ID:" in connection_header
+    assert "Page ID:" in connection_header
+    assert "cf-badge-active" in connection_header
+    assert '<i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Connected' in connection_header
+    assert '<i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active' not in connection_header
+    assert "cf-status-cancelled" in connection_header
+    assert "Page: <code" not in connection_card
+    assert ".cf-messenger-page-strip" in css
+    assert ".cf-messenger-page-summary" in css
+    assert ".cf-messenger-page-details" in css
+    assert ".cf-messenger-page-item" in css
+    assert ".cf-messenger-page-name" in css
+    assert ".cf-messenger-page-icon" not in css
+    assert "padding: .45rem .65rem;" in css
+
+    footer_start = connection_card.index("cf-messenger-connection-actions")
+    footer = connection_card[footer_start:]
+    assert "border-t border-[var(--cf-line)]" in footer
+    assert "sm:justify-end" in footer
+    assert "Save Settings" in footer
+    assert "Disconnect" in footer
+    assert "{% else %}" in footer
+    assert footer.index("Disconnect") < footer.index("{% else %}") < footer.index("Save Settings")
+
+
+def test_messenger_secret_reveal_buttons_do_not_overlap_input_border():
+    template = source_text("dashboard/templates/dashboard/messenger_settings.html")
+    css = css_text()
+
+    reveal_buttons = re.findall(r'<button type="button" class="([^"]+)"[^>]+data-secret-toggle', template)
+
+    assert len(reveal_buttons) == 2
+    for button_class in reveal_buttons:
+        assert "cf-secret-toggle" in button_class
+        assert "inset-y-0" not in button_class
+        assert "top-1/2" in button_class
+        assert "-translate-y-1/2" in button_class
+        assert "h-8 w-8" in button_class
+        assert "justify-center" in button_class
+        assert "border-0" in button_class
+        assert "bg-transparent" in button_class
+        assert "p-0" in button_class
+    assert ".cf-secret-toggle:focus-visible" in css
+    assert "box-shadow: inset 0 0 0 2px var(--cf-focus);" in css
+
+
 def test_calendar_page_header_groups_description_actions_and_filters():
     template = source_text("templates/dashboard/calendar.html")
 
@@ -684,6 +827,27 @@ def test_dashboard_topbar_search_matches_responsive_width_spec():
     assert "max-w-[200px]" not in template
 
 
+def test_dashboard_mobile_topbar_centers_search_between_menu_and_avatar():
+    template = dashboard_base_text()
+
+    topbar = re.search(r"<header\b(?P<attrs>[^>]*)>", template, re.DOTALL)
+    assert topbar is not None
+    assert "gap-3" in topbar.group("attrs")
+    assert "md:gap-0" in topbar.group("attrs")
+
+    mobile_search_row = re.search(
+        r"<div class=\"(?P<class>[^\"]*flex[^\"]*items-center[^\"]*)\">\s*"
+        r"<button @click=\"sidebarOpen = true\"",
+        template,
+        re.DOTALL,
+    )
+    assert mobile_search_row is not None
+    row_class = mobile_search_row.group("class")
+    assert "min-w-0" in row_class
+    assert "gap-3" in row_class
+    assert "md:gap-2" in row_class
+
+
 def test_dashboard_dynamic_toasts_remove_by_stable_id():
     template = dashboard_base_text()
 
@@ -833,20 +997,56 @@ def test_task_3_shared_partials_avoid_legacy_cyan_slate_field_utilities():
         ]
 
 
+def test_potential_duplicates_header_buttons_reference_edit_appointment_styles_at_smaller_size():
+    template = partial_text("duplicate_list.html")
+    button_classes = {}
+    button_bodies = {}
+    for match in CF_BTN_TAG_RE.finditer(template):
+        label = visible_button_text(match.group("body"))
+        if label in {"Refresh", "Close"}:
+            button_classes[label] = re.search(r'class="([^"]*)"', match.group("attrs")).group(1)
+            button_bodies[label] = match.group("body")
+
+    assert set(button_classes) == {"Refresh", "Close"}
+    assert "cf-btn-primary" in button_classes["Refresh"]
+    assert "cf-btn-secondary" not in button_classes["Refresh"]
+    assert "cf-btn-secondary" in button_classes["Close"]
+    assert "cf-btn-muted" not in button_classes["Close"]
+    assert "cf-btn-ghost" not in button_classes["Close"]
+    for button_class in button_classes.values():
+        assert "cf-btn" in button_class
+        assert "cf-btn-sm" in button_class
+        assert "flex-1" not in button_class
+
+    assert 'data-lucide="refresh-cw"' in button_bodies["Refresh"]
+    assert 'data-lucide="loader-2"' in button_bodies["Refresh"]
+    assert 'data-lucide="x-circle"' in button_bodies["Close"]
+
+
 def test_service_row_toggle_button_uses_stateful_action_styles():
     template = partial_text("service_row.html")
     muted_button = css_rule_block(".cf-btn-muted")
+    activate_button = css_rule_block(".cf-service-activate-action")
+    activate_hover = css_rule_block(".cf-service-activate-action:hover")
     edit_hover = css_rule_block(".cf-service-edit-action:hover")
     archive_hover = css_rule_block(".cf-service-archive-action:hover")
 
-    assert 'class="cf-btn cf-btn-sm cf-btn-secondary cf-service-edit-action"' in template
-    assert 'class="cf-btn cf-btn-sm cf-btn-muted cf-service-archive-action"' in template
-    assert "cf-btn cf-btn-sm {% if service.is_active %}cf-btn-danger{% else %}cf-btn-primary{% endif %}" in template
+    assert 'class="cf-btn cf-btn-xs cf-btn-secondary cf-service-edit-action"' in template
+    assert 'class="cf-btn cf-btn-xs cf-btn-muted cf-service-archive-action"' in template
+    assert "cf-btn cf-btn-xs {% if service.is_active %}cf-btn-danger{% else %}cf-service-activate-action{% endif %}" in template
+    assert "{% if service.is_active %}cf-btn-danger{% else %}cf-btn-primary{% endif %}" not in template
     assert '{{ service.is_active|yesno:"Deactivate,Activate" }}' in template
     assert "border-color:" in muted_button
     assert "background: var(--cf-surface);" in muted_button
     assert "var(--cf-brand)" not in muted_button
     assert "var(--cf-danger)" not in muted_button
+    assert "border-color:" in activate_button
+    assert "background: var(--cf-surface);" in activate_button
+    assert "color: var(--cf-lemon);" in activate_button
+    assert "var(--cf-brand)" not in activate_button
+    assert "background: var(--cf-lemon);" in activate_hover
+    assert "border-color: var(--cf-lemon);" in activate_hover
+    assert "color: #fff;" in activate_hover
     assert "background: var(--cf-brand);" in edit_hover
     assert "border-color: var(--cf-brand);" in edit_hover
     assert "color: #fff;" in edit_hover
@@ -917,16 +1117,96 @@ def test_task_3_form_widgets_use_design_system_classes():
             assert pattern not in source
 
 
-def test_task_3_faq_row_controls_are_accessible():
+def test_faq_section_uses_split_composer_layout():
+    template = source_text("templates/dashboard/assistant_settings.html")
+    summary = div_block_containing(template, "faq_total_count")
+    composer = div_block_containing(template, "faq_form.is_active")
+
+    assert "cf-faq-shell" in template
+    assert "cf-faq-header" in template
+    assert "cf-faq-layout" in template
+    assert "cf-faq-composer" in template
+    assert "cf-faq-list" in template
+    assert "cf-faq-summary" in template
+    assert "{{ faq_total_count }}" in template
+    assert "{{ faq_visible_count }}" in template
+    assert "Patient-facing assistant copy" in template
+    assert summary.count("cf-faq-summary-metric") == 2
+    assert summary.count("cf-faq-summary-separator") == 1
+    assert "{{ faq_total_count }} total" in summary
+    assert "{{ faq_visible_count }} visible" in summary
+    assert summary.index("{{ faq_total_count }} total") < summary.index("cf-faq-summary-separator")
+    assert summary.index("cf-faq-summary-separator") < summary.index("{{ faq_visible_count }} visible")
+    assert "cf-faq-summary-pill" not in summary
+    assert "Visible to patients" in composer
+    assert "Make this FAQ visible" not in composer
+
+
+def test_faq_summary_metrics_use_aqua_soft_pills():
+    metric_block = css_rule_block(".cf-faq-summary-metric")
+    separator_block = css_rule_block(".cf-faq-summary-separator")
+
+    assert "background: var(--cf-brand-soft);" in metric_block
+    assert "color: var(--cf-brand-strong);" in metric_block
+    assert "border-radius: var(--cf-radius-pill);" in metric_block
+    assert "font-variant-numeric: tabular-nums;" in metric_block
+    assert "background: var(--cf-input-line);" in separator_block
+
+
+def faq_action_button(template, aria_label):
+    match = re.search(
+        rf"<button\b(?P<attrs>[^>]*\baria-label=\"{re.escape(aria_label)}\"[^>]*)>"
+        r"(?P<body>.*?)</button>",
+        template,
+        re.DOTALL,
+    )
+    assert match is not None
+    return match.group("attrs"), match.group("body")
+
+
+def test_faq_row_controls_are_accessible_icon_actions():
     template = partial_text("faq_row.html")
+    edit_attrs, edit_body = faq_action_button(template, "Edit FAQ")
+    delete_attrs, delete_body = faq_action_button(template, "Delete FAQ")
 
     assert "for=\"faq-question-{{ faq.id }}\"" in template
     assert "id=\"faq-question-{{ faq.id }}\"" in template
     assert "for=\"faq-answer-{{ faq.id }}\"" in template
     assert "id=\"faq-answer-{{ faq.id }}\"" in template
-    assert "aria-label=\"{% if faq.is_active %}Deactivate FAQ{% else %}Activate FAQ{% endif %}\"" in template
-    assert "aria-label=\"Edit FAQ\"" in template
-    assert "aria-label=\"Delete FAQ\"" in template
+    assert "aria-label=\"{% if faq.is_active %}Hide FAQ from patients{% else %}Show FAQ to patients{% endif %}\"" in template
+    assert "title=\"Edit FAQ\"" in edit_attrs
+    assert "cf-faq-icon-action" in edit_attrs
+    assert "data-lucide=\"pencil\"" in edit_body
+    assert visible_button_text(edit_body) == ""
+    assert "title=\"Delete FAQ\"" in delete_attrs
+    assert "cf-faq-icon-action" in delete_attrs
+    assert "data-lucide=\"trash-2\"" in delete_body
+    assert visible_button_text(delete_body) == ""
+    assert "{% if faq.is_active %}Visible{% else %}Hidden{% endif %}" in template
+
+
+def test_faq_icon_actions_use_accessible_compact_size():
+    stylesheet = css_text()
+    template = partial_text("faq_row.html")
+    edit_attrs, _ = faq_action_button(template, "Edit FAQ")
+    delete_attrs, _ = faq_action_button(template, "Delete FAQ")
+    action_block = css_rule_block(".cf-faq-icon-action")
+    icon_block = css_rule_block(".cf-faq-icon-action svg")
+    delete_hover_block = css_rule_block(".cf-faq-delete-action:hover")
+
+    assert "cf-faq-icon-actions" in template
+    assert "cf-faq-icon-action" in edit_attrs
+    assert "cf-faq-icon-action" in delete_attrs
+    assert "cf-faq-delete-action" in delete_attrs
+    assert "width: 2rem;" in action_block
+    assert "height: 2rem;" in action_block
+    assert "border-radius: var(--cf-radius-pill);" in action_block
+    assert "width: .95rem;" in icon_block
+    assert "height: .95rem;" in icon_block
+    assert ".cf-faq-delete-action" in stylesheet
+    assert "color: var(--cf-danger);" in css_rule_block(".cf-faq-delete-action")
+    assert "background: var(--cf-danger);" in delete_hover_block
+    assert "color: #fff;" in delete_hover_block
 
 
 def test_task_3_appointment_form_cta_matches_create_or_edit_mode():
@@ -935,17 +1215,108 @@ def test_task_3_appointment_form_cta_matches_create_or_edit_mode():
     assert "{% if appointment %}Save Changes{% else %}Create Appointment{% endif %}" in template
 
 
+def test_appointment_detail_places_add_note_action_on_right():
+    template = partial_text("appointment_detail.html")
+    note_form_start = template.index("dashboard:add_appointment_note")
+    add_note_button = template.index("Add Note</button>", note_form_start)
+    wrapper_start = template.rfind("<div", note_form_start, add_note_button)
+    wrapper = template[wrapper_start:add_note_button]
+
+    assert 'class="mt-3 flex justify-end"' in wrapper
+
+
+def test_edit_appointment_form_places_cancel_left_and_save_changes_right():
+    template = partial_text("appointment_form.html")
+    footer_start = template.index("<div class=\"cf-modal-footer\">")
+    footer = template[footer_start : template.index("</div>", footer_start)]
+
+    assert "Cancel</button>" in footer
+    assert footer.index("Cancel</button>") < footer.index("{% if appointment %}Save Changes{% else %}Create Appointment{% endif %}</button>")
+
+
+def test_reschedule_appointment_modal_places_back_left_and_reschedule_right():
+    template = partial_text("appointment_detail.html")
+    modal_start = template.index("id=\"reschedule-appointment-title\"")
+    footer_start = template.index("<div class=\"cf-modal-footer\">", modal_start)
+    footer = template[footer_start : template.index("</div>", footer_start)]
+
+    assert footer.index("Back</button>") < footer.index("Reschedule</button>")
+
+
+def test_edit_patient_modal_places_cancel_left_and_save_changes_right():
+    template = partial_text("patient_edit_modal_form.html")
+    footer_start = template.index("<div class=\"cf-modal-footer\">")
+    footer = template[footer_start : template.index("</div>", footer_start)]
+
+    assert footer.index("Cancel</button>") < footer.index("Save Changes")
+
+
+ROW_ACTION_TEMPLATE_PATHS = [
+    "templates/dashboard/partials/appointment_row.html",
+    "templates/dashboard/partials/patient_list.html",
+    "templates/dashboard/partials/patient_row.html",
+    "templates/dashboard/partials/patient_detail_content.html",
+    "templates/dashboard/partials/service_row.html",
+    "templates/dashboard/partials/faq_row.html",
+    "templates/dashboard/partials/duplicate_list.html",
+    "templates/dashboard/settings.html",
+    "templates/dashboard/unavailable_dates.html",
+]
+
+
+def test_item_level_action_clusters_match_appointment_button_size():
+    for relative_path in ROW_ACTION_TEMPLATE_PATHS:
+        template = source_text(relative_path)
+        action_blocks = re.findall(
+            r"<div\b[^>]*\bcf-row-actions\b[^>]*>.*?</div>",
+            template,
+            re.DOTALL,
+        )
+        assert action_blocks, relative_path
+
+        for block in action_blocks:
+            for match in re.finditer(
+                r"<(?P<tag>a|button)\b(?P<attrs>[^>]*\bclass=\"[^\"]*\bcf-btn\b[^\"]*\"[^>]*)>",
+                block,
+            ):
+                attrs = match.group("attrs")
+                assert "cf-btn-xs" in attrs, f"{relative_path}: {match.group(0)}"
+                assert "cf-btn-sm" not in attrs, f"{relative_path}: {match.group(0)}"
+                assert "!min-h-0" not in attrs, f"{relative_path}: {match.group(0)}"
+
+
+def test_item_level_action_icons_use_compact_appointment_size():
+    for relative_path in ROW_ACTION_TEMPLATE_PATHS:
+        template = source_text(relative_path)
+        action_blocks = re.findall(
+            r"<div\b[^>]*\bcf-row-actions\b[^>]*>.*?</div>",
+            template,
+            re.DOTALL,
+        )
+        assert action_blocks, relative_path
+
+        for block in action_blocks:
+            for match in re.finditer(r"<i\b[^>]*data-lucide=\"[^\"]+\"[^>]*>", block):
+                icon = match.group(0)
+                assert "h-3 w-3" in icon, f"{relative_path}: {icon}"
+                assert "shrink-0" in icon, f"{relative_path}: {icon}"
+                assert 'aria-hidden="true"' in icon, f"{relative_path}: {icon}"
+
+
 def test_task_3_appointment_rows_surface_inline_actions():
     template = partial_text("appointment_row.html")
     stylesheet = source_text("static/css/clinicflow.css")
+    reschedule_action = css_rule_block(".cf-appointment-reschedule-action")
+    reschedule_hover = css_rule_block(".cf-appointment-reschedule-action:hover")
 
     assert template.count("class=\"cf-btn") == 4
     assert "data-lucide=\"eye\"" in template
     assert "data-lucide=\"pencil\"" in template
     assert "data-lucide=\"calendar-clock\"" in template
     assert "data-lucide=\"x-circle\"" in template
+    assert "cf-appointment-row-actions" in template
     for icon in ["eye", "pencil", "calendar-clock", "x-circle"]:
-        assert f'data-lucide="{icon}" class="h-4 w-4 shrink-0" aria-hidden="true"' in template
+        assert f'data-lucide="{icon}" class="h-3 w-3 shrink-0" aria-hidden="true"' in template
     assert "View</a>" in template
     assert "Edit</a>" in template
     assert "Reschedule</a>" in template
@@ -954,15 +1325,27 @@ def test_task_3_appointment_rows_surface_inline_actions():
     assert "?mode=reschedule" in template
     assert "?mode=cancel" in template
     assert "appointment.status != 'cancelled' and appointment.status != 'completed'" in template
+    assert "cf-row-actions" in template
     assert "cf-appointment-action" not in template
     assert ".cf-appointment-action" not in stylesheet
     assert ".cf-btn-xs" in stylesheet
-    assert "min-height: 2.5rem;" in stylesheet
-    assert template.count("cf-service-archive-action") == 1
+    assert "min-height: 1.75rem;" in stylesheet
+    assert "padding: .25rem .55rem;" in stylesheet
+    assert "font-size: .6875rem;" in stylesheet
+    assert ".cf-row-actions .cf-btn-xs" in stylesheet
+    assert "min-height: 1.625rem;" in stylesheet
+    assert "padding: .2rem .45rem;" in stylesheet
+    assert "width: .75rem;" in stylesheet
+    assert "height: .75rem;" in stylesheet
+    assert ".cf-row-actions .cf-btn-xs svg" in stylesheet
+    assert "width: .7rem;" in stylesheet
+    assert "height: .7rem;" in stylesheet
+    assert "cf-service-archive-action" not in template
     assert "hx-get=\"{% url 'dashboard:appointment_detail' appointment.id %}\" hx-target=\"#detail-modal-body\" class=\"cf-btn cf-btn-xs cf-appointment-view-action\"" in template
-    assert "class=\"cf-btn cf-btn-xs cf-btn-muted cf-service-archive-action\"" in template
     assert "class=\"cf-btn cf-btn-xs cf-btn-secondary cf-service-edit-action\"" in template
-    assert "class=\"cf-btn cf-btn-xs cf-btn-muted cf-service-archive-action\"" in template
+    assert "?mode=reschedule\" hx-target=\"#detail-modal-body\" class=\"cf-btn cf-btn-xs cf-appointment-reschedule-action\"" in template
+    assert "Reschedule</a>" in template
+    assert "cf-btn-muted" not in template
     assert "class=\"cf-btn cf-btn-xs cf-btn-danger\"" in template
     assert ".cf-appointment-view-action" in stylesheet
     assert ".cf-appointment-view-action:hover" in stylesheet
@@ -970,8 +1353,12 @@ def test_task_3_appointment_rows_surface_inline_actions():
     assert "border-color: var(--cf-muted);" in stylesheet
     assert ".cf-service-edit-action:hover" in stylesheet
     assert "background: var(--cf-brand);" in stylesheet
+    assert "background: var(--cf-warning-soft);" in reschedule_action
+    assert "color: var(--cf-warning);" in reschedule_action
+    assert "background: var(--cf-warning);" in reschedule_hover
+    assert "border-color: var(--cf-warning);" in reschedule_hover
+    assert "color: #fff;" in reschedule_hover
     assert ".cf-service-archive-action:hover" in stylesheet
-    assert "background: var(--cf-ink-secondary);" in stylesheet
     assert ".cf-btn-danger:hover" in stylesheet
     assert "background: var(--cf-danger);" in stylesheet
 
@@ -1149,6 +1536,22 @@ def test_task_5_appointment_pagination_preserves_filters_for_htmx():
     assert "{% if search_query %}&q={{ search_query }}{% endif %}" in appointment_list
 
 
+def test_patient_pagination_preserves_search_for_htmx():
+    patient_list = partial_text("patient_list.html")
+
+    for page_snippet in [
+        "hx-get=\"?page=1",
+        "hx-get=\"?page={{ page_obj.previous_page_number }}",
+        "hx-get=\"?page={{ num }}",
+        "hx-get=\"?page={{ page_obj.next_page_number }}",
+        "hx-get=\"?page={{ page_obj.paginator.num_pages }}",
+    ]:
+        assert page_snippet in patient_list
+    assert "{% if query %}&q={{ query|urlencode }}{% endif %}" in patient_list
+    assert "hx-target=\"#patient-list\"" in patient_list
+    assert "hx-push-url=\"true\"" in patient_list
+
+
 def test_appointment_search_preserves_input_focus_after_htmx_swap():
     appointments = source_text("templates/dashboard/appointments.html")
     base = dashboard_base_text()
@@ -1216,6 +1619,26 @@ def test_task_5_appointment_modals_use_neon_aqua_anatomy_and_singular_titles():
     assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in appointments
     assert "Cancel Appointments" not in detail
     assert "Reschedule Appointments" not in detail
+
+
+def test_add_appointment_modal_places_cancel_action_on_left():
+    template = source_text("templates/dashboard/appointments.html")
+    modal_start = template.index("id=\"add-appointment-title\"")
+    footer_start = template.index("<div class=\"cf-modal-footer\">", modal_start)
+    footer = template[footer_start : template.index("</div>", footer_start)]
+
+    assert footer.index("Cancel</button>") < footer.index("Create appointment</button>")
+
+
+def test_cancel_appointment_modal_places_confirm_cancel_action_on_right():
+    template = partial_text("appointment_detail.html")
+    cancel_start = template.index("<!-- Cancel Mode -->")
+    cancel_end = template.index("<!-- Reschedule Mode -->", cancel_start)
+    cancel_mode = template[cancel_start:cancel_end]
+    footer_start = cancel_mode.index("<div class=\"cf-modal-footer\">")
+    footer = cancel_mode[footer_start : cancel_mode.index("</div>", footer_start)]
+
+    assert footer.index("Back</button>") < footer.index("Confirm Cancel</button>")
 
 
 def test_task_5_calendar_uses_single_neon_aqua_shell_and_accessible_modal():
@@ -1381,7 +1804,8 @@ def test_mobile_responsive_css_scopes_full_width_buttons_and_keeps_tap_targets()
         assert snippet in mobile
 
     assert "min-height: 2.5rem;" in css_rule_block(".cf-btn-sm")
-    assert "min-height: 2.5rem;" in css_rule_block(".cf-btn-xs")
+    assert "min-height: 1.75rem;" in css_rule_block(".cf-btn-xs")
+    assert "min-height: 1.625rem;" in css_rule_block(".cf-row-actions .cf-btn-xs")
     assert "min-height: 2.75rem;" in css_rule_block(".cf-slot-button")
 
 
@@ -1428,8 +1852,11 @@ def test_mobile_responsive_dynamic_text_has_wrapping_guards():
     assert "flex flex-col gap-3 rounded-[var(--cf-radius)] border border-[var(--cf-line-soft)] p-4 sm:flex-row sm:items-center sm:justify-between" in duplicate_list
     assert "min-w-0 break-words text-sm" in duplicate_list
     assert "flex flex-col gap-3 sm:flex-row sm:items-center" in merge_confirm
-    assert "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between" in faq_row
+    assert "cf-faq-card" in faq_row
+    assert "min-w-0" in faq_row
     assert "break-words" in faq_row
+    assert "whitespace-pre-wrap" in faq_row
+    assert "cf-faq-layout" in assistant_settings
     assert "break-all" in appointment_detail
     assert "max-w-[14rem] break-all" in patient_list
     assert "min-w-0 flex-1" in widget

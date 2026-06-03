@@ -9,37 +9,50 @@
     </div>
   </div>
 
+  <!-- Messenger Setup Row -->
+  <div class="grid gap-5 lg:grid-cols-2">
   <!-- Connection Status Card -->
   <section class="cf-card p-6">
-    <div class="flex items-center gap-3 mb-4">
-      <div class="cf-icon-box p-3">
-        <i data-lucide="message-circle" class="h-5 w-5"></i>
+    <div class="cf-messenger-connection-header mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div class="flex items-center gap-3">
+        <div class="cf-icon-box p-3">
+          <i data-lucide="message-circle" class="h-5 w-5"></i>
+        </div>
+        <div>
+          <h2 class="cf-section-title">Facebook Page Connection</h2>
+          {% if connection and connection.is_active %}
+            <div class="cf-messenger-page-strip">
+              <div class="cf-messenger-page-summary">
+                <span>Facebook Page:</span>
+                <strong class="cf-messenger-page-name">{{ connection.page_name|default:connection.page_id }}</strong>
+              </div>
+              <div class="cf-messenger-page-details">
+                {% if connection.app_id %}
+                  <span class="cf-messenger-page-item">App ID: <code class="cf-mono">{{ connection.app_id }}</code></span>
+                {% endif %}
+                <span class="cf-messenger-page-item">Page ID: <code class="cf-mono">{{ connection.page_id }}</code></span>
+              </div>
+            </div>
+          {% endif %}
+          {% if not connection or not connection.is_active %}
+            <p class="mt-1 text-sm text-[var(--cf-muted)]">Enter your Facebook Page details for the n8n workflow.</p>
+          {% endif %}
+        </div>
       </div>
       <div>
-        <h2 class="cf-section-title">Facebook Page Connection</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Enter your Facebook Page details for the n8n workflow.</p>
+        {% if connection and connection.is_active %}
+          <span class="cf-badge cf-badge-active">
+            <i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Connected
+          </span>
+        {% else %}
+          <span class="cf-badge cf-status-cancelled">
+            <i data-lucide="x-circle" class="h-3 w-3"></i> Not Configured
+          </span>
+        {% endif %}
       </div>
     </div>
 
-    {% if connection and connection.is_active %}
-      <div class="flex flex-wrap items-center gap-3 mb-5">
-        <span class="cf-badge cf-status-confirmed">
-          <i data-lucide="check-circle-2" class="h-3 w-3"></i> Active
-        </span>
-        {% if connection.app_id %}
-          <span class="text-sm text-[var(--cf-muted)]">App ID: <code class="cf-mono text-[var(--cf-blue)]">{{ connection.app_id }}</code></span>
-        {% endif %}
-        <span class="text-sm text-[var(--cf-muted)]">Page ID: <code class="cf-mono text-[var(--cf-blue)]">{{ connection.page_id }}</code></span>
-      </div>
-    {% else %}
-      <div class="flex flex-wrap items-center gap-3 mb-5">
-        <span class="cf-badge cf-status-cancelled">
-          <i data-lucide="x-circle" class="h-3 w-3"></i> Not Configured
-        </span>
-      </div>
-    {% endif %}
-
-    <form method="post" action="{% url 'dashboard:messenger_settings' %}" class="grid gap-5 md:grid-cols-2">
+    <form id="messenger-connection-form" method="post" action="{% url 'dashboard:messenger_settings' %}" class="grid gap-5">
       {% csrf_token %}
       <input type="hidden" name="_form" value="connection_settings">
       <div class="cf-field">
@@ -51,7 +64,12 @@
       </div>
       <div class="cf-field">
         <label class="cf-label" for="{{ form.app_secret.id_for_label }}">{{ form.app_secret.label }}</label>
-        {{ form.app_secret }}
+        <div class="relative">
+          {{ form.app_secret }}
+          <button type="button" class="cf-secret-toggle absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--cf-muted)] transition hover:text-[var(--cf-brand)] focus:outline-none" data-secret-toggle data-secret-field="app_secret" data-secret-url="{% url 'dashboard:messenger_secret_reveal' %}" data-secret-mask="************" data-has-secret="{% if connection and connection.app_secret %}true{% else %}false{% endif %}" data-show-label="Show Facebook App Secret" data-hide-label="Hide Facebook App Secret" aria-label="Show Facebook App Secret" aria-pressed="false">
+            <i data-lucide="eye" class="h-4 w-4" aria-hidden="true"></i>
+          </button>
+        </div>
         <p class="mt-1 text-xs text-[var(--cf-muted)]">Used to verify Meta webhook signatures. Leave blank to keep the saved secret.</p>
         {% if form.app_secret.errors %}
           <p class="text-sm text-red-600 mt-1">{{ form.app_secret.errors.0 }}</p>
@@ -66,91 +84,66 @@
       </div>
       <div class="cf-field">
         <label class="cf-label" for="{{ form.page_access_token.id_for_label }}">{{ form.page_access_token.label }}</label>
-        {{ form.page_access_token }}
+        <div class="relative">
+          {{ form.page_access_token }}
+          <button type="button" class="cf-secret-toggle absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--cf-muted)] transition hover:text-[var(--cf-brand)] focus:outline-none" data-secret-toggle data-secret-field="page_access_token" data-secret-url="{% url 'dashboard:messenger_secret_reveal' %}" data-secret-mask="************" data-has-secret="{% if connection and connection.page_access_token %}true{% else %}false{% endif %}" data-show-label="Show Page Access Token" data-hide-label="Hide Page Access Token" aria-label="Show Page Access Token" aria-pressed="false">
+            <i data-lucide="eye" class="h-4 w-4" aria-hidden="true"></i>
+          </button>
+        </div>
         <p class="mt-1 text-xs text-[var(--cf-muted)]">Used to send Messenger replies as this Page. Leave blank to keep the saved token.</p>
         {% if form.page_access_token.errors %}
           <p class="text-sm text-red-600 mt-1">{{ form.page_access_token.errors.0 }}</p>
         {% endif %}
       </div>
-      <div class="md:col-span-2">
-        <button type="submit" class="cf-btn cf-btn-primary">
-          <i data-lucide="save" class="h-4 w-4"></i> Save Settings
-        </button>
-      </div>
     </form>
 
-    {% if connection and connection.is_active %}
-      <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" class="mt-3">
+    <div class="cf-messenger-connection-actions mt-5 flex flex-col gap-2 border-t border-[var(--cf-line)] pt-4 sm:flex-row sm:justify-end">
+      {% if connection and connection.is_active %}
+      <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" class="w-full sm:w-auto">
         {% csrf_token %}
-        <button type="submit" class="cf-btn cf-btn-danger">
+        <button type="submit" class="cf-btn cf-btn-danger w-full sm:w-auto">
           <i data-lucide="unlink" class="h-4 w-4"></i> Disconnect
         </button>
       </form>
-    {% endif %}
+      {% else %}
+      <button type="submit" form="messenger-connection-form" class="cf-btn cf-btn-primary w-full sm:w-auto">
+        <i data-lucide="save" class="h-4 w-4"></i> Save Settings
+      </button>
+      {% endif %}
+    </div>
   </section>
 
-  <!-- Shared AI Prompt Card -->
+  <div class="grid gap-5">
+  <!-- Instructions Card -->
   <section class="cf-card p-6">
     <div class="flex items-center gap-3 mb-4">
       <div class="cf-icon-box p-3">
-        <i data-lucide="bot" class="h-5 w-5"></i>
+        <i data-lucide="book-open" class="h-5 w-5"></i>
       </div>
       <div>
-        <h2 class="cf-section-title">Shared AI Prompt</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Used by both Facebook Messenger and the website Assistant.</p>
+        <h2 class="cf-section-title">Setup Instructions</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Follow these steps to activate Messenger booking via n8n.</p>
       </div>
     </div>
 
-    {% if ai_form %}
-      <form method="post" action="{% url 'dashboard:messenger_settings' %}" class="grid gap-5">
-        {% csrf_token %}
-        <input type="hidden" name="_form" value="ai_settings">
-        <textarea id="default-ai-prompt-value" class="hidden" aria-hidden="true">{{ default_ai_prompt }}</textarea>
-
-        <div>
-          <label class="flex items-center gap-2 cursor-pointer">
-            {{ ai_form.is_ai_enabled }}
-            <span class="text-sm font-semibold text-[var(--cf-ink)]">{{ ai_form.is_ai_enabled.label }}</span>
-          </label>
-          {% if ai_form.is_ai_enabled.errors %}
-            <p class="text-sm text-red-600 mt-1">{{ ai_form.is_ai_enabled.errors.0 }}</p>
-          {% endif %}
-        </div>
-
-        <div class="cf-field">
-          <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
-            <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
-            <button
-              type="button"
-              class="cf-btn cf-btn-secondary cf-btn-sm"
-              @click="const field = document.getElementById('{{ ai_form.instructions.id_for_label }}'); const source = document.getElementById('default-ai-prompt-value'); if (field && source) { field.value = source.value; field.focus(); }"
-            >
-              <i data-lucide="rotate-ccw" class="h-4 w-4"></i> Restore default prompt
-            </button>
-          </div>
-          {{ ai_form.instructions }}
-          <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the AI how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from ClinicFlow.</p>
-          {% if ai_form.instructions.errors %}
-            <p class="text-sm text-red-600 mt-1">{{ ai_form.instructions.errors.0 }}</p>
-          {% endif %}
-        </div>
-
-        <div class="cf-field">
-          <label class="cf-label" for="{{ ai_form.fallback_message.id_for_label }}">{{ ai_form.fallback_message.label }}</label>
-          {{ ai_form.fallback_message }}
-          <p class="mt-1 text-xs text-[var(--cf-muted)]">Shown in both Messenger and the website Assistant when AI replies are disabled or unavailable.</p>
-          {% if ai_form.fallback_message.errors %}
-            <p class="text-sm text-red-600 mt-1">{{ ai_form.fallback_message.errors.0 }}</p>
-          {% endif %}
-        </div>
-
-        <div class="pt-2">
-          <button type="submit" class="cf-btn cf-btn-primary">
-            <i data-lucide="save" class="h-4 w-4"></i> Save AI Prompt
-          </button>
-        </div>
-      </form>
-    {% endif %}
+    <ol class="grid gap-4 text-sm text-[var(--cf-muted)]">
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">1</span>
+        <span>Go to your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a> and get your <strong class="text-[var(--cf-ink)]">App ID</strong>, <strong class="text-[var(--cf-ink)]">App Secret</strong>, <strong class="text-[var(--cf-ink)]">Page ID</strong>, and <strong class="text-[var(--cf-ink)]">Page Access Token</strong>.</span>
+      </li>
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">2</span>
+        <span>Enter the Meta app and Page credentials, then click <strong class="text-[var(--cf-ink)]">Save Settings</strong>.</span>
+      </li>
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">3</span>
+        <span>In your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a>, go to your App -> Messenger -> Webhooks. Set the webhook URL to your n8n instance and subscribe to <strong class="text-[var(--cf-ink)]">messages</strong> and <strong class="text-[var(--cf-ink)]">messaging_postbacks</strong>.</span>
+      </li>
+      <li class="flex items-start gap-3">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">4</span>
+        <span>Patients can now message your Facebook Page to book appointments. The bot will guide them through service selection, date, time, and confirmation.</span>
+      </li>
+    </ol>
   </section>
 
   <!-- n8n Webhook Setup Card -->
@@ -176,37 +169,83 @@
       </div>
     </div>
   </section>
+  </div>
 
-  <!-- Instructions Card -->
+  </div>
+
   <section class="cf-card p-6">
-    <div class="flex items-center gap-3 mb-4">
-      <div class="cf-icon-box p-3">
-        <i data-lucide="book-open" class="h-5 w-5"></i>
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div class="flex items-start gap-3">
+        <div class="cf-icon-box p-3">
+          <i data-lucide="bot" class="h-5 w-5"></i>
+        </div>
+        <div>
+          <h2 class="cf-section-title">Shared Assistant</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">AI prompt, fallback message, and FAQs are shared by Facebook Messenger and the website Assistant.</p>
+          <p class="mt-2 text-xs text-[var(--cf-muted)]">Manage shared assistant behavior from Assistant settings. Messenger-specific credentials stay on this page.</p>
+        </div>
       </div>
-      <div>
-        <h2 class="cf-section-title">Setup Instructions</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Follow these steps to activate Messenger booking via n8n.</p>
-      </div>
+      <a href="{% url 'dashboard:assistant_settings' %}" class="cf-btn cf-btn-secondary shrink-0">
+        <i data-lucide="settings" class="h-4 w-4"></i> Open Assistant
+      </a>
     </div>
-
-    <ol class="grid gap-4 text-sm text-[var(--cf-muted)]">
-      <li class="flex items-start gap-3">
-        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">1</span>
-        <span>Go to your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a> and get your <strong class="text-[var(--cf-ink)]">App ID</strong>, <strong class="text-[var(--cf-ink)]">App Secret</strong>, <strong class="text-[var(--cf-ink)]">Page ID</strong>, and <strong class="text-[var(--cf-ink)]">Page Access Token</strong>.</span>
-      </li>
-      <li class="flex items-start gap-3">
-        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">2</span>
-        <span>Enter the Meta app and Page credentials above, then click <strong class="text-[var(--cf-ink)]">Save Settings</strong>.</span>
-      </li>
-      <li class="flex items-start gap-3">
-        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">3</span>
-        <span>In your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a>, go to your App -> Messenger -> Webhooks. Set the webhook URL to your n8n instance and subscribe to <strong class="text-[var(--cf-ink)]">messages</strong> and <strong class="text-[var(--cf-ink)]">messaging_postbacks</strong>.</span>
-      </li>
-      <li class="flex items-start gap-3">
-        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">4</span>
-        <span>Patients can now message your Facebook Page to book appointments. The bot will guide them through service selection, date, time, and confirmation.</span>
-      </li>
-    </ol>
   </section>
 </div>
+
+<script>
+  (() => {
+    const form = document.getElementById('messenger-connection-form');
+    if (!form) return;
+
+    const csrfInput = form.querySelector('[name="csrfmiddlewaretoken"]');
+    const csrfToken = csrfInput ? csrfInput.value : '';
+
+    const refreshIcon = (button, iconName) => {
+      const icon = button.querySelector('[data-lucide]');
+      if (!icon) return;
+      icon.setAttribute('data-lucide', iconName);
+      if (window.lucide) window.lucide.createIcons();
+    };
+
+    document.querySelectorAll('[data-secret-toggle]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const fieldName = button.dataset.secretField;
+        const input = document.getElementById(`id_${fieldName}`);
+        if (!input) return;
+
+        if (input.type === 'text') {
+          input.type = 'password';
+          button.setAttribute('aria-pressed', 'false');
+          button.setAttribute('aria-label', button.dataset.showLabel);
+          refreshIcon(button, 'eye');
+          return;
+        }
+
+        if (input.value === button.dataset.secretMask && button.dataset.hasSecret === 'true') {
+          button.disabled = true;
+          try {
+            const response = await fetch(button.dataset.secretUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': csrfToken,
+              },
+              body: new URLSearchParams({ field: fieldName }).toString(),
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            input.value = data.value || '';
+          } finally {
+            button.disabled = false;
+          }
+        }
+
+        input.type = 'text';
+        button.setAttribute('aria-pressed', 'true');
+        button.setAttribute('aria-label', button.dataset.hideLabel);
+        refreshIcon(button, 'eye-off');
+      });
+    });
+  })();
+</script>
 {% endblock %}

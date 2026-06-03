@@ -9,6 +9,7 @@ class MessengerConnection(TimeStampedModel):
     app_id = models.CharField(max_length=64, blank=True, default="")
     app_secret = models.CharField(max_length=256, blank=True, default="")
     page_id = models.CharField(max_length=64, blank=True, default="")
+    page_name = models.CharField(max_length=255, blank=True, default="")
     page_access_token = models.CharField(max_length=512, blank=True, default="")
     is_active = models.BooleanField(default=True)
 

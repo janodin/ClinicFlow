@@ -19,7 +19,9 @@
           <td class="p-5 font-semibold text-[var(--cf-ink)]">{{ ud.date|date:"l, M j, Y" }}</td>
           <td class="p-5 text-[var(--cf-muted)]">{{ ud.reason|default:"—" }}</td>
           <td class="p-5">
-            <button type="button" @click="deleteUrl='{% url 'dashboard:delete_unavailable_date' ud.id %}'; deleteOpen=true" class="cf-btn cf-btn-sm cf-btn-danger"><i data-lucide="trash-2" class="h-4 w-4"></i>Delete</button>
+            <div class="cf-row-actions cf-row-actions-start">
+              <button type="button" @click="deleteUrl='{% url 'dashboard:delete_unavailable_date' ud.id %}'; deleteOpen=true" class="cf-btn cf-btn-xs cf-btn-danger"><i data-lucide="trash-2" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Delete</button>
+            </div>
           </td>
         </tr>
       {% empty %}

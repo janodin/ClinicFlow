@@ -1,10 +1,29 @@
 from django import forms
 
-from clinics.models import ClinicAISettings
 from messenger.models import MessengerConnection
 
 
+SAVED_SECRET_MASK = "************"
+
+
+class SavedSecretPasswordInput(forms.PasswordInput):
+    def __init__(self, attrs=None):
+        super().__init__(attrs=attrs, render_value=True)
+
+    def get_context(self, name, value, attrs):
+        safe_value = value if value == SAVED_SECRET_MASK else None
+        return super().get_context(name, safe_value, attrs)
+
+
 class MessengerConnectionForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            if self.instance.app_secret:
+                self.initial["app_secret"] = SAVED_SECRET_MASK
+            if self.instance.page_access_token:
+                self.initial["page_access_token"] = SAVED_SECRET_MASK
+
     class Meta:
         model = MessengerConnection
         fields = ["app_id", "app_secret", "page_id", "page_access_token"]
@@ -13,18 +32,18 @@ class MessengerConnectionForm(forms.ModelForm):
                 "class": "ui-input",
                 "placeholder": "e.g. 123456789012345",
             }),
-            "app_secret": forms.PasswordInput(attrs={
-                "class": "ui-input",
+            "app_secret": SavedSecretPasswordInput(attrs={
+                "class": "ui-input pr-12",
                 "placeholder": "Leave blank to keep saved App Secret",
-            }, render_value=False),
+            }),
             "page_id": forms.TextInput(attrs={
                 "class": "ui-input",
                 "placeholder": "e.g. 123456789012345",
             }),
-            "page_access_token": forms.PasswordInput(attrs={
-                "class": "ui-input",
+            "page_access_token": SavedSecretPasswordInput(attrs={
+                "class": "ui-input pr-12",
                 "placeholder": "Leave blank to keep saved Page Access Token",
-            }, render_value=False),
+            }),
         }
         labels = {
             "app_id": "Facebook App ID",
@@ -35,42 +54,12 @@ class MessengerConnectionForm(forms.ModelForm):
 
     def clean_app_secret(self):
         app_secret = self.cleaned_data.get("app_secret", "")
-        if not app_secret and self.instance and self.instance.pk:
+        if app_secret in {"", SAVED_SECRET_MASK} and self.instance and self.instance.pk:
             return self.instance.app_secret
         return app_secret
 
     def clean_page_access_token(self):
         page_access_token = self.cleaned_data.get("page_access_token", "")
-        if not page_access_token and self.instance and self.instance.pk:
+        if page_access_token in {"", SAVED_SECRET_MASK} and self.instance and self.instance.pk:
             return self.instance.page_access_token
         return page_access_token
-
-
-class MessengerAISettingsForm(forms.ModelForm):
-    class Meta:
-        model = ClinicAISettings
-        fields = ["is_ai_enabled", "instructions", "fallback_message"]
-        widgets = {
-            "is_ai_enabled": forms.CheckboxInput(attrs={
-                "class": "h-4 w-4 rounded border-[var(--cf-line)] text-[var(--cf-brand)] focus:ring-[var(--cf-focus)]",
-            }),
-            "instructions": forms.Textarea(attrs={
-                "class": "ui-input min-h-36",
-                "placeholder": "Tell the Messenger AI how to speak, what clinic policies to follow, and what it should avoid.",
-                "rows": 6,
-            }),
-            "fallback_message": forms.Textarea(attrs={
-                "class": "ui-input min-h-24",
-                "placeholder": "Example: Our team will help you shortly. Please call the clinic for urgent concerns.",
-                "rows": 3,
-            }),
-        }
-        labels = {
-            "is_ai_enabled": "Enable AI replies",
-            "instructions": "Prompt / Instructions",
-            "fallback_message": "Fallback message",
-        }
-        help_texts = {
-            "instructions": "Used by both Messenger and the website Assistant. Services, prices, and availability still come from ClinicFlow.",
-            "fallback_message": "Shown in both Messenger and the website Assistant when AI replies are disabled or unavailable.",
-        }
