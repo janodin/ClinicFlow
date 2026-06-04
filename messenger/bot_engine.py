@@ -13,14 +13,38 @@ from .models import MessengerSession
 
 
 MESSENGER_QUICK_REPLY_LIMIT = 13
+MESSENGER_QUICK_REPLY_TITLE_LIMIT = 20
 
 
 def _quick_reply(text, options):
-    return {"type": "quick_replies", "text": text, "options": list(options or [])[:MESSENGER_QUICK_REPLY_LIMIT]}
+    safe_options = []
+    for option in list(options or [])[:MESSENGER_QUICK_REPLY_LIMIT]:
+        safe_options.append({
+            "title": str(option.get("title", ""))[:MESSENGER_QUICK_REPLY_TITLE_LIMIT],
+            "payload": str(option.get("payload", "")),
+        })
+    return {"type": "quick_replies", "text": text, "options": safe_options}
 
 
 def _text(text):
     return {"type": "text", "text": text}
+
+
+def _service_options(clinic):
+    services = clinic.services.filter(is_active=True, is_archived=False)
+    return [{"title": s.name, "payload": str(s.id)} for s in services]
+
+
+def _reset_to_service_selection(session, actions, message="That service is no longer available. Please choose another:"):
+    session.state = MessengerSession.STATE_SELECT_SERVICE
+    session.data = {}
+    actions.append(_quick_reply(message, _service_options(session.connection.clinic)))
+    session.save()
+    return actions
+
+
+def _time_options(slots):
+    return [{"title": slot["label"], "payload": slot["starts_at"].isoformat()} for slot in slots]
 
 
 def _parse_name_phone(text):
@@ -73,6 +97,17 @@ def handle_message(session, text, postback):
             {"title": "View FAQs", "payload": "view_faqs"},
             {"title": "Clinic info", "payload": "clinic_info"},
         ]))
+        return actions
+
+    if postback and postback.startswith("faq:"):
+        try:
+            faq_id = int(postback.split(":")[1])
+            faq = clinic.faqs.get(pk=faq_id, is_active=True)
+            actions.append(_text(f"Q: {faq.question}\nA: {faq.answer}"))
+        except (ValueError, ClinicFAQ.DoesNotExist):
+            actions.append(_text("Sorry, that FAQ is no longer available."))
+        session.state = MessengerSession.STATE_GREETING
+        session.save()
         return actions
 
     if state == MessengerSession.STATE_GREETING:
@@ -135,8 +170,7 @@ def handle_message(session, text, postback):
             data["service_id"] = service.id
             state = MessengerSession.STATE_SELECT_DATE
         else:
-            options = [{"title": s.name, "payload": str(s.id)} for s in services]
-            actions.append(_quick_reply("Which service would you like to book?", options))
+            actions.append(_quick_reply("Which service would you like to book?", _service_options(clinic)))
             session.state = state
             session.data = data
             session.save()
@@ -151,6 +185,30 @@ def handle_message(session, text, postback):
         if selected_date:
             data["date"] = selected_date.isoformat()
             state = MessengerSession.STATE_SELECT_TIME
+            service = clinic.services.filter(pk=data.get("service_id"), is_active=True, is_archived=False).first()
+            if not service:
+                return _reset_to_service_selection(session, actions)
+            slots = generate_slots(clinic, service, selected_date)
+            if slots:
+                actions.append(_quick_reply("Here are the available times:", _time_options(slots)))
+            else:
+                next_d = _find_next_available_date(clinic, service, selected_date)
+                if next_d:
+                    actions.append(_text(f"No slots available. The next available date is {next_d.strftime('%a, %b %d')}."))
+                    options = [
+                        {"title": (next_d + timedelta(days=i)).strftime("%a, %b %d"), "payload": (next_d + timedelta(days=i)).isoformat()}
+                        for i in range(0, 14)
+                    ]
+                    actions.append(_quick_reply("Choose a date:", options))
+                    state = MessengerSession.STATE_SELECT_DATE
+                else:
+                    actions.append(_text("Sorry, no slots are available in the near future."))
+                    session.reset()
+                    return actions
+            session.state = state
+            session.data = data
+            session.save()
+            return actions
         else:
             options = [
                 {"title": (_clinic_localdate(clinic) + timedelta(days=i)).strftime("%a, %b %d"), "payload": (_clinic_localdate(clinic) + timedelta(days=i)).isoformat()}
@@ -165,7 +223,9 @@ def handle_message(session, text, postback):
     if state == MessengerSession.STATE_SELECT_TIME:
         service_id = data.get("service_id")
         date_str = data.get("date")
-        service = clinic.services.filter(pk=service_id).first()
+        service = clinic.services.filter(pk=service_id, is_active=True, is_archived=False).first()
+        if not service:
+            return _reset_to_service_selection(session, actions)
         selected_date = date.fromisoformat(date_str)
         slots = generate_slots(clinic, service, selected_date)
         if postback or text:
@@ -182,8 +242,7 @@ def handle_message(session, text, postback):
                 state = MessengerSession.STATE_COLLECT_INFO
             else:
                 if slots:
-                    options = [{"title": slot["label"], "payload": slot["starts_at"].isoformat()} for slot in slots]
-                    actions.append(_quick_reply("That slot is no longer available. Please choose another:", options))
+                    actions.append(_quick_reply("That slot is no longer available. Please choose another:", _time_options(slots)))
                 else:
                     next_d = _find_next_available_date(clinic, service, selected_date)
                     if next_d:
@@ -203,8 +262,7 @@ def handle_message(session, text, postback):
                 return actions
         else:
             if slots:
-                options = [{"title": slot["label"], "payload": slot["starts_at"].isoformat()} for slot in slots]
-                actions.append(_quick_reply("Here are the available times:", options))
+                actions.append(_quick_reply("Here are the available times:", _time_options(slots)))
             else:
                 next_d = _find_next_available_date(clinic, service, selected_date)
                 if next_d:
@@ -251,12 +309,13 @@ def handle_message(session, text, postback):
                 state = MessengerSession.STATE_SELECT_TIME
                 service_id = data.get("service_id")
                 date_str = data.get("date")
-                service = clinic.services.filter(pk=service_id).first()
+                service = clinic.services.filter(pk=service_id, is_active=True, is_archived=False).first()
+                if not service:
+                    return _reset_to_service_selection(session, actions)
                 selected_date = date.fromisoformat(date_str)
                 slots = generate_slots(clinic, service, selected_date)
                 if slots:
-                    options = [{"title": slot["label"], "payload": slot["starts_at"].isoformat()} for slot in slots]
-                    actions.append(_quick_reply("Please choose another time:", options))
+                    actions.append(_quick_reply("Please choose another time:", _time_options(slots)))
                 session.state = state
                 session.data = data
                 session.save()
@@ -310,18 +369,6 @@ def handle_message(session, text, postback):
             session.state = state
             session.save()
             return actions
-
-    # FAQ postback handling
-    if postback and postback.startswith("faq:"):
-        try:
-            faq_id = int(postback.split(":")[1])
-            faq = clinic.faqs.get(pk=faq_id, is_active=True)
-            actions.append(_text(f"Q: {faq.question}\nA: {faq.answer}"))
-        except (ValueError, ClinicFAQ.DoesNotExist):
-            actions.append(_text("Sorry, that FAQ is no longer available."))
-        session.state = MessengerSession.STATE_GREETING
-        session.save()
-        return actions
 
     # Fallback
     session.reset()

@@ -7,6 +7,16 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 META_API_URL = "https://graph.facebook.com/v18.0"
+QUICK_REPLY_LIMIT = 13
+QUICK_REPLY_TITLE_LIMIT = 20
+
+
+def _quick_reply_option(option):
+    return {
+        "content_type": "text",
+        "title": str(option.get("title", ""))[:QUICK_REPLY_TITLE_LIMIT],
+        "payload": str(option.get("payload", "")),
+    }
 
 
 def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
@@ -44,7 +54,7 @@ def fetch_page_profile(page_access_token):
 def _send_message(connection, psid, payload):
     url = f"{META_API_URL}/me/messages"
     params = {"access_token": connection.page_access_token}
-    body = {"recipient": {"id": psid}, "message": payload}
+    body = {"messaging_type": "RESPONSE", "recipient": {"id": psid}, "message": payload}
     try:
         resp = requests.post(url, params=params, json=body, timeout=10)
         resp.raise_for_status()
@@ -66,14 +76,7 @@ def send_messages(connection, psid, actions):
         elif msg_type == "quick_replies":
             payload = {
                 "text": action["text"],
-                "quick_replies": [
-                    {
-                        "content_type": "text",
-                        "title": opt["title"],
-                        "payload": opt["payload"],
-                    }
-                    for opt in action["options"]
-                ],
+                "quick_replies": [_quick_reply_option(opt) for opt in action["options"][:QUICK_REPLY_LIMIT]],
             }
             sent_any = True
             all_sent = bool(_send_message(connection, psid, payload)) and all_sent

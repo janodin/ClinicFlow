@@ -29,7 +29,7 @@ const metaWebhookVerification = trigger({
       options: {},
     },
   },
-  output: [{ query: { 'hub.mode': 'subscribe', 'hub.challenge': '123456789' } }],
+  output: [{ query: { 'hub.mode': 'subscribe', 'hub.verify_token': 'configured-token', 'hub.challenge': '123456789' } }],
 });
 
 const verifyMetaChallenge = node({
@@ -43,8 +43,10 @@ const verifyMetaChallenge = node({
       jsCode: `const item = $input.first().json;
 const query = item.query || {};
 const mode = query['hub.mode'] || query.hub?.mode || '';
+const token = String(query['hub.verify_token'] || query.hub?.verify_token || '').trim();
 const challenge = query['hub.challenge'] || query.hub?.challenge || '';
-if (mode === 'subscribe' && challenge) {
+const expectedToken = String(process.env.MESSENGER_VERIFY_TOKEN || '').trim();
+if (mode === 'subscribe' && expectedToken && token === expectedToken && challenge) {
   return [{ json: { statusCode: 200, body: String(challenge) } }];
 }
 return [{ json: { statusCode: 403, body: 'Invalid verification request' } }];`,
@@ -114,8 +116,10 @@ const normalizeMessengerRequest = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const input = $input.first().json;
-const rawBodySource = input.rawBody ?? input.body ?? input;
-const rawBody = typeof rawBodySource === 'string' ? rawBodySource : JSON.stringify(rawBodySource);
+const rawBody = typeof input.rawBody === 'string' ? input.rawBody : '';
+if (!rawBody) {
+  return [];
+}
 let body = input.body || input;
 if (typeof body === 'string') {
   try {
@@ -126,28 +130,34 @@ if (typeof body === 'string') {
 }
 const headers = input.headers || {};
 const signature = String(headers['X-Hub-Signature-256'] || headers['x-hub-signature-256'] || '').trim();
-const entry = body.entry?.[0] || {};
-const messaging = entry.messaging?.[0] || {};
-const pageId = String(entry.id || messaging.recipient?.id || '').trim();
-const psid = String(messaging.sender?.id || '').trim();
-const message = String(messaging.message?.text || '').trim();
-const postback = String(messaging.postback?.payload || messaging.message?.quick_reply?.payload || '').trim();
-if (!pageId || !psid || (!message && !postback)) {
-  return [];
+const entries = Array.isArray(body.entry) ? body.entry : [];
+const items = [];
+for (const entry of entries) {
+  const messagingItems = Array.isArray(entry.messaging) ? entry.messaging : [];
+  for (const messaging of messagingItems) {
+    const pageId = String(entry.id || messaging.recipient?.id || '').trim();
+    const psid = String(messaging.sender?.id || '').trim();
+    const message = String(messaging.message?.text || '').trim();
+    const postback = String(messaging.postback?.payload || messaging.message?.quick_reply?.payload || '').trim();
+    if (!pageId || !psid || (!message && !postback)) {
+      continue;
+    }
+    items.push({ json: {
+      channel: 'messenger',
+      message,
+      postback,
+      page_id: pageId,
+      psid,
+      clinic_slug: '',
+      session_id: '',
+      session_key: 'messenger:' + pageId + ':' + psid,
+      output_mode: 'facebook',
+      raw_body: rawBody,
+      signature
+    } });
+  }
 }
-return [{ json: {
-  channel: 'messenger',
-  message,
-  postback,
-  page_id: pageId,
-  psid,
-  clinic_slug: '',
-  session_id: '',
-  session_key: 'messenger:' + pageId + ':' + psid,
-  output_mode: 'facebook',
-  raw_body: rawBody,
-  signature
-} }];`,
+return items;`,
     },
   },
   output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', postback: '', page_id: 'PAGE123', psid: 'PSID123', clinic_slug: '', session_id: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook', raw_body: '{"entry":[{"id":"PAGE123"}]}', signature: 'sha256=abc123' }],
@@ -324,9 +334,12 @@ const buildMessengerSharedInput = node({
     position: [912, 560],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const context = $input.first().json || {};
-const source = $items('Normalize Messenger Request')[0].json || {};
-return [{ json: { ...source, context, fallback_message: context.ai?.fallback_message || '${MESSENGER_FALLBACK}' } }];`,
+      jsCode: `const sources = $items('Normalize Messenger Request');
+return $input.all().map((input, itemIndex) => {
+  const context = input.json || {};
+  const source = sources[itemIndex]?.json || {};
+  return { json: { ...source, context, fallback_message: context.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
+});`,
     },
   },
   output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', page_id: 'PAGE123', psid: 'PSID123', clinic_slug: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook', fallback_message: MESSENGER_FALLBACK, context: { found: true, ai: { is_ai_enabled: true } } }],
@@ -582,28 +595,31 @@ const prepareMessengerQuickReplies = node({
     position: [1968, 520],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const input = $input.first().json || {};
-const source = $items('Resolve Assistant Mode')[0].json || {};
-const actions = Array.isArray(input.replies) ? input.replies : [];
-const pageToken = input.page_token || source.context?.page_token || '';
-const psid = source.psid || '';
+      jsCode: `const sources = $items('Resolve Assistant Mode');
 const items = [];
-for (const action of actions) {
-  if (action.type === 'text') {
-    items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: String(action.text || '') } } } });
+for (const [itemIndex, inputItem] of $input.all().entries()) {
+  const input = inputItem.json || {};
+  const source = sources[itemIndex]?.json || {};
+  const actions = Array.isArray(input.replies) ? input.replies : [];
+  const pageToken = input.page_token || source.context?.page_token || '';
+  const psid = source.psid || '';
+  for (const action of actions) {
+    if (action.type === 'text') {
+      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: String(action.text || '') } } } });
+    }
+    if (action.type === 'quick_replies') {
+      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: String(action.text || ''), quick_replies: (action.options || []).slice(0, 13).map((option) => ({ content_type: 'text', title: String(option.title || '').slice(0, 20), payload: String(option.payload || '') })) } } } });
+    }
   }
-  if (action.type === 'quick_replies') {
-    items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: String(action.text || ''), quick_replies: (action.options || []).slice(0, 13).map((option) => ({ content_type: 'text', title: option.title, payload: option.payload })) } } } });
+  if (!actions.length) {
+    const fallback = source.fallback_message || '${MESSENGER_FALLBACK}';
+    items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: fallback } } } });
   }
-}
-if (!items.length) {
-  const fallback = source.fallback_message || '${MESSENGER_FALLBACK}';
-  items.push({ json: { access_token: pageToken, facebook_body: { recipient: { id: psid }, message: { text: fallback } } } });
 }
 return items;`,
     },
   },
-  output: [{ access_token: 'PAGE_TOKEN', facebook_body: { recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } } }],
+  output: [{ access_token: 'PAGE_TOKEN', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } } }],
 });
 
 const clinicFlowSharedAiAgent = node({
@@ -646,9 +662,11 @@ const prepareSharedFallback = node({
     position: [1600, 912],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const item = $input.first().json || {};
-const fallback = item.fallback_message || (item.channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}');
-return [{ json: { output: fallback } }];`,
+      jsCode: `return $input.all().map((input) => {
+  const item = input.json || {};
+  const fallback = item.fallback_message || (item.channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}');
+  return { json: { output: fallback } };
+});`,
     },
   },
   output: [{ output: WIDGET_FALLBACK }],
@@ -662,30 +680,33 @@ const prepareChannelReply = node({
     position: [2192, 800],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const input = $input.first().json || {};
-const shared = $items('Shared AI Input')[0].json || {};
-const context = shared.context || {};
-const channel = shared.channel || 'widget';
-const genericFallback = channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}';
-let text = input.output || input.text || input.response || input.reply || shared.fallback_message || genericFallback;
-text = String(text).replace(/<think[\\s\\S]*?<\\/think>/gi, '').replace(/<\\/?think>/gi, '').trim();
-if (!text) {
-  text = shared.fallback_message || genericFallback;
-}
-const maxLength = channel === 'messenger' ? 1900 : 1800;
-if (text.length > maxLength) {
-  text = text.slice(0, maxLength);
-}
-return [{ json: {
-  ...shared,
-  reply_text: text,
-  access_token: context.page_token || '',
-  facebook_body: { recipient: { id: shared.psid || '' }, message: { text } },
-  widget_body: { reply: text }
-} }];`,
+      jsCode: `const sharedItems = $items('Shared AI Input');
+return $input.all().map((inputItem, itemIndex) => {
+  const input = inputItem.json || {};
+  const shared = sharedItems[itemIndex]?.json || {};
+  const context = shared.context || {};
+  const channel = shared.channel || 'widget';
+  const genericFallback = channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}';
+  let text = input.output || input.text || input.response || input.reply || shared.fallback_message || genericFallback;
+  text = String(text).replace(/<think[\\s\\S]*?<\\/think>/gi, '').replace(/<\\/?think>/gi, '').trim();
+  if (!text) {
+    text = shared.fallback_message || genericFallback;
+  }
+  const maxLength = channel === 'messenger' ? 1900 : 1800;
+  if (text.length > maxLength) {
+    text = text.slice(0, maxLength);
+  }
+  return { json: {
+    ...shared,
+    reply_text: text,
+    access_token: context.page_token || '',
+    facebook_body: { messaging_type: 'RESPONSE', recipient: { id: shared.psid || '' }, message: { text } },
+    widget_body: { reply: text }
+  } };
+});`,
     },
   },
-  output: [{ channel: 'widget', reply_text: 'Assistant reply', access_token: '', facebook_body: { recipient: { id: '' }, message: { text: 'Assistant reply' } }, widget_body: { reply: 'Assistant reply' } }],
+  output: [{ channel: 'widget', reply_text: 'Assistant reply', access_token: '', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: '' }, message: { text: 'Assistant reply' } }, widget_body: { reply: 'Assistant reply' } }],
 });
 
 const routeChannelReply = switchCase({

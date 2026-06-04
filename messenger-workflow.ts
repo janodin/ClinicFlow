@@ -22,20 +22,22 @@ const formatPayload = node({
     name: 'Format Django Payload',
     parameters: {
       jsCode: `
-const msg = $input.first().json;
-const senderId = msg.sender?.id || msg.psid;
-const pageId = msg.recipient?.id || msg.page_id;
-const text = msg.message?.text || '';
-const postback = msg.postback?.payload || '';
+return $input.all().map((input) => {
+  const msg = input.json || {};
+  const senderId = msg.sender?.id || msg.psid;
+  const pageId = msg.recipient?.id || msg.page_id;
+  const text = msg.message?.text || '';
+  const postback = msg.postback?.payload || msg.message?.quick_reply?.payload || '';
 
-return [{
-  json: {
-    page_id: pageId,
-    psid: senderId,
-    text: text,
-    postback: postback
-  }
-}];
+  return {
+    json: {
+      page_id: pageId,
+      psid: senderId,
+      text: text,
+      postback: postback
+    }
+  };
+});
       `
     }
   }
@@ -82,37 +84,42 @@ const formatReply = node({
     name: 'Format Facebook Reply',
     parameters: {
       jsCode: `
-const djangoResponse = $input.first().json;
-const replies = djangoResponse.replies || [];
-const pageToken = djangoResponse.page_token || '';
-const psid = $('Format Django Payload').first().json.psid;
+const payloadItems = $items('Format Django Payload');
 const results = [];
 
-for (const reply of replies) {
-  if (reply.type === 'text') {
-    results.push({
-      json: {
-        recipient: { id: psid },
-        message: { text: reply.text },
-        page_token: pageToken
-      }
-    });
-  } else if (reply.type === 'quick_replies') {
-    const quickReplies = (reply.options || []).map(opt => ({
-      content_type: 'text',
-      title: opt.title,
-      payload: opt.payload
-    }));
-    results.push({
-      json: {
-        recipient: { id: psid },
-        message: {
-          text: reply.text,
-          quick_replies: quickReplies
-        },
-        page_token: pageToken
-      }
-    });
+for (const [itemIndex, input] of $input.all().entries()) {
+  const djangoResponse = input.json || {};
+  const replies = djangoResponse.replies || [];
+  const pageToken = djangoResponse.page_token || '';
+  const psid = payloadItems[itemIndex]?.json?.psid || '';
+  for (const reply of replies) {
+    if (reply.type === 'text') {
+      results.push({
+        json: {
+          messaging_type: 'RESPONSE',
+          recipient: { id: psid },
+          message: { text: reply.text },
+          page_token: pageToken
+        }
+      });
+    } else if (reply.type === 'quick_replies') {
+      const quickReplies = (reply.options || []).slice(0, 13).map(opt => ({
+        content_type: 'text',
+        title: String(opt.title || '').slice(0, 20),
+        payload: String(opt.payload || '')
+      }));
+      results.push({
+        json: {
+          messaging_type: 'RESPONSE',
+          recipient: { id: psid },
+          message: {
+            text: reply.text,
+            quick_replies: quickReplies
+          },
+          page_token: pageToken
+        }
+      });
+    }
   }
 }
 
@@ -139,6 +146,7 @@ const sendReply = node({
       sendBody: true,
       bodyParameters: {
         parameters: [
+          { name: 'messaging_type', value: expr('{{ $json.messaging_type }}') },
           { name: 'recipient', value: expr('{{ JSON.stringify($json.recipient) }}') },
           { name: 'message', value: expr('{{ JSON.stringify($json.message) }}') }
         ]

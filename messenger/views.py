@@ -30,6 +30,8 @@ from .models import MessengerConnection, MessengerSession
 
 
 logger = logging.getLogger(__name__)
+MESSENGER_QUICK_REPLY_LIMIT = 13
+MESSENGER_QUICK_REPLY_TITLE_LIMIT = 20
 
 
 def _verify_shared_secret(request):
@@ -292,13 +294,17 @@ def _send_facebook_reply(page_token, psid, actions):
         return
     url = "https://graph.facebook.com/v18.0/me/messages"
     for action in actions:
-        msg_payload = {"recipient": {"id": psid}}
+        msg_payload = {"messaging_type": "RESPONSE", "recipient": {"id": psid}}
         if action["type"] == "text":
             msg_payload["message"] = {"text": action["text"]}
         elif action["type"] == "quick_replies":
             quick_replies = [
-                {"content_type": "text", "title": opt["title"], "payload": opt["payload"]}
-                for opt in action.get("options", [])
+                {
+                    "content_type": "text",
+                    "title": str(opt.get("title", ""))[:MESSENGER_QUICK_REPLY_TITLE_LIMIT],
+                    "payload": str(opt.get("payload", "")),
+                }
+                for opt in action.get("options", [])[:MESSENGER_QUICK_REPLY_LIMIT]
             ]
             msg_payload["message"] = {"text": action["text"], "quick_replies": quick_replies}
         else:
@@ -321,11 +327,15 @@ def n8n_webhook(request):
     data = _json_body(request)
     if data is None:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
+    if not isinstance(data, dict):
+        return JsonResponse({"error": "Invalid request data"}, status=400)
 
     page_id = data.get("page_id", "")
     psid = data.get("psid", "")
     text = data.get("text", "")
     postback = data.get("postback", "")
+    if not all(isinstance(value, str) for value in [page_id, psid, text, postback]):
+        return JsonResponse({"error": "Invalid request data"}, status=400)
 
     if not page_id or not psid:
         return JsonResponse({"replies": [], "page_token": ""}, status=200)
@@ -380,9 +390,22 @@ def webhook(request):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return HttpResponse(status=400)
 
-        for entry in data.get("entry", []):
+        if not isinstance(data, dict):
+            return HttpResponse(status=403)
+        entries = data.get("entry", [])
+        if not isinstance(entries, list):
+            return HttpResponse(status=403)
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return HttpResponse(status=403)
             entry_id = str(entry.get("id") or "")
-            for messaging in entry.get("messaging", []):
+            messaging_items = entry.get("messaging", [])
+            if not isinstance(messaging_items, list):
+                return HttpResponse(status=403)
+            for messaging in messaging_items:
+                if not isinstance(messaging, dict):
+                    return HttpResponse(status=403)
                 recipient = messaging.get("recipient", {})
                 if not isinstance(recipient, dict):
                     return HttpResponse(status=403)
@@ -390,17 +413,30 @@ def webhook(request):
                 if not recipient_id or recipient_id != entry_id or recipient_id not in verified_connections:
                     return HttpResponse(status=403)
 
-        for entry in data.get("entry", []):
+        for entry in entries:
             for messaging in entry.get("messaging", []):
-                sender_id = messaging.get("sender", {}).get("id")
+                sender = messaging.get("sender", {})
+                if not isinstance(sender, dict):
+                    continue
+                sender_id = sender.get("id")
                 recipient = messaging.get("recipient", {})
                 if not isinstance(recipient, dict):
                     continue
                 recipient_id = recipient.get("id")
                 message = messaging.get("message", {})
+                if not isinstance(message, dict):
+                    message = {}
                 postback = messaging.get("postback", {})
+                if not isinstance(postback, dict):
+                    postback = {}
                 text = message.get("text", "")
-                payload_str = postback.get("payload", "")
+                if not isinstance(text, str):
+                    text = str(text)
+                quick_reply = message.get("quick_reply", {})
+                if not isinstance(quick_reply, dict):
+                    quick_reply = {}
+                payload = quick_reply.get("payload") or postback.get("payload", "")
+                payload_str = str(payload or "")
 
                 if not sender_id or not recipient_id:
                     continue

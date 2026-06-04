@@ -148,7 +148,36 @@ class TestSendMessages:
         send_messages(conn, "PSID1", [{"type": "text", "text": "Hello"}])
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
+        assert kwargs["json"]["messaging_type"] == "RESPONSE"
         assert kwargs["json"]["message"]["text"] == "Hello"
+
+    @pytest.mark.django_db
+    @patch("messenger.messenger_api.requests.post")
+    def test_send_quick_replies_uses_meta_safe_payload(self, mock_post):
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"recipient_id": "123"}
+        user = User.objects.create_user(username="owner_api_qr", email="owner_api_qr@test.com", password="pass")
+        group = ClinicGroup.objects.create(name="GroupAPIQR", owner=user)
+        clinic = Clinic.objects.create(group=group, name="ClinicAPIQR")
+        conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE-API-QR", page_access_token="TOKEN")
+
+        send_messages(conn, "PSID1", [{
+            "type": "quick_replies",
+            "text": "Choose a service",
+            "options": [{"title": "Very long consultation service", "payload": 123}]
+            + [{"title": f"Option {i}", "payload": i} for i in range(2, 15)],
+        }])
+
+        body = mock_post.call_args.kwargs["json"]
+        assert body["messaging_type"] == "RESPONSE"
+        assert body["recipient"] == {"id": "PSID1"}
+        assert body["message"]["text"] == "Choose a service"
+        assert len(body["message"]["quick_replies"]) == 13
+        assert body["message"]["quick_replies"][0] == {
+            "content_type": "text",
+            "title": "Very long consultati",
+            "payload": "123",
+        }
 
     @pytest.mark.django_db
     @patch("messenger.messenger_api.requests.post")
@@ -205,6 +234,59 @@ def test_messenger_quick_reply_date_options_respect_meta_limit():
     quick_reply = next(action for action in actions if action.get("type") == "quick_replies")
     assert quick_reply["text"] == "What date works for you?"
     assert len(quick_reply["options"]) == 13
+
+
+@pytest.mark.django_db
+def test_service_quick_reply_titles_are_meta_safe():
+    user = User.objects.create_user(username="owner_be_qr_title", email="owner_be_qr_title@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEQRTitle", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBEQRTitle")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-QR-TITLE", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Very long consultation service", duration_minutes=30, price=0)
+    session = MessengerSession.objects.create(connection=conn, psid="S-QR-TITLE", state=MessengerSession.STATE_SELECT_SERVICE)
+
+    actions = handle_message(session, "unknown", "")
+
+    quick_reply = next(action for action in actions if action.get("type") == "quick_replies")
+    assert quick_reply["options"] == [{"title": "Very long consultati", "payload": str(service.id)}]
+
+
+@pytest.mark.django_db
+def test_faq_quick_reply_payload_returns_selected_answer_from_greeting_state():
+    user = User.objects.create_user(username="owner_be_faq_payload", email="owner_be_faq_payload@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEFAQPayload", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBEFAQPayload")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-FAQ-PAYLOAD", page_access_token="T")
+    faq = ClinicFAQ.objects.create(clinic=clinic, question="What are your hours?", answer="8am to 5pm")
+    session = MessengerSession.objects.create(connection=conn, psid="S-FAQ-PAYLOAD")
+
+    actions = handle_message(session, "", f"faq:{faq.id}")
+
+    assert actions == [{"type": "text", "text": "Q: What are your hours?\nA: 8am to 5pm"}]
+    assert session.state == MessengerSession.STATE_GREETING
+
+
+@pytest.mark.django_db
+def test_date_quick_reply_returns_time_options_without_reusing_date_as_time():
+    user = User.objects.create_user(username="owner_be_date_payload", email="owner_be_date_payload@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEDatePayload", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBEDatePayload", timezone="Asia/Manila")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-DATE-PAYLOAD", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=2)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-DATE-PAYLOAD",
+        state=MessengerSession.STATE_SELECT_DATE,
+        data={"service_id": service.id},
+    )
+
+    actions = handle_message(session, "", target_date.isoformat())
+
+    assert actions[0]["type"] == "quick_replies"
+    assert actions[0]["text"] == "Here are the available times:"
+    assert session.state == MessengerSession.STATE_SELECT_TIME
 
 
 @pytest.mark.django_db
@@ -305,6 +387,70 @@ def test_webhook_post_valid_message():
     assert resp.status_code == 200
     session = MessengerSession.objects.get(connection=conn, psid="PSID1")
     assert session.state == MessengerSession.STATE_SELECT_SERVICE
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_direct_webhook_rejects_malformed_signed_payload_shape():
+    client = Client()
+    clinic, connection = _create_messenger_clinic("owner_direct_bad_shape", "PAGE-DIRECT-BAD-SHAPE")
+    connection.app_secret = "test_secret"
+    connection.save(update_fields=["app_secret"])
+    payload = json.dumps({"object": "page", "entry": "not-a-list"}).encode()
+    signature = "sha256=" + hmac.new("test_secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    response = client.post(
+        reverse("messenger:webhook"),
+        data=payload,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+    )
+
+    assert response.status_code == 403
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_direct_webhook_reads_meta_quick_reply_payload_for_service_selection():
+    client = Client()
+    clinic, conn = _create_messenger_clinic("owner_direct_qr_payload", "PAGE-DIRECT-QR")
+    conn.app_secret = "test_secret"
+    conn.save(update_fields=["app_secret"])
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+
+    def post_meta_message(message):
+        payload = json.dumps({
+            "object": "page",
+            "entry": [{
+                "id": "PAGE-DIRECT-QR",
+                "time": 123,
+                "messaging": [{
+                    "sender": {"id": "PSID1"},
+                    "recipient": {"id": "PAGE-DIRECT-QR"},
+                    "message": message,
+                }],
+            }],
+        }).encode()
+        signature = "sha256=" + hmac.new("test_secret".encode(), payload, hashlib.sha256).hexdigest()
+        return client.post(
+            reverse("messenger:webhook"),
+            data=payload,
+            content_type="application/json",
+            HTTP_X_HUB_SIGNATURE_256=signature,
+        )
+
+    with patch("messenger.views._send_facebook_reply"):
+        assert post_meta_message({"text": "Book an appointment"}).status_code == 200
+        session = MessengerSession.objects.get(connection=conn, psid="PSID1")
+        assert session.state == MessengerSession.STATE_SELECT_SERVICE
+
+        response = post_meta_message({"text": "Cleaning", "quick_reply": {"payload": str(service.id)}})
+
+    assert response.status_code == 200
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_SELECT_DATE
+    assert session.data["service_id"] == service.id
 
 
 @pytest.mark.django_db
@@ -1308,6 +1454,24 @@ def test_n8n_webhook_rejects_invalid_secret():
 
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_rejects_non_object_json_without_creating_session():
+    _clinic, _connection = _create_messenger_clinic("owner_n8n_bad_shape", "PAGE-N8N-BAD-SHAPE")
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps([]),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Invalid request data"}
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
 def test_n8n_webhook_accepts_valid_secret():
     clinic, _connection = _create_messenger_clinic("owner_n8n_good_secret", "PAGE-N8N-GOOD-SECRET")
     Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
@@ -1971,6 +2135,35 @@ def test_direct_facebook_reply_logs_http_failures_without_token(mock_post, caplo
     assert "SECRET-PAGE-TOKEN" not in caplog.text
 
 
+@patch("messenger.views.requests.post")
+def test_direct_facebook_reply_uses_meta_safe_quick_reply_body(mock_post):
+    from messenger.views import _send_facebook_reply
+
+    _send_facebook_reply("PAGE-TOKEN", "PSID1", [{
+        "type": "quick_replies",
+        "text": "Choose a service",
+        "options": [{"title": "Very long consultation service", "payload": 123}]
+        + [{"title": f"Option {i}", "payload": i} for i in range(2, 15)],
+    }])
+
+    body = mock_post.call_args.kwargs["json"]
+    assert body == {
+        "messaging_type": "RESPONSE",
+        "recipient": {"id": "PSID1"},
+        "message": {
+            "text": "Choose a service",
+            "quick_replies": [{
+                "content_type": "text",
+                "title": "Very long consultati",
+                "payload": "123",
+            }] + [
+                {"content_type": "text", "title": f"Option {i}", "payload": str(i)}
+                for i in range(2, 14)
+            ],
+        },
+    }
+
+
 @pytest.mark.django_db
 @override_settings(MESSENGER_APP_SECRET="test_secret")
 def test_full_booking_flow_via_webhook():
@@ -1985,6 +2178,8 @@ def test_full_booking_flow_via_webhook():
         page_access_token="TOKEN",
     )
     service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
 
     def send_message(text="", payload=""):
         msg = {"message": {"text": text}}
@@ -2019,7 +2214,7 @@ def test_full_booking_flow_via_webhook():
         assert session.state == MessengerSession.STATE_SELECT_DATE
 
         # Select date -> select time
-        resp = send_message(payload=(timezone.localdate() + timedelta(days=1)).isoformat())
+        resp = send_message(payload=target_date.isoformat())
         assert resp.status_code == 200
         session.refresh_from_db()
         assert session.state == MessengerSession.STATE_SELECT_TIME
