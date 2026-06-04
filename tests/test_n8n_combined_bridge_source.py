@@ -44,14 +44,20 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
     workflow_block = source[source.index("export default workflow"):]
     widget_start = workflow_block.index(".add(widgetAssistantWebhook)")
     widget_block = workflow_block[widget_start:]
+    widget_shared_input_chain = ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)"
+    shared_downstream_chain = ".to(sharedAiInput)\n      .to(resolveAssistantMode)\n      .to(routeAssistantMode"
+    shared_route_start = workflow_block.index(shared_downstream_chain)
+    shared_route_block = workflow_block[shared_route_start:widget_start]
 
     assert "name: 'Widget Assistant Webhook'" in source
     assert "name: 'Get Widget Clinic Context'" in source
     assert "/messenger/ai/widget/context/" in source
-    assert ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)" in widget_block
-    assert ".to(sharedAiInput)\n      .to(resolveAssistantMode)\n      .to(routeAssistantMode" in workflow_block
-    assert ".onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in workflow_block
-    assert ".onCase(1, returnWidgetReply)" in workflow_block
+    assert widget_shared_input_chain in widget_block
+    assert workflow_block.count(".to(sharedAiInput)") == 2
+    assert workflow_block.count(".to(resolveAssistantMode)") == 1
+    assert workflow_block.count(".to(routeAssistantMode") == 1
+    assert ".onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in shared_route_block
+    assert ".onCase(1, returnWidgetReply)" in shared_route_block
 
 
 def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmation():
