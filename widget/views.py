@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 import json
 
 import requests
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
@@ -142,8 +143,6 @@ def _process_guest_booking(clinic, data, source):
         locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
         if locked_clinic.requires_onboarding or not locked_clinic.is_active:
             return None, "Online booking is not available for this clinic yet."
-        if not locked_clinic.show_reason_field:
-            reason = ""
         service = locked_clinic.services.filter(is_active=True, is_archived=False, pk=data.get("service")).first()
         if service is None:
             return None, "Please choose a valid service."
@@ -243,12 +242,31 @@ def chat_api(request, clinic_slug):
     return JsonResponse({"message": clinic.widget_welcome_message, "services": services})
 
 
-def _widget_chat_history(request, clinic):
-    return request.session.get(f"widget_chat_history_{clinic.id}", [])
+def _widget_chat_history_version_key(clinic):
+    return f"widget_chat_history_version_{clinic.id}"
 
 
-def _save_widget_chat_history(request, clinic, history):
-    request.session[f"widget_chat_history_{clinic.id}"] = history[-10:]
+def _widget_chat_history_key(clinic):
+    return f"widget_chat_history_{clinic.id}"
+
+
+def _widget_chat_history(request, clinic, ai_settings=None):
+    history_key = _widget_chat_history_key(clinic)
+    if ai_settings:
+        current_version = ai_settings.updated_at.isoformat()
+        version_key = _widget_chat_history_version_key(clinic)
+        if request.session.get(version_key) != current_version:
+            request.session[history_key] = []
+            request.session[version_key] = current_version
+            request.session.modified = True
+            return []
+    return request.session.get(history_key, [])
+
+
+def _save_widget_chat_history(request, clinic, history, ai_settings=None):
+    request.session[_widget_chat_history_key(clinic)] = history[-10:]
+    if ai_settings:
+        request.session[_widget_chat_history_version_key(clinic)] = ai_settings.updated_at.isoformat()
 
 
 WIDGET_AI_STATE = "ai"
@@ -269,6 +287,16 @@ def _widget_ai_fallback_message(ai_settings):
     if "book" not in message.lower():
         message = f"{message} You can still use Book an Appointment to schedule a visit."
     return message
+
+
+def _widget_ai_unavailable_message(ai_settings, error):
+    if getattr(settings, "DEBUG", False) and "webhook URL is not configured" in str(error):
+        return (
+            "Assistant webhook is not configured locally. Set ASSISTANT_N8N_WEBHOOK_URL "
+            "and N8N_WEBHOOK_SECRET, then restart Django. You can still use Book an Appointment "
+            "to schedule a visit."
+        )
+    return _widget_ai_fallback_message(ai_settings)
 
 
 def _widget_ai_initial_message(clinic):
@@ -293,26 +321,29 @@ def _handle_widget_ai_chat(request, clinic, action, value):
         return _widget_ai_json(_widget_ai_fallback_message(ai_settings))
 
     if action == "init":
+        _widget_chat_history(request, clinic, ai_settings)
         return _widget_ai_json(_widget_ai_initial_message(clinic), WIDGET_AI_SUGGESTIONS)
 
     message = _widget_ai_message_from_action(action, value)
     if not message:
         return _widget_ai_json(_widget_ai_initial_message(clinic), WIDGET_AI_SUGGESTIONS)
 
-    history = _widget_chat_history(request, clinic)
+    history = _widget_chat_history(request, clinic, ai_settings)
     if not request.session.session_key:
         request.session.create()
 
     try:
         reply = call_assistant_webhook(clinic, message, history, request.session.session_key)
-    except (AssistantUnavailable, requests.RequestException, ValueError):
+    except AssistantUnavailable as error:
+        reply = _widget_ai_unavailable_message(ai_settings, error)
+    except (requests.RequestException, ValueError):
         reply = _widget_ai_fallback_message(ai_settings)
 
     history.extend([
         {"role": "user", "content": message},
         {"role": "assistant", "content": reply},
     ])
-    _save_widget_chat_history(request, clinic, history)
+    _save_widget_chat_history(request, clinic, history, ai_settings)
     return _widget_ai_json(reply)
 
 

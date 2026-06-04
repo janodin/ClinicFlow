@@ -1366,40 +1366,23 @@ def test_widget_settings_form_excludes_unused_behavior_instructions(clinic_setup
 
 
 @pytest.mark.django_db
-def test_owner_can_save_widget_reason_field_setting_from_assistant_page(clinic_setup, client):
+def test_widget_settings_no_longer_exposes_reason_field_toggle(clinic_setup, client):
+    from django.core.exceptions import FieldDoesNotExist
+    from clinics.forms import WidgetSettingsForm
+
     clinic, service, owner = clinic_setup
     client.force_login(owner)
 
-    response = client.post(
-        reverse("dashboard:assistant_settings"),
-        {
-            "_form": "widget_settings",
-            "widget_accent_color": clinic.widget_accent_color,
-            "widget_welcome_message": "Welcome to the clinic.",
-        },
-    )
+    with pytest.raises(FieldDoesNotExist):
+        Clinic._meta.get_field("show_reason_field")
 
-    assert response.status_code == 302
-    clinic.refresh_from_db()
-    assert clinic.show_reason_field is False
-    widget_response = client.get(reverse("widget:home", args=[clinic.slug]))
-    assert b'name="reason"' not in widget_response.content
+    form = WidgetSettingsForm(instance=clinic)
+    assert "show_reason_field" not in form.fields
 
-    response = client.post(
-        reverse("dashboard:assistant_settings"),
-        {
-            "_form": "widget_settings",
-            "widget_accent_color": clinic.widget_accent_color,
-            "widget_welcome_message": "Welcome to the clinic.",
-            "show_reason_field": "on",
-        },
-    )
+    response = client.get(reverse("dashboard:assistant_settings"))
 
-    assert response.status_code == 302
-    clinic.refresh_from_db()
-    assert clinic.show_reason_field is True
-    widget_response = client.get(reverse("widget:home", args=[clinic.slug]))
-    assert b'name="reason"' in widget_response.content
+    assert response.status_code == 200
+    assert b'show_reason_field' not in response.content
 
 
 @pytest.mark.django_db
@@ -1411,7 +1394,6 @@ def test_widget_settings_rejects_invalid_accent_color(clinic_setup):
         data={
             "widget_accent_color": '";alert(1)//',
             "widget_welcome_message": "Welcome",
-            "show_reason_field": "on",
         },
         instance=clinic,
     )

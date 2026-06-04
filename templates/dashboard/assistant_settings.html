@@ -49,7 +49,7 @@
         {% endif %}
         <div class="mt-4 grid gap-3 md:grid-cols-2" role="radiogroup" aria-label="{{ ai_form.messenger_response_mode.label }}">
           <label class="cf-choice-card">
-            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="quick_replies" class="cf-choice-card-input" onchange="this.form.requestSubmit()" {% if ai_form.messenger_response_mode.value == "quick_replies" %}checked{% endif %}>
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="quick_replies" class="cf-choice-card-input" {% if ai_form.messenger_response_mode.value == "quick_replies" %}checked{% endif %}>
             <span class="cf-choice-card-mark" aria-hidden="true"></span>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">Quick replies</span>
@@ -57,7 +57,7 @@
             </span>
           </label>
           <label class="cf-choice-card">
-            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="ai" class="cf-choice-card-input" onchange="this.form.requestSubmit()" {% if ai_form.messenger_response_mode.value == "ai" %}checked{% endif %}>
+            <input type="radio" name="{{ ai_form.messenger_response_mode.html_name }}" value="ai" class="cf-choice-card-input" {% if ai_form.messenger_response_mode.value == "ai" %}checked{% endif %}>
             <span class="cf-choice-card-mark" aria-hidden="true"></span>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">AI mode</span>
@@ -135,13 +135,6 @@
             <label for="{{ widget_form.widget_welcome_message.id_for_label }}" class="cf-label">{{ widget_form.widget_welcome_message.label }}</label>
             {{ widget_form.widget_welcome_message }}
             {% if widget_form.widget_welcome_message.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.widget_welcome_message.errors.0 }}</p>{% endif %}
-          </div>
-          <div>
-            <label class="flex items-center gap-2 cursor-pointer">
-              {{ widget_form.show_reason_field }}
-              <span class="text-sm text-[var(--cf-ink)]">{{ widget_form.show_reason_field.label }}</span>
-            </label>
-            {% if widget_form.show_reason_field.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.show_reason_field.errors.0 }}</p>{% endif %}
           </div>
           <div class="flex justify-end pt-2">
             <button class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Save Changes</button>

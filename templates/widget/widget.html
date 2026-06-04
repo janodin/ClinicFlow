@@ -107,9 +107,7 @@
               <div class="cf-field"><label for="widget-full-name" class="cf-label">Full Name</label><input id="widget-full-name" name="full_name" required autocomplete="name" class="cf-input"></div>
               <div class="cf-field"><label for="widget-phone" class="cf-label">Phone</label><input id="widget-phone" name="phone" type="tel" required autocomplete="tel" class="cf-input"></div>
               <div class="cf-field"><label for="widget-email" class="cf-label">Email</label><input id="widget-email" name="email" type="email" autocomplete="email" class="cf-input"></div>
-              {% if clinic.show_reason_field %}
               <div class="cf-field"><label for="widget-reason" class="cf-label">Reason for visit</label><textarea id="widget-reason" name="reason" rows="3" class="cf-textarea" placeholder="Optional details for the clinic"></textarea></div>
-              {% endif %}
               <button type="submit" class="cf-btn w-full" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="check-circle-2" class="h-4 w-4"></i>Confirm Appointment</button>
             </form>
           </div>
@@ -128,8 +126,13 @@
         <div x-show="chatTab==='conversation'" x-ref="chatConversation" class="flex-1 overflow-y-auto space-y-3 pr-1">
           <template x-for="msg in chatHistory" :key="msg.id">
             <div class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
-              <div class="max-w-[85%] break-words rounded-2xl px-4 py-2.5 text-sm" :class="msg.role === 'user' ? '' : 'border border-[var(--cf-line)] bg-white text-[var(--cf-ink)]'" :style="msg.role === 'user' ? 'background-color:' + accentColor + '; color:' + accentForeground() : ''">
-                <p x-text="msg.text"></p>
+              <div class="max-w-[85%] break-words rounded-2xl px-4 py-2.5 text-sm leading-5" :class="msg.role === 'user' ? '' : 'border border-[var(--cf-line)] bg-white text-[var(--cf-ink)]'" :style="msg.role === 'user' ? 'background-color:' + accentColor + '; color:' + accentForeground() : ''">
+                <template x-if="msg.role === 'assistant'">
+                  <p class="whitespace-pre-wrap"><template x-for="part in messageParts(msg.text)" :key="part.key"><span :class="part.strong ? 'font-semibold text-[var(--cf-ink)]' : ''" x-text="part.text"></span></template></p>
+                </template>
+                <template x-if="msg.role === 'user'">
+                  <p x-text="msg.text"></p>
+                </template>
               </div>
             </div>
           </template>
@@ -223,6 +226,39 @@
         const lightContrast = 1.05 / (luminance + 0.05);
         return darkContrast >= lightContrast ? '#001f2a' : '#ffffff';
       },
+      messageParts(text) {
+        const source = String(text || '');
+        const pattern = /\*\*([^*]+?)\*\*|\*([^*\n]+?)\*/g;
+        const parts = [];
+        let lastIndex = 0;
+        let match;
+        const pushPart = (value, strong) => {
+          if (!value) return;
+          parts.push({
+            key: parts.length + '-' + (strong ? 'strong' : 'text'),
+            text: value,
+            strong: strong,
+          });
+        };
+
+        while ((match = pattern.exec(source)) !== null) {
+          if (match.index > lastIndex) {
+            pushPart(source.slice(lastIndex, match.index), false);
+          }
+          const strongText = match[1] || match[2] || '';
+          if (strongText.trim()) {
+            pushPart(strongText, true);
+          } else {
+            pushPart(match[0], false);
+          }
+          lastIndex = pattern.lastIndex;
+        }
+
+        if (lastIndex < source.length) {
+          pushPart(source.slice(lastIndex), false);
+        }
+        return parts;
+      },
       init() {
         // optional initialization
       },
@@ -309,6 +345,9 @@
             body: formData,
             headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
           });
+          if (!resp.ok) {
+            throw new Error('Assistant request failed.');
+          }
           const data = await resp.json();
           if (stateResetVersion !== this.stateResetVersion) return;
           this.chatState = data.state;
@@ -316,6 +355,11 @@
           if (data.message) {
             this.chatHistory.push({id: this.nextId++, role: 'assistant', text: data.message});
           }
+        } catch (error) {
+          if (stateResetVersion !== this.stateResetVersion) return;
+          this.chatState = 'ai';
+          this.chatOptions = [];
+          this.chatHistory.push({id: this.nextId++, role: 'assistant', text: 'Sorry, I could not reach the assistant. Please try again or use Book an Appointment.'});
         } finally {
           if (stateResetVersion === this.stateResetVersion) {
             this.isAssistantTyping = false;

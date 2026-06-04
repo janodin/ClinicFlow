@@ -77,7 +77,6 @@ class Clinic(TimeStampedModel):
     widget_accent_color = models.CharField(max_length=7, default=DEFAULT_WIDGET_ACCENT_COLOR, validators=[hex_color_validator])
     widget_welcome_message = models.TextField(default="Welcome! How can we help you book an appointment today?")
     widget_behavior_instructions = models.TextField(default="Guide patients through booking smoothly. Always suggest the nearest available slot.")
-    show_reason_field = models.BooleanField(default=True)
     requires_onboarding = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 

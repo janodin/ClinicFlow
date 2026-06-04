@@ -11,7 +11,7 @@ import {
   expr,
 } from '@n8n/workflow-sdk';
 
-const DJANGO_BASE_URL = 'https://178-105-83-211.nip.io';
+const DJANGO_BASE_URL = String(process.env.DJANGO_BASE_URL || 'https://178-105-83-211.nip.io').replace(/\/$/, '');
 const N8N_WEBHOOK_CREDENTIAL_ID = 'PJHqVMwE3qU58s9E';
 const MESSENGER_FALLBACK = 'Thanks for your message. Please contact the clinic directly for help.';
 const WIDGET_FALLBACK = 'Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.';
@@ -115,10 +115,11 @@ const normalizeMessengerRequest = node({
     position: [464, 560],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const input = $input.first().json;
-const rawBody = typeof input.rawBody === 'string' ? input.rawBody : '';
-if (!rawBody) {
-  return [];
+      jsCode: `const inputItem = $input.first();
+const input = inputItem.json || {};
+let rawBody = typeof input.rawBody === 'string' ? input.rawBody : '';
+if (!rawBody && typeof inputItem.binary?.data?.data === 'string') {
+  rawBody = Buffer.from(inputItem.binary.data.data, 'base64').toString('utf8');
 }
 let body = input.body || input;
 if (typeof body === 'string') {
@@ -127,6 +128,9 @@ if (typeof body === 'string') {
   } catch (error) {
     return [];
   }
+}
+if (!rawBody && body && typeof body === 'object') {
+  rawBody = JSON.stringify(body);
 }
 const headers = input.headers || {};
 const signature = String(headers['X-Hub-Signature-256'] || headers['x-hub-signature-256'] || '').trim();
@@ -338,7 +342,8 @@ const buildMessengerSharedInput = node({
 return $input.all().map((input, itemIndex) => {
   const context = input.json || {};
   const source = sources[itemIndex]?.json || {};
-  return { json: { ...source, context, fallback_message: context.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
+  const aiVersion = context.ai?.settings_updated_at || 'unversioned';
+  return { json: { ...source, session_key: source.session_key + ':ai-settings:' + aiVersion, context, fallback_message: context.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
 });`,
     },
   },
@@ -355,7 +360,8 @@ const buildWidgetSharedInput = node({
       mode: 'runOnceForAllItems',
       jsCode: `const context = $input.first().json || {};
 const source = $items('Normalize Widget Request')[0].json || {};
-return [{ json: { ...source, context, fallback_message: context.ai?.fallback_message || '${WIDGET_FALLBACK}' } }];`,
+const aiVersion = context.ai?.settings_updated_at || 'unversioned';
+return [{ json: { ...source, session_key: source.session_key + ':ai-settings:' + aiVersion, context, fallback_message: context.ai?.fallback_message || '${WIDGET_FALLBACK}' } }];`,
     },
   },
   output: [{ channel: 'widget', message: 'Can I book tomorrow?', page_id: '', psid: '', clinic_slug: 'demo-clinic', session_id: 'SESSION123', session_key: 'widget:demo-clinic:SESSION123', output_mode: 'widget_json', fallback_message: WIDGET_FALLBACK, context: { found: true, ai: { is_ai_enabled: true } } }],
@@ -465,7 +471,7 @@ const sharedConversationMemory = memory({
     position: [1664, 1040],
     parameters: {
       sessionIdType: 'customKey',
-      sessionKey: expr('{{ $("Shared AI Input").item.json.session_key + ":shared:v2:" + ($("Shared AI Input").item.json.context?.ai?.settings_updated_at || "unversioned") }}'),
+      sessionKey: expr('{{ $("Shared AI Input").item.json.session_key + ":shared:v4:" + ($("Shared AI Input").item.json.context?.ai?.settings_updated_at || "unversioned") }}'),
       contextWindowLength: 8,
     },
   },

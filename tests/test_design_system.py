@@ -1321,6 +1321,26 @@ def test_patient_empty_search_keeps_table_heading_and_columns_visible():
     assert "cf-card cf-empty-state" not in template
 
 
+def test_services_empty_states_use_table_surface_without_visible_table_headers():
+    template = partial_text("service_list.html")
+    empty_content_class = 'class="flex flex-col items-center justify-center px-6 py-14 text-center"'
+
+    assert template.count('class="col-span-full cf-table-wrap"') == 2
+    assert template.count('class="cf-table-scroll"') == 2
+    assert template.count('<table class="cf-table cf-table-wide">') == 2
+    assert template.count('<td colspan="5">') == 2
+    assert template.count(empty_content_class) == 2
+    assert template.index("cf-table-wrap") < template.index("No active services")
+    assert template.rindex("cf-table-wrap") < template.index("No archived services")
+    assert "cf-table-header" not in template
+    assert "<thead" not in template
+    assert ">Active services<" not in template
+    assert ">Archived services<" not in template
+    assert "cf-services-empty-state" not in template
+    assert "cf-card cf-empty-state" not in template
+    assert ".cf-services-empty-state" not in css_text()
+
+
 def test_task_3_modal_partials_use_accessible_modal_anatomy():
     for name in ["add_patient_modal.html", "patient_detail.html", "faq_row.html"]:
         template = partial_text(name)
@@ -1599,7 +1619,7 @@ def test_faq_section_uses_split_composer_layout():
     assert "Make this FAQ visible" not in composer
 
 
-def test_assistant_page_messenger_mode_uses_readable_radio_cards():
+def test_assistant_page_messenger_mode_waits_for_save_button():
     template = source_text("templates/dashboard/assistant_settings.html")
 
     assert "Messenger Response Mode" in template
@@ -1607,7 +1627,12 @@ def test_assistant_page_messenger_mode_uses_readable_radio_cards():
     assert "name=\"{{ ai_form.messenger_response_mode.html_name }}\"" in template
     assert "value=\"quick_replies\"" in template
     assert "value=\"ai\"" in template
-    assert template.count('onchange="this.form.requestSubmit()"') == 2
+    messenger_mode = template[
+        template.index("Messenger Response Mode") : template.index("Tell the assistant how to speak")
+    ]
+    assert "requestSubmit" not in messenger_mode
+    assert "onchange=" not in messenger_mode
+    assert "Save Assistant Settings" in template
     assert "No AI tokens are consumed" in template
     assert "No quick-reply buttons are shown" in template
     assert "Messenger AI mode is independent from the website Assistant switch" in template

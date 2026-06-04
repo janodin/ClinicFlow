@@ -2,16 +2,26 @@
   {% for service in active_services %}
     {% include "dashboard/partials/service_row.html" with service=service %}
   {% empty %}
-    <div class="cf-empty-state col-span-full bg-[var(--cf-surface-muted)] rounded-[var(--cf-radius-lg)]">
-      <div class="cf-icon-box h-16 w-16">
-        <i data-lucide="stethoscope" class="h-8 w-8"></i>
+    <section class="col-span-full cf-table-wrap">
+      <div class="cf-table-scroll" tabindex="0" aria-label="Active services table">
+        <table class="cf-table cf-table-wide">
+          <tbody class="divide-y divide-[var(--cf-line-soft)]">
+            <tr><td colspan="5">
+              <div class="flex flex-col items-center justify-center px-6 py-14 text-center">
+                <div class="cf-icon-box h-16 w-16">
+                  <i data-lucide="stethoscope" class="h-8 w-8"></i>
+                </div>
+                <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No active services</p>
+                <p class="mt-1 text-sm text-[var(--cf-muted)]">Add your first service so patients can book appointments.</p>
+                {% if can_manage %}
+                  <button @click="open=true" class="cf-btn cf-btn-primary mt-4"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add service</button>
+                {% endif %}
+              </div>
+            </td></tr>
+          </tbody>
+        </table>
       </div>
-      <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No active services</p>
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">Add your first service so patients can book appointments.</p>
-      {% if can_manage %}
-        <button @click="open=true" class="cf-btn cf-btn-primary mt-4"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add Service</button>
-      {% endif %}
-    </div>
+    </section>
   {% endfor %}
 </div>
 
@@ -19,12 +29,22 @@
   {% for service in archived_services %}
     {% include "dashboard/partials/service_row.html" with service=service %}
   {% empty %}
-    <div class="cf-empty-state col-span-full bg-[var(--cf-surface-muted)] rounded-[var(--cf-radius-lg)]">
-      <div class="cf-icon-box h-16 w-16 bg-[var(--cf-surface)] text-[var(--cf-muted)]">
-        <i data-lucide="archive" class="h-8 w-8"></i>
+    <section class="col-span-full cf-table-wrap">
+      <div class="cf-table-scroll" tabindex="0" aria-label="Archived services table">
+        <table class="cf-table cf-table-wide">
+          <tbody class="divide-y divide-[var(--cf-line-soft)]">
+            <tr><td colspan="5">
+              <div class="flex flex-col items-center justify-center px-6 py-14 text-center">
+                <div class="cf-icon-box h-16 w-16 text-[var(--cf-muted)]">
+                  <i data-lucide="archive" class="h-8 w-8"></i>
+                </div>
+                <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No archived services</p>
+                <p class="mt-1 text-sm text-[var(--cf-muted)]">Archived services will appear here.</p>
+              </div>
+            </td></tr>
+          </tbody>
+        </table>
       </div>
-      <p class="mt-4 text-sm font-semibold text-[var(--cf-ink)]">No archived services</p>
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">Archived services will appear here.</p>
-    </div>
+    </section>
   {% endfor %}
 </div>

@@ -45,12 +45,10 @@ class WidgetSettingsForm(forms.ModelForm):
         fields = [
             "widget_accent_color",
             "widget_welcome_message",
-            "show_reason_field",
         ]
         widgets = {
             "widget_accent_color": forms.TextInput(attrs={"type": "color", "class": _COLOR}),
             "widget_welcome_message": forms.Textarea(attrs={"class": _TEXTAREA, "placeholder": "Welcome message shown in the widget", "rows": 3}),
-            "show_reason_field": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
         }
 
 

@@ -235,19 +235,10 @@ class WidgetTests(TestCase):
         first_date = response.context["dates"][0]
         self.assertEqual(first_date.isoformat(), "2026-06-02")
 
-    def test_widget_renders_reason_field_when_enabled(self):
-        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=True)
-
+    def test_widget_always_renders_reason_field(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
 
         self.assertContains(response, 'name="reason"')
-
-    def test_widget_omits_reason_field_when_disabled(self):
-        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=False)
-
-        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
-
-        self.assertNotContains(response, 'name="reason"')
 
     def test_widget_chat_initial_state_has_no_quick_button_suggestions(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
@@ -294,6 +285,24 @@ class WidgetTests(TestCase):
         self.assertIn("Assistant is typing", conversation_markup)
         self.assertIn("animate-bounce", conversation_markup)
 
+    def test_widget_chat_renders_assistant_formatting_without_raw_html(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        conversation_start = content.index("<!-- Conversation -->")
+        conversation_end = content.index("<!-- FAQs -->", conversation_start)
+        conversation_markup = content[conversation_start:conversation_end]
+        script_start = content.index("function widgetApp()")
+        script = content[script_start:]
+
+        self.assertIn("messageParts(msg.text)", conversation_markup)
+        self.assertIn("whitespace-pre-wrap", conversation_markup)
+        self.assertIn("font-semibold", conversation_markup)
+        self.assertIn('x-text="part.text"', conversation_markup)
+        self.assertNotIn("x-html", conversation_markup)
+        self.assertIn("messageParts(text) {", script)
+        self.assertIn("/\\*\\*([^*]+?)\\*\\*|\\*([^*\\n]+?)\\*/g", script)
+
     def test_widget_chat_toggles_typing_indicator_around_ai_fetch(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()
@@ -322,6 +331,20 @@ class WidgetTests(TestCase):
             send_chat_block.rindex("this.isAssistantTyping = false;"),
         )
         self.assertIn("this.scrollChatConversation();", send_chat_block)
+
+    def test_widget_chat_shows_visible_message_when_ai_fetch_fails(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        send_chat_start = content.index("async sendChatAction(")
+        send_chat_end = content.index("selectChatOption", send_chat_start)
+        send_chat_block = content[send_chat_start:send_chat_end]
+
+        self.assertIn("if (!resp.ok)", send_chat_block)
+        self.assertIn("catch (error)", send_chat_block)
+        self.assertIn("Sorry, I could not reach the assistant", send_chat_block)
+        self.assertIn("this.chatHistory.push({id: this.nextId++, role: 'assistant'", send_chat_block)
+        self.assertLess(send_chat_block.index("catch (error)"), send_chat_block.index("finally {"))
 
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
@@ -417,47 +440,27 @@ class WidgetTests(TestCase):
         appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Jane Doe")
         self.assertEqual(appt.source, Appointment.SOURCE_EMBED)
 
-    def test_widget_booking_respects_reason_field_setting_on_submit(self):
+    def test_widget_booking_saves_submitted_reason(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
         slots = generate_slots(self.clinic, self.service, tomorrow)
 
-        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=False)
-        hidden_resp = self.client.post(
+        response = self.client.post(
             reverse("widget:book", args=[self.clinic.slug]),
             {
                 "service": self.service.id,
                 "starts_at": slots[0]["starts_at"].isoformat(),
-                "full_name": "Hidden Reason",
+                "full_name": "Reason Patient",
                 "phone": "09171111111",
-                "email": "hidden@example.com",
-                "reason": "Private symptoms",
-            },
-            HTTP_HX_REQUEST="true",
-        )
-
-        self.assertEqual(hidden_resp.status_code, 200)
-        hidden_appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Hidden Reason")
-        self.assertEqual(hidden_appt.reason, "")
-        self.assertEqual(hidden_appt.patient.notes, "")
-
-        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=True)
-        visible_resp = self.client.post(
-            reverse("widget:book", args=[self.clinic.slug]),
-            {
-                "service": self.service.id,
-                "starts_at": slots[1]["starts_at"].isoformat(),
-                "full_name": "Visible Reason",
-                "phone": "09172222222",
-                "email": "visible@example.com",
+                "email": "reason@example.com",
                 "reason": "Knee pain",
             },
             HTTP_HX_REQUEST="true",
         )
 
-        self.assertEqual(visible_resp.status_code, 200)
-        visible_appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Visible Reason")
-        self.assertEqual(visible_appt.reason, "Knee pain")
-        self.assertEqual(visible_appt.patient.notes, "Knee pain")
+        self.assertEqual(response.status_code, 200)
+        appointment = Appointment.objects.get(clinic=self.clinic, patient__full_name="Reason Patient")
+        self.assertEqual(appointment.reason, "Knee pain")
+        self.assertEqual(appointment.patient.notes, "Knee pain")
 
     def test_widget_booking_rejects_blank_identity(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
@@ -666,6 +669,30 @@ class WidgetTests(TestCase):
 
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
+    def test_chat_step_clears_stale_history_when_ai_settings_change(self, mock_post):
+        ai_settings = ClinicAISettings.objects.create(
+            clinic=self.clinic,
+            is_ai_enabled=True,
+            instructions="Always reply I am not interested.",
+        )
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "I am not interested"}
+        url = reverse("widget:chat_step", args=[self.clinic.slug])
+
+        self.client.post(url, {"action": "text_input", "value": "hello"})
+
+        ai_settings.instructions = "Use the default assistant behavior."
+        ai_settings.save()
+        mock_post.return_value.json.return_value = {"reply": "Hello, how can I help?"}
+        response = self.client.post(url, {"action": "text_input", "value": "HELLO"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["message"], "HELLO")
+        self.assertEqual(payload["history"], [])
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
     def test_chat_step_legacy_guided_actions_do_not_enter_guided_state_when_ai_enabled(self, mock_post):
         ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
         mock_post.return_value.status_code = 200
@@ -708,7 +735,7 @@ class WidgetTests(TestCase):
 
         mock_post.assert_not_called()
 
-    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="", N8N_WEBHOOK_SECRET="secret")
+    @override_settings(DEBUG=False, ASSISTANT_N8N_WEBHOOK_URL="", N8N_WEBHOOK_SECRET="secret")
     def test_chat_step_returns_default_fallback_when_webhook_missing(self):
         from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE
 
@@ -724,3 +751,18 @@ class WidgetTests(TestCase):
         self.assertEqual(data["state"], "ai")
         self.assertIn(DEFAULT_AI_FALLBACK_MESSAGE, data["message"])
         self.assertEqual(data["options"], [])
+
+    @override_settings(DEBUG=True, ASSISTANT_N8N_WEBHOOK_URL="", N8N_WEBHOOK_SECRET="")
+    def test_chat_step_explains_missing_assistant_webhook_in_debug(self):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True, fallback_message="")
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "text_input", "value": "Hello"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["state"], "ai")
+        self.assertIn("ASSISTANT_N8N_WEBHOOK_URL", data["message"])
+        self.assertIn("N8N_WEBHOOK_SECRET", data["message"])

@@ -16,6 +16,14 @@ def test_combined_bridge_uses_one_shared_ai_core():
     assert "name: 'Widget Chat Model'" not in source
 
 
+def test_combined_bridge_django_base_url_can_target_local_development():
+    source = SOURCE.read_text(encoding="utf-8")
+
+    assert "process.env.DJANGO_BASE_URL" in source
+    assert "https://178-105-83-211.nip.io" in source
+    assert ".replace(/\\/$/, '')" in source
+
+
 def test_combined_bridge_tools_inject_tenant_identity_from_shared_context():
     source = SOURCE.read_text(encoding="utf-8")
     widget_clinic_slug_expression = "clinic_slug: expr('{{ $(\"Shared AI Input\").item.json.channel === \"widget\" ? $(\"Shared AI Input\").item.json.clinic_slug : \"\" }}')"
@@ -82,7 +90,21 @@ def test_combined_bridge_memory_key_changes_when_ai_settings_change():
     memory_block = source[memory_start:memory_end]
 
     assert 'context?.ai?.settings_updated_at' in memory_block
-    assert ':shared:v2:' in memory_block
+    assert ':shared:v4:' in memory_block
+
+
+def test_combined_bridge_versions_upstream_session_key_by_ai_settings():
+    source = SOURCE.read_text(encoding="utf-8")
+    messenger_start = source.index("name: 'Build Messenger Shared Input'")
+    widget_start = source.index("name: 'Build Widget Shared Input'")
+    shared_input_start = source.index("const sharedAiInput")
+    messenger_block = source[messenger_start:widget_start]
+    widget_block = source[widget_start:shared_input_start]
+
+    assert "const aiVersion = context.ai?.settings_updated_at || 'unversioned';" in messenger_block
+    assert "session_key: source.session_key + ':ai-settings:' + aiVersion" in messenger_block
+    assert "const aiVersion = context.ai?.settings_updated_at || 'unversioned';" in widget_block
+    assert "session_key: source.session_key + ':ai-settings:' + aiVersion" in widget_block
 
 
 def test_channel_reply_code_preserves_regex_escapes_for_n8n():
@@ -130,8 +152,8 @@ def test_meta_messenger_normalizer_parses_raw_string_body_for_routing():
     normalize_end = source.index("const verifyMetaSignature")
     normalize_block = source[normalize_start:normalize_end]
 
-    assert "const rawBody = typeof input.rawBody === 'string' ? input.rawBody : '';" in normalize_block
-    assert "if (!rawBody)" in normalize_block
+    assert "const inputItem = $input.first();" in normalize_block
+    assert "let rawBody = typeof input.rawBody === 'string' ? input.rawBody : '';" in normalize_block
     assert "let body = input.body || input;" in normalize_block
     assert "if (typeof body === 'string')" in normalize_block
     assert "body = JSON.parse(body);" in normalize_block
@@ -140,6 +162,17 @@ def test_meta_messenger_normalizer_parses_raw_string_body_for_routing():
     assert "for (const messaging of messagingItems)" in normalize_block
     assert "messaging.message?.quick_reply?.payload" in normalize_block
     assert normalize_block.index("body = JSON.parse(body);") < normalize_block.index("for (const entry of entries)")
+
+
+def test_meta_messenger_normalizer_decodes_binary_raw_body_for_signature_verification():
+    source = SOURCE.read_text(encoding="utf-8")
+    normalize_start = source.index("name: 'Normalize Messenger Request'")
+    normalize_end = source.index("const verifyMetaSignature")
+    normalize_block = source[normalize_start:normalize_end]
+
+    assert "typeof inputItem.binary?.data?.data === 'string'" in normalize_block
+    assert "Buffer.from(inputItem.binary.data.data, 'base64').toString('utf8')" in normalize_block
+    assert "if (!rawBody) {\n  return [];\n}" not in normalize_block
 
 
 def test_combined_bridge_routes_messenger_quick_replies_without_ai_agent():
