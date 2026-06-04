@@ -633,12 +633,13 @@ code,
 .cf-btn-primary:hover,
 .ui-button-primary:hover {
   background: var(--cf-brand-hover);
-  color: #fff;
+  color: #001f2a;
 }
 
 .cf-btn-primary:active,
 .ui-button-primary:active {
   background: var(--cf-brand-strong);
+  color: #fff;
 }
 
 .cf-btn-secondary,
