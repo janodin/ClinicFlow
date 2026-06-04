@@ -15,6 +15,7 @@ urlpatterns = [
     path("appointments/<int:pk>/edit/", views.appointment_edit, name="appointment_edit"),
     path("appointments/<int:pk>/update/", views.update_appointment, name="update_appointment"),
     path("appointments/<int:pk>/cancel/", views.appointment_cancel, name="appointment_cancel"),
+    path("appointments/<int:pk>/delete/", views.delete_appointment, name="delete_appointment"),
     path("appointments/<int:pk>/reschedule/", views.appointment_reschedule, name="appointment_reschedule"),
     path("appointments/<int:pk>/notes/", views.add_appointment_note, name="add_appointment_note"),
     path("appointments/export/", views.export_csv, name="export_csv"),
@@ -22,6 +23,7 @@ urlpatterns = [
     path("patients/create/", views.create_patient, name="create_patient"),
     path("patients/<int:pk>/", views.patient_detail, name="patient_detail"),
     path("patients/<int:pk>/edit/", views.patient_edit, name="patient_edit"),
+    path("patients/<int:pk>/delete/", views.delete_patient, name="delete_patient"),
 
     path("patients/duplicates/", views.find_duplicates, name="find_duplicates"),
     path("patients/merge/", views.patient_merge, name="patient_merge"),

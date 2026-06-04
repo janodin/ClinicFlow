@@ -2,7 +2,7 @@ from pathlib import Path
 import re
 
 
-CSS_PATH = Path(__file__).resolve().parents[1] / "static" / "css" / "clinicflow.css"
+CSS_PATH = Path(__file__).resolve().parents[1] / "static" / "css" / "kliniassist.css"
 DASHBOARD_BASE_PATH = Path(__file__).resolve().parents[1] / "templates" / "dashboard" / "base.html"
 DASHBOARD_HOME_PATH = Path(__file__).resolve().parents[1] / "templates" / "dashboard" / "home.html"
 SEARCH_RESULTS_PATH = Path(__file__).resolve().parents[1] / "templates" / "dashboard" / "partials" / "search_results.html"
@@ -71,6 +71,28 @@ def test_visible_brand_copy_uses_kliniassist():
 
     assert "KliniAssist" in combined
     assert legacy_brand not in combined
+
+
+def test_active_frontend_technical_namespace_uses_kliniassist():
+    active_files = [
+        "templates/base.html",
+        "templates/dashboard/assistant_settings.html",
+        "templates/widget/widget.html",
+        "widget/views.py",
+    ]
+    combined = "\n".join(source_text(path) for path in active_files)
+    legacy_prefix = "clinic" + "flow"
+
+    assert (ROOT / "static" / "css" / "kliniassist.css").exists()
+    assert not (ROOT / "static" / "css" / f"{legacy_prefix}.css").exists()
+    assert "css/kliniassist.css" in combined
+    assert "kliniassist-widget-frame" in combined
+    assert "kliniassist-minimize" in combined
+    assert "kliniassist:load-slots" in combined
+    assert f"{legacy_prefix}.css" not in combined
+    assert f"{legacy_prefix}-widget-frame" not in combined
+    assert f"{legacy_prefix}-minimize" not in combined
+    assert f"{legacy_prefix}:load-slots" not in combined
 
 
 def div_block_containing(template, marker):
@@ -483,7 +505,7 @@ def test_widget_mobile_embed_contracts_are_specific():
     assert "bg-[var(--cf-danger-soft)]" in widget_error
     assert "text-[var(--cf-danger)]" in widget_error
     assert "height:min(500px, 70dvh)" in widget_embed
-    assert "clinicflow-widget-frame" in widget_views
+    assert "kliniassist-widget-frame" in widget_views
     assert "@media (max-width: 640px)" in widget_views
 
 
@@ -1512,6 +1534,11 @@ def test_archived_service_row_has_guarded_delete_confirmation():
     assert "hx-post=\"{% url 'dashboard:delete_service' service.id %}\"" in archived_block
     assert "hx-target=\"#services-list-container\"" in archived_block
     assert "hx-swap=\"innerHTML\"" in archived_block
+    assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in archived_block
+    assert "tabindex=\"-1\"" in archived_block
+    assert "x-effect=\"if (deleting) focusModal($el)\"" in archived_block
+    assert "focusModal(root)" in template
+    assert "trapModalFocus(event, root)" in template
     assert "href=\"{% url 'dashboard:delete_service'" not in template
 
 
@@ -1542,6 +1569,79 @@ def test_appointment_detail_secondary_metadata_uses_muted_panels():
             assert class_name in block
 
 
+def test_appointment_detail_has_separate_delete_mode():
+    template = partial_text("appointment_detail.html")
+
+    assert "Delete appointment" in template
+    assert "Delete permanently" in template
+    assert "dashboard:delete_appointment" in template
+    assert "mode === 'delete'" in template
+    assert "modal_source" in template
+    assert "hx-include=\"#filter-form\"" in template
+    assert "cf-btn cf-btn-danger" in template
+    assert "href=\"{% url 'dashboard:delete_appointment'" not in template
+
+
+def test_appointment_delete_success_closes_open_detail_modals():
+    appointments = source_text("templates/dashboard/appointments.html")
+    patient_detail = partial_text("patient_detail.html")
+
+    assert 'x-on:appointment-deleted.camel' in appointments
+    assert 'detailOpen=false' in appointments
+    assert 'appointments-table' in appointments
+    assert '.focus()' in appointments
+    assert '<div id="appointments-table" tabindex="-1">' in appointments
+    assert '<div id="detail-modal-body">\n        <div class="cf-modal-header sr-only">\n          <h2 id="appointment-detail-title"' in appointments
+    assert 'x-on:appointment-deleted.camel' in patient_detail
+    assert 'detailOpen=false' in patient_detail
+    assert 'visit-history-heading' in patient_detail
+    assert '.focus()' in patient_detail
+
+
+def test_patient_visit_history_marks_appointment_detail_source():
+    template = partial_text("patient_detail_content.html")
+
+    assert "dashboard:appointment_detail' appointment.id %}?source=patient" in template
+    assert 'id="visit-history-heading"' in template
+    assert 'tabindex="-1"' in template
+
+
+def test_patient_rows_have_guarded_delete_confirmation():
+    patient_list = partial_text("patient_list.html")
+    patient_row = partial_text("patient_row.html")
+
+    for template in [patient_list, patient_row]:
+        assert "dashboard:delete_patient" in template
+        assert "Delete patient" in template
+        assert "Patients with appointment history cannot be deleted." in template
+        assert "cf-btn cf-btn-xs cf-btn-danger" in template
+        assert "hx-target=\"#patient-list\"" in template
+        assert "hx-include=\"#patient-toolbar\"" in template
+        assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in template
+        assert "x-effect=\"if (deleting) focusModal($el)\"" in template
+        assert "x-on:patient-delete-blocked.window=\"deleting=false\"" in template
+        assert "tabindex=\"-1\"" in template
+        assert "csrf_token" in template
+        assert "href=\"{% url 'dashboard:delete_patient'" not in template
+
+
+def test_patient_detail_has_guarded_delete_confirmation():
+    detail = partial_text("patient_detail.html")
+    content = partial_text("patient_detail_content.html")
+
+    assert "patientDeleteOpen:false" in detail
+    assert "patientDeleteOpen=false" in detail
+    assert "x-on:patient-delete-blocked.window=\"patientDeleteOpen=false\"" in detail
+    assert "focusModal(root)" in detail
+    assert "dashboard:delete_patient" in content
+    assert "Delete patient" in content
+    assert "Patients with appointment history cannot be deleted." in content
+    assert "cf-btn cf-btn-danger" in content
+    assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in content
+    assert "x-effect=\"if (patientDeleteOpen) focusModal($el)\"" in content
+    assert "csrf_token" in content
+
+
 def test_patient_detail_uses_defined_radius_tokens_and_semantic_kpi_icons():
     template = partial_text("patient_detail_content.html")
 
@@ -1558,21 +1658,30 @@ def test_patient_detail_uses_defined_radius_tokens_and_semantic_kpi_icons():
 
 
 def test_patient_detail_modals_match_dashboard_focus_management():
-    template = partial_text("patient_detail.html")
+    detail = partial_text("patient_detail.html")
+    content = partial_text("patient_detail_content.html")
+    combined = detail + content
 
-    assert "trapModalFocus(event, root)" in template
-    assert '@keydown.escape.window="detailOpen=false; editOpen=false"' in template
-    assert template.count('@keydown.tab="trapModalFocus($event, $el)"') == 2
-    assert template.count('tabindex="-1"') == 2
-    assert 'x-effect="if (detailOpen)' in template
-    assert 'x-effect="if (editOpen)' in template
+    assert "trapModalFocus(event, root)" in detail
+    assert "patientDeleteOpen:false" in detail
+    assert "detailOpen=false" in detail
+    assert "editOpen=false" in detail
+    assert "patientDeleteOpen=false" in detail
+    assert 'aria-labelledby="appointment-detail-title"' in detail
+    assert 'id="appointment-detail-title"' in detail
+    assert combined.count('@keydown.tab="trapModalFocus($event, $el)"') == 3
+    assert combined.count('tabindex="-1"') >= 3
+    assert 'x-effect="if (detailOpen)' in detail
+    assert 'x-effect="if (editOpen)' in detail
+    assert 'x-effect="if (patientDeleteOpen)' in content
+    assert 'aria-labelledby="patient-delete-modal-title"' in content
 
 
 def test_patient_detail_visit_history_uses_table_surface_without_nested_card():
     template = partial_text("patient_detail_content.html")
 
-    assert '<div class="cf-card p-5 lg:p-6">\n    <div class="flex items-center justify-between">\n      <h2 class="cf-section-title">Visit History</h2>' not in template
-    assert '<section class="grid gap-4">\n    <div class="flex items-center justify-between">\n      <h2 class="cf-section-title">Visit History</h2>' in template
+    assert '<div class="cf-card p-5 lg:p-6">\n    <div class="flex items-center justify-between">\n      <h2 id="visit-history-heading" tabindex="-1" class="cf-section-title">Visit History</h2>' not in template
+    assert '<section class="grid gap-4">\n    <div class="flex items-center justify-between">\n      <h2 id="visit-history-heading" tabindex="-1" class="cf-section-title">Visit History</h2>' in template
 
 
 def test_patient_detail_visit_history_summary_matches_faq_summary_pattern():
@@ -1867,7 +1976,7 @@ def test_item_level_action_icons_use_compact_appointment_size():
 
 def test_task_3_appointment_rows_surface_inline_actions():
     template = partial_text("appointment_row.html")
-    stylesheet = source_text("static/css/clinicflow.css")
+    stylesheet = source_text("static/css/kliniassist.css")
     reschedule_action = css_rule_block(".cf-appointment-reschedule-action")
     reschedule_hover = css_rule_block(".cf-appointment-reschedule-action:hover")
 
@@ -2051,7 +2160,7 @@ def test_task_5_appointment_filters_and_status_dropdown_use_design_system():
     ]:
         assert snippet in template
 
-    filter_form = template[template.index("<form id=\"filter-form\" class=\"cf-toolbar\">") : template.index("<div id=\"appointments-table\">")]
+    filter_form = template[template.index("<form id=\"filter-form\" class=\"cf-toolbar\">") : template.index("<div id=\"appointments-table\"")]
     for preserved_filter in ["status", "date_from", "date_to", "service", "source", "payment_state", "q"]:
         assert preserved_filter in filter_form
     assert "<select id=\"filter-status\" name=\"status\"" in filter_form
@@ -2157,13 +2266,17 @@ def test_task_5_appointment_modals_use_neon_aqua_anatomy_and_singular_titles():
     assert "id=\"{% if appointment %}appointment-detail-title{% else %}add-appointment-title{% endif %}\"" in form
     assert "Cancel appointment" in detail
     assert "Reschedule appointment" in detail
+    assert "Delete appointment" in detail
     assert "id=\"appointment-detail-title\" class=\"sr-only\"" in detail
-    assert "x-text=\"mode === 'cancel' ? 'Cancel appointment'" in detail
+    assert "mode === 'cancel' ? 'Cancel appointment'" in detail
+    assert "mode === 'reschedule' ? 'Reschedule appointment'" in detail
+    assert "mode === 'delete' ? 'Delete appointment'" in detail
     assert "name=\"modal_source\" value=\"calendar\"" in detail
     assert "source == 'calendar'" in detail
     assert "appointment_edit' appointment.id" not in detail
-    assert "@click=\"mode = 'reschedule'\"" not in detail
-    assert "@click=\"mode = 'cancel'\"" not in detail
+    assert "@click=\"mode = 'reschedule'\"" in detail
+    assert "@click=\"mode = 'cancel'\"" in detail
+    assert "@click=\"mode = 'delete'\"" in detail
     assert "hx-target=\"#cancel-error\"" in detail
     assert "hx-swap=\"innerHTML\"" in detail
     assert "id=\"cancel-error\"" in detail
@@ -2334,7 +2447,7 @@ def test_task_9_widget_preserves_behavior_hooks_and_neon_aqua_patterns():
         'id="booking-form-container"',
         'hx-target="#booking-form-container"',
         "accentColor: '{{ clinic.safe_widget_accent_color|escapejs }}'",
-        "clinicflow-minimize",
+        "kliniassist-minimize",
         "htmx:beforeSwap",
     ]:
         assert snippet in widget

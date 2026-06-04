@@ -13,9 +13,25 @@
   <td>{{ patient.created_at|date:"M Y" }}</td>
   <td><span class="cf-badge cf-badge-active"><i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active</span></td>
   <td class="pr-5">
-    <div class="cf-row-actions">
+    <div class="cf-row-actions" x-data="{deleting:false, focusModal(root) { this.$nextTick(() => root.querySelector('button, [href], input, select, textarea')?.focus()) }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" @keydown.escape.window="deleting=false" x-on:patient-delete-blocked.window="deleting=false">
       <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>View</a>
       <button @click="editOpen=true" hx-get="{% url 'dashboard:patient_edit' patient.id %}" hx-target="#edit-modal-body" class="cf-btn cf-btn-xs cf-btn-secondary cf-service-edit-action"><i data-lucide="pencil" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Edit</button>
+      <button type="button" @click="deleting=true" class="cf-btn cf-btn-xs cf-btn-danger"><i data-lucide="trash-2" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Delete</button>
+      <div x-show="deleting" class="cf-modal-backdrop" x-cloak @click.self="deleting=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (deleting) focusModal($el)">
+        <div class="cf-modal cf-modal-sm" role="dialog" aria-modal="true" aria-labelledby="delete-patient-title-{{ patient.id }}" @click.stop>
+          <div class="cf-modal-header">
+            <h2 id="delete-patient-title-{{ patient.id }}" class="cf-modal-title">Delete patient</h2>
+          </div>
+          <div class="cf-modal-body">
+            <p class="cf-muted">Patients with appointment history cannot be deleted. Use merge for duplicates with history.</p>
+          </div>
+          <form method="post" action="{% url 'dashboard:delete_patient' patient.id %}" hx-post="{% url 'dashboard:delete_patient' patient.id %}" hx-target="#patient-list" hx-swap="innerHTML" hx-include="#patient-toolbar" class="cf-modal-footer">
+            {% csrf_token %}
+            <button type="button" class="cf-btn cf-btn-secondary" @click="deleting=false"><i data-lucide="x" class="h-4 w-4" aria-hidden="true"></i>Cancel</button>
+            <button type="submit" class="cf-btn cf-btn-danger"><i data-lucide="trash-2" class="h-4 w-4" aria-hidden="true"></i>Delete patient</button>
+          </form>
+        </div>
+      </div>
     </div>
   </td>
 </tr>

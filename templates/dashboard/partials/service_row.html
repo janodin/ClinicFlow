@@ -1,4 +1,4 @@
-<article id="service-card-{{ service.id }}" x-data="{deleting:false}" class="cf-card p-5 flex flex-col">
+<article id="service-card-{{ service.id }}" x-data="{deleting:false, focusModal(root) { this.$nextTick(() => { window.setTimeout(() => root.querySelector('button, [href], input, select, textarea')?.focus(), 0); }); }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }}" class="cf-card p-5 flex flex-col">
   <div class="flex-1">
     <div class="flex items-center justify-between">
       <div class="grid h-14 w-14 place-items-center rounded-2xl text-[var(--cf-surface)]" style="background-color: {{ service.color }};">
@@ -64,7 +64,7 @@
   </div>
 
   {% if service.is_archived %}
-      <div x-show="deleting" x-cloak class="cf-modal-backdrop" @click.self="deleting = false">
+      <div x-show="deleting" x-cloak class="cf-modal-backdrop" @click.self="deleting = false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (deleting) focusModal($el)">
         <div class="cf-modal cf-modal-sm" role="dialog" aria-modal="true" aria-labelledby="delete-service-title-{{ service.id }}" @click.stop>
           <div class="cf-modal-header flex items-center justify-between">
             <div class="flex items-center gap-3">

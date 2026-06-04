@@ -18,6 +18,32 @@
         <i data-lucide="pencil" class="h-4 w-4"></i>
         Edit
       </button>
+      <button type="button" @click="patientDeleteOpen=true" class="cf-btn cf-btn-danger">
+        <i data-lucide="trash-2" class="h-4 w-4"></i>
+        Delete patient
+      </button>
+    </div>
+  </div>
+
+  <div x-show="patientDeleteOpen" class="cf-modal-backdrop" x-cloak @click.self="patientDeleteOpen=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (patientDeleteOpen) focusModal($el)">
+    <div class="cf-modal cf-modal-sm" role="dialog" aria-modal="true" aria-labelledby="patient-delete-modal-title" @click.stop>
+      <div class="cf-modal-header">
+        <h2 id="patient-delete-modal-title" class="cf-modal-title">Delete patient</h2>
+      </div>
+      <div class="cf-modal-body">
+        <p class="cf-muted">Patients with appointment history cannot be deleted. Use merge for duplicates with history.</p>
+      </div>
+      <form method="post" action="{% url 'dashboard:delete_patient' patient.id %}" class="cf-modal-footer">
+        {% csrf_token %}
+        <button type="button" class="cf-btn cf-btn-secondary" @click="patientDeleteOpen=false">
+          <i data-lucide="x" class="h-4 w-4"></i>
+          Cancel
+        </button>
+        <button type="submit" class="cf-btn cf-btn-danger">
+          <i data-lucide="trash-2" class="h-4 w-4"></i>
+          Delete patient
+        </button>
+      </form>
     </div>
   </div>
 
@@ -100,7 +126,7 @@
 
   <section class="grid gap-4">
     <div class="flex items-center justify-between">
-      <h2 class="cf-section-title">Visit History</h2>
+      <h2 id="visit-history-heading" tabindex="-1" class="cf-section-title">Visit History</h2>
       <div id="visit-history-summary" class="cf-faq-summary" aria-label="Visit history summary">
         <span class="cf-faq-summary-metric">{{ kpi_total }} total</span>
         {% if last_appointment %}
@@ -134,7 +160,7 @@
               {% for appointment in patient.appointments.all|dictsortreversed:"starts_at" %}
                 <tr>
                   <td class="p-5">
-                    <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-mobile-break font-semibold text-[var(--cf-brand)] hover:underline">{{ appointment.starts_at|date:"M j, Y" }}</button>
+                    <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}?source=patient" hx-target="#detail-modal-body" class="cf-mobile-break font-semibold text-[var(--cf-brand)] hover:underline">{{ appointment.starts_at|date:"M j, Y" }}</button>
                   </td>
                   <td class="cf-mobile-break text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }}</td>
                   <td class="cf-mobile-break text-[var(--cf-muted)]">{{ appointment.service.name }}</td>
@@ -142,7 +168,7 @@
                   <td class="cf-mobile-break text-xs text-[var(--cf-muted)]">{{ appointment.get_source_display }}</td>
                   <td class="pr-5">
                     <div class="cf-row-actions">
-                      <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>View</button>
+                      <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}?source=patient" hx-target="#detail-modal-body" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>View</button>
                     </div>
                   </td>
                 </tr>

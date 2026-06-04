@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, time, timedelta
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from django.contrib import messages
@@ -8,7 +9,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection, transaction
 from django.db.models import Q
 from django.core.paginator import Paginator
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -113,6 +114,103 @@ def _calendar_modal_trigger(message, *, close=False, refetch=True):
     if close:
         trigger["close-calendar-modal"] = True
     return json.dumps(trigger)
+
+
+def _request_filter_params(request):
+    if request.method == "POST" and request.headers.get("HX-Request"):
+        params = request.POST.copy()
+        current_url = request.headers.get("HX-Current-URL")
+        if current_url:
+            current_params = QueryDict(urlparse(current_url).query)
+            for key in current_params:
+                if key not in params:
+                    params.setlist(key, current_params.getlist(key))
+        return params
+    return request.GET
+
+
+def _appointments_context(request, clinic):
+    params = _request_filter_params(request)
+    qs = clinic.appointments.select_related("patient", "service").all()
+    search_query = params.get("q", "").strip()
+    if search_query:
+        qs = qs.filter(
+            Q(patient__full_name__icontains=search_query)
+            | Q(patient__phone__icontains=search_query)
+            | Q(service__name__icontains=search_query)
+            | Q(reference_code__icontains=search_query)
+        )
+    status = params.get("status")
+    if status:
+        qs = qs.filter(status=status)
+    date_from = params.get("date_from")
+    date_to = params.get("date_to")
+    if date_from:
+        qs = qs.filter(starts_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(starts_at__date__lte=date_to)
+    service_filter = params.get("service")
+    if service_filter:
+        qs = qs.filter(service_id=service_filter)
+    source_filter = params.get("source")
+    if source_filter:
+        qs = qs.filter(source=source_filter)
+    payment_filter = params.get("payment_state")
+    if payment_filter:
+        qs = qs.filter(payment_state=payment_filter)
+    qs = qs.order_by("-starts_at")
+    paginator = Paginator(qs, 10)
+    page_number = params.get("page", 1)
+    page_obj = paginator.get_page(page_number)
+    return {
+        "clinic": clinic,
+        "appointments": page_obj,
+        "page_obj": page_obj,
+        "form": StaffAppointmentForm(clinic),
+        "patient_form": PatientForm(clinic=clinic),
+        "services": clinic.services.filter(is_archived=False),
+        "search_query": search_query,
+        "status": status,
+        "date_from": date_from,
+        "date_to": date_to,
+        "service_filter": service_filter,
+        "source_filter": source_filter,
+        "payment_filter": payment_filter,
+        "status_choices": Appointment.STATUS_CHOICES,
+        "source_choices": Appointment.SOURCE_CHOICES,
+        "payment_choices": Appointment.PAYMENT_CHOICES,
+    }
+
+
+def _patient_detail_context(clinic, patient):
+    appointments = patient.appointments.all()
+    return {
+        "clinic": clinic,
+        "patient": patient,
+        "kpi_total": appointments.count(),
+        "kpi_upcoming": appointments.filter(status__in=["pending", "confirmed"], starts_at__gte=timezone.now()).count(),
+        "kpi_completed": appointments.filter(status="completed").count(),
+        "kpi_cancelled": appointments.filter(status__in=["cancelled", "no_show"]).count(),
+        "last_appointment": appointments.order_by("starts_at").last(),
+    }
+
+
+def _patients_context(request, clinic):
+    params = _request_filter_params(request)
+    query = params.get("q", "").strip()
+    qs = clinic.patients.order_by("-created_at", "-id")
+    if query:
+        qs = qs.filter(Q(full_name__icontains=query) | Q(phone__icontains=query) | Q(email__icontains=query))
+    paginator = Paginator(qs, 10)
+    page_number = params.get("page", 1)
+    page_obj = paginator.get_page(page_number)
+    return {
+        "clinic": clinic,
+        "patients": page_obj,
+        "page_obj": page_obj,
+        "patient_form": PatientForm(clinic=clinic),
+        "query": query,
+    }
 
 
 @login_required
@@ -312,56 +410,7 @@ def calendar_reschedule(request):
 @login_required
 def appointments(request):
     clinic = _clinic_or_redirect(request)
-    qs = clinic.appointments.select_related("patient", "service").all()
-    search_query = request.GET.get("q", "").strip()
-    if search_query:
-        qs = qs.filter(
-            Q(patient__full_name__icontains=search_query)
-            | Q(patient__phone__icontains=search_query)
-            | Q(service__name__icontains=search_query)
-            | Q(reference_code__icontains=search_query)
-        )
-    status = request.GET.get("status")
-    if status:
-        qs = qs.filter(status=status)
-    date_from = request.GET.get("date_from")
-    date_to = request.GET.get("date_to")
-    if date_from:
-        qs = qs.filter(starts_at__date__gte=date_from)
-    if date_to:
-        qs = qs.filter(starts_at__date__lte=date_to)
-    service_filter = request.GET.get("service")
-    if service_filter:
-        qs = qs.filter(service_id=service_filter)
-    source_filter = request.GET.get("source")
-    if source_filter:
-        qs = qs.filter(source=source_filter)
-    payment_filter = request.GET.get("payment_state")
-    if payment_filter:
-        qs = qs.filter(payment_state=payment_filter)
-    qs = qs.order_by("-starts_at")
-    paginator = Paginator(qs, 10)
-    page_number = request.GET.get("page", 1)
-    page_obj = paginator.get_page(page_number)
-    form = StaffAppointmentForm(clinic)
-    context = {
-        "clinic": clinic,
-        "appointments": page_obj,
-        "page_obj": page_obj,
-        "form": form,
-        "patient_form": PatientForm(clinic=clinic),
-        "services": clinic.services.filter(is_archived=False),
-        "search_query": search_query,
-        "status": status,
-        "date_from": date_from,
-        "date_to": date_to,
-        "service_filter": service_filter,
-        "source_filter": source_filter,
-        "payment_filter": payment_filter,
-        "status_choices": Appointment.STATUS_CHOICES,
-        "source_choices": Appointment.SOURCE_CHOICES,
-        "payment_choices": Appointment.PAYMENT_CHOICES,
-    }
+    context = _appointments_context(request, clinic)
     if request.headers.get("HX-Request"):
         return render(request, "dashboard/partials/appointment_list.html", context)
     return render(request, "dashboard/appointments.html", context)
@@ -399,7 +448,7 @@ def appointment_detail(request, pk):
     clinic = _clinic_or_redirect(request)
     appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
     init_mode = request.GET.get("mode", "detail")
-    if init_mode not in {"detail", "cancel", "reschedule"}:
+    if init_mode not in {"detail", "cancel", "reschedule", "delete"}:
         init_mode = "detail"
     context = {
         "clinic": clinic,
@@ -504,6 +553,47 @@ def appointment_cancel(request, pk):
         })
         return response
     messages.success(request, "Appointment cancelled.")
+    return redirect("dashboard:appointments")
+
+
+@login_required
+@require_POST
+def delete_appointment(request, pk):
+    clinic = _clinic_or_redirect(request)
+    appointment = get_object_or_404(clinic.appointments.select_related("patient"), pk=pk)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
+    patient_id = appointment.patient_id
+    appointment.delete()
+    if request.headers.get("HX-Request"):
+        modal_source = request.POST.get("modal_source", "")
+        if modal_source == "calendar":
+            response = HttpResponse("")
+            response["HX-Trigger"] = _calendar_modal_trigger("Appointment deleted.", close=True)
+            return response
+        if modal_source == "patient":
+            patient = get_object_or_404(
+                clinic.patients.prefetch_related("appointments__service"),
+                pk=patient_id,
+            )
+            response = render(
+                request,
+                "dashboard/partials/patient_detail_content.html",
+                _patient_detail_context(clinic, patient),
+            )
+            response["HX-Trigger"] = json.dumps({
+                "appointmentDeleted": True,
+                "toast-message": {"message": "Appointment deleted.", "type": "success"},
+            })
+            return response
+        response = render(request, "dashboard/partials/appointment_list.html", _appointments_context(request, clinic))
+        response["HX-Trigger"] = json.dumps({
+            "appointmentDeleted": True,
+            "toast-message": {"message": "Appointment deleted.", "type": "success"},
+        })
+        return response
+    messages.success(request, "Appointment deleted.")
     return redirect("dashboard:appointments")
 
 
@@ -676,20 +766,7 @@ def add_appointment_note(request, pk):
 @login_required
 def patients(request):
     clinic = _clinic_or_redirect(request)
-    query = request.GET.get("q", "").strip()
-    qs = clinic.patients.order_by("-created_at", "-id")
-    if query:
-        qs = qs.filter(Q(full_name__icontains=query) | Q(phone__icontains=query) | Q(email__icontains=query))
-    paginator = Paginator(qs, 10)
-    page_number = request.GET.get("page", 1)
-    page_obj = paginator.get_page(page_number)
-    context = {
-        "clinic": clinic,
-        "patients": page_obj,
-        "page_obj": page_obj,
-        "patient_form": PatientForm(clinic=clinic),
-        "query": query,
-    }
+    context = _patients_context(request, clinic)
     if request.headers.get("HX-Request"):
         return render(request, "dashboard/partials/patient_list.html", context)
     return render(request, "dashboard/patients.html", context)
@@ -717,21 +794,7 @@ def patient_detail(request, pk):
         ),
         pk=pk,
     )
-    appointments = patient.appointments.all()
-    total = appointments.count()
-    upcoming = appointments.filter(status__in=["pending", "confirmed"], starts_at__gte=timezone.now()).count()
-    completed = appointments.filter(status="completed").count()
-    cancelled = appointments.filter(status__in=["cancelled", "no_show"]).count()
-    last_appointment = appointments.order_by("starts_at").last()
-    context = {
-        "clinic": clinic,
-        "patient": patient,
-        "kpi_total": total,
-        "kpi_upcoming": upcoming,
-        "kpi_completed": completed,
-        "kpi_cancelled": cancelled,
-        "last_appointment": last_appointment,
-    }
+    context = _patient_detail_context(clinic, patient)
     return render(request, "dashboard/partials/patient_detail.html", context)
 
 
@@ -775,6 +838,38 @@ def patient_edit(request, pk):
     else:
         form = PatientForm(clinic=clinic, instance=patient)
     return render(request, "dashboard/partials/patient_edit_modal_form.html", {"form": form, "patient": patient})
+
+
+@login_required
+@require_POST
+def delete_patient(request, pk):
+    clinic = _clinic_or_redirect(request)
+    patient = get_object_or_404(clinic.patients, pk=pk)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
+    if patient.appointments.exists():
+        message = "Patients with appointment history cannot be deleted. Merge duplicates instead."
+        if request.headers.get("HX-Request"):
+            response = HttpResponse("")
+            response["HX-Reswap"] = "none"
+            response["HX-Trigger"] = json.dumps({
+                "patientDeleteBlocked": True,
+                "toast-message": {"message": message, "type": "error"}
+            })
+            return response
+        messages.error(request, message)
+        return redirect("dashboard:patient_detail", pk=patient.pk)
+    patient.delete()
+    if request.headers.get("HX-Request"):
+        response = render(request, "dashboard/partials/patient_list.html", _patients_context(request, clinic))
+        response["HX-Trigger"] = json.dumps({
+            "patientDeleted": True,
+            "toast-message": {"message": "Patient deleted.", "type": "success"},
+        })
+        return response
+    messages.success(request, "Patient deleted.")
+    return redirect("dashboard:patients")
 
 
 @login_required

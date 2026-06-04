@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Appointments{% endblock %}
 {% block content %}
-<div x-data="{open:false, filtersOpen:false, detailOpen:false, patientOpen:false, queryParams() { const form = document.getElementById('filter-form'); const params = new URLSearchParams(new FormData(form)); Array.from(params.keys()).forEach((key) => { if (!params.get(key)) params.delete(key); }); return params; }, exportHref() { const query = this.queryParams().toString(); return '{% url 'dashboard:export_csv' %}' + (query ? '?' + query : ''); }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" class="cf-page">
+<div x-data="{open:false, filtersOpen:false, detailOpen:false, patientOpen:false, queryParams() { const form = document.getElementById('filter-form'); const params = new URLSearchParams(new FormData(form)); Array.from(params.keys()).forEach((key) => { if (!params.get(key)) params.delete(key); }); return params; }, exportHref() { const query = this.queryParams().toString(); return '{% url 'dashboard:export_csv' %}' + (query ? '?' + query : ''); }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" x-on:appointment-deleted.camel="detailOpen=false; $nextTick(() => document.getElementById('appointments-table')?.focus())" class="cf-page">
   <div class="cf-page-header">
     <div><h1 class="cf-page-title ui-page-title">Appointments</h1><p class="cf-page-description">Manage and track all clinic appointments</p></div>
     <div class="cf-page-actions">
@@ -67,7 +67,7 @@
     </div>
   </form>
 
-  <div id="appointments-table">
+  <div id="appointments-table" tabindex="-1">
     {% include "dashboard/partials/appointment_list.html" %}
   </div>
 
@@ -155,7 +155,11 @@
   <!-- Detail Modal -->
   <div x-show="detailOpen" class="cf-modal-backdrop" x-cloak @click.self="detailOpen=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (detailOpen) $nextTick(() => $el.querySelector('button, [href], input, select, textarea')?.focus())">
     <div class="cf-modal cf-modal-lg" role="dialog" aria-modal="true" aria-labelledby="appointment-detail-title" @click.stop>
-      <div id="detail-modal-body"></div>
+      <div id="detail-modal-body">
+        <div class="cf-modal-header sr-only">
+          <h2 id="appointment-detail-title" class="cf-modal-title">Appointment details</h2>
+        </div>
+      </div>
     </div>
   </div>
 

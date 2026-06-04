@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -108,6 +110,143 @@ def test_merge_scoped_to_clinic(clinic_setup, client):
     )
     assert response.status_code == 404
     assert Patient.objects.filter(pk=other_patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_patient_delete_without_appointments_deletes_patient(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    patient = Patient.objects.create(clinic=clinic, full_name="Delete Me", phone="09170008888")
+
+    response = client.post(reverse("dashboard:delete_patient", args=[patient.id]))
+
+    assert response.status_code == 302
+    assert not Patient.objects.filter(pk=patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_patient_delete_with_appointments_is_blocked(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    patient = Patient.objects.create(clinic=clinic, full_name="History Patient", phone="09170007777")
+    starts_at = timezone.now() + timezone.timedelta(days=1)
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timezone.timedelta(minutes=30),
+    )
+
+    response = client.post(reverse("dashboard:delete_patient", args=[patient.id]))
+
+    assert response.status_code == 302
+    assert Patient.objects.filter(pk=patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_patient_delete_requires_post(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    patient = Patient.objects.create(clinic=clinic, full_name="Delete By Post", phone="09170006666")
+
+    response = client.get(reverse("dashboard:delete_patient", args=[patient.id]))
+
+    assert response.status_code == 405
+    assert Patient.objects.filter(pk=patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_patient_delete_requires_login(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    patient = Patient.objects.create(clinic=clinic, full_name="Login Required", phone="09170001110")
+
+    response = client.post(reverse("dashboard:delete_patient", args=[patient.id]))
+
+    assert response.status_code == 302
+    assert Patient.objects.filter(pk=patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_patient_delete_cross_clinic_returns_404(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    other_group = ClinicGroup.objects.create(name="Other Clinic", owner=user)
+    other_clinic = Clinic.objects.create(group=other_group, name="Other Clinic", slug="other-patient-delete")
+    other_patient = Patient.objects.create(clinic=other_clinic, full_name="Other Patient", phone="09170005555")
+
+    response = client.post(reverse("dashboard:delete_patient", args=[other_patient.id]))
+
+    assert response.status_code == 404
+    assert Patient.objects.filter(pk=other_patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_patient_delete_htmx_refreshes_patient_list(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    patient = Patient.objects.create(clinic=clinic, full_name="HTMX Delete", phone="09170004444")
+
+    response = client.post(
+        reverse("dashboard:delete_patient", args=[patient.id]),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert not Patient.objects.filter(pk=patient.pk).exists()
+    assert b"Patients" in response.content
+    assert "Patient deleted." in response.headers["HX-Trigger"]
+
+
+@pytest.mark.django_db
+def test_patient_delete_htmx_preserves_current_page_from_current_url(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    for index in range(12):
+        Patient.objects.create(clinic=clinic, full_name=f"Paged Patient {index:02d}", phone=f"09170010{index:03d}")
+    ordered_patients = list(clinic.patients.order_by("-created_at", "-id"))
+    page_1_patient = ordered_patients[0]
+    delete_patient = ordered_patients[10]
+    remaining_page_2_patient = ordered_patients[11]
+
+    response = client.post(
+        reverse("dashboard:delete_patient", args=[delete_patient.id]),
+        HTTP_HX_REQUEST="true",
+        HTTP_HX_CURRENT_URL=reverse("dashboard:patients") + "?page=2",
+    )
+
+    content = response.content.decode()
+    assert response.status_code == 200
+    assert page_1_patient.full_name not in content
+    assert remaining_page_2_patient.full_name in content
+
+
+@pytest.mark.django_db
+def test_patient_delete_htmx_blocked_keeps_patient_list(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    patient = Patient.objects.create(clinic=clinic, full_name="Blocked Delete", phone="09170003333")
+    starts_at = timezone.now() + timezone.timedelta(days=1)
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timezone.timedelta(minutes=30),
+    )
+
+    response = client.post(
+        reverse("dashboard:delete_patient", args=[patient.id]),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert Patient.objects.filter(pk=patient.pk).exists()
+    assert response.headers["HX-Reswap"] == "none"
+    trigger = json.loads(response.headers["HX-Trigger"])
+    assert trigger["patientDeleteBlocked"] is True
+    assert trigger["toast-message"]["type"] == "error"
+    assert "appointment history" in trigger["toast-message"]["message"]
 
 
 @pytest.mark.django_db

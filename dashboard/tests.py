@@ -15,7 +15,7 @@ from unittest.mock import patch
 from clinics.models import Clinic, ClinicGroup, ClinicMembership
 from patients.models import Patient
 from services.models import Service
-from appointments.models import Appointment
+from appointments.models import Appointment, AppointmentNote
 from django.utils import timezone
 from scheduling.models import ClinicBusinessHour, UnavailableDate
 from dashboard.middleware import HtmxMessagesMiddleware
@@ -45,7 +45,12 @@ def calendar_setup(clinic_setup):
         break_start=time(12),
         break_end=time(13),
     )
-    patient = Patient.objects.create(clinic=clinic, full_name="Test Patient", phone="09170001111")
+    patient = Patient.objects.create(
+        clinic=clinic,
+        full_name="Test Patient",
+        phone="09170001111",
+        email="test.patient@example.com",
+    )
     starts_at = timezone.make_aware(timezone.datetime.combine(target_date, time(10)))
     appointment = Appointment.objects.create(
         clinic=clinic,
@@ -601,6 +606,100 @@ def test_appointment_detail_rejects_unsafe_mode(calendar_setup, client):
 
 
 @pytest.mark.django_db
+def test_delete_appointment_requires_post(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:delete_appointment", args=[appointment.id]))
+
+    assert response.status_code == 405
+    assert Appointment.objects.filter(pk=appointment.pk).exists()
+
+
+@pytest.mark.django_db
+def test_delete_appointment_removes_appointment_and_notes(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    note = AppointmentNote.objects.create(appointment=appointment, author=user, body="Mistaken booking")
+    client.force_login(user)
+
+    response = client.post(reverse("dashboard:delete_appointment", args=[appointment.id]))
+
+    assert response.status_code == 302
+    assert not Appointment.objects.filter(pk=appointment.pk).exists()
+    assert not AppointmentNote.objects.filter(pk=note.pk).exists()
+
+
+@pytest.mark.django_db
+def test_htmx_delete_appointment_refreshes_appointments_table(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:delete_appointment", args=[appointment.id]),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert not Appointment.objects.filter(pk=appointment.pk).exists()
+    assert b"Appointments" in response.content
+    assert "appointmentDeleted" in response.headers["HX-Trigger"]
+    assert "Appointment deleted." in response.headers["HX-Trigger"]
+
+
+@pytest.mark.django_db
+def test_calendar_delete_appointment_triggers_refetch_and_close(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:delete_appointment", args=[appointment.id]),
+        {"modal_source": "calendar"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert not Appointment.objects.filter(pk=appointment.pk).exists()
+    trigger = response.headers["HX-Trigger"]
+    assert "calendar-refetch" in trigger
+    assert "close-calendar-modal" in trigger
+    assert "Appointment deleted." in trigger
+    assert "HX-Retarget" not in response.headers
+
+
+@pytest.mark.django_db
+def test_patient_history_delete_appointment_refreshes_patient_detail(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:delete_appointment", args=[appointment.id]),
+        {"modal_source": "patient"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert not Appointment.objects.filter(pk=appointment.pk).exists()
+    assert b"Contact Details" in response.content
+    assert b"No visits yet" in response.content
+    assert "appointmentDeleted" in response.headers["HX-Trigger"]
+
+
+@pytest.mark.django_db
+def test_delete_appointment_cross_clinic_isolation(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    other_user = get_user_model().objects.create_user(username="delete-other@example.com", email="delete-other@example.com", password="password123")
+    other_group = ClinicGroup.objects.create(name="Other Delete Clinic", owner=other_user)
+    other_clinic = Clinic.objects.create(group=other_group, name="Other Delete Clinic", slug="other-delete-clinic")
+    ClinicMembership.objects.create(clinic=other_clinic, user=other_user, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(other_user)
+
+    response = client.post(reverse("dashboard:delete_appointment", args=[appointment.id]))
+
+    assert response.status_code == 404
+    assert Appointment.objects.filter(pk=appointment.pk).exists()
+
+
+@pytest.mark.django_db
 def test_htmx_status_update_shows_errors_without_success_toast(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     appointment.status = Appointment.STATUS_COMPLETED
@@ -796,7 +895,7 @@ def test_assistant_settings_page_explains_launcher_first_embed_options(clinic_se
     assert "previewOpen: false" in content
     assert "@click=\"previewOpen = true\"" in content
     assert "window.addEventListener('message'" in content
-    assert "clinicflow-minimize" in content
+    assert "kliniassist-minimize" in content
     assert "x-show=\"previewOpen\" x-transition x-cloak" in content
     assert "Minimize preview" not in content
     assert "Click the launcher to preview how patients open the widget." in content

@@ -1,5 +1,5 @@
 <div x-data="{mode: '{{ init_mode|default:'detail' }}'}">
-  <h2 id="appointment-detail-title" class="sr-only" x-text="mode === 'cancel' ? 'Cancel appointment' : (mode === 'reschedule' ? 'Reschedule appointment' : 'Appointment Details')">Appointment Details</h2>
+  <h2 id="appointment-detail-title" class="sr-only" x-text="mode === 'delete' ? 'Delete appointment' : (mode === 'cancel' ? 'Cancel appointment' : (mode === 'reschedule' ? 'Reschedule appointment' : 'Appointment Details'))">Appointment Details</h2>
   <!-- Detail Mode -->
   <div x-show="mode === 'detail'" x-cloak>
     <div class="cf-modal-header flex items-center justify-between">
@@ -106,6 +106,13 @@
     {% endif %}
 
     </div>
+    <div class="cf-modal-footer justify-between">
+      <button type="button" @click="mode = 'delete'" class="cf-btn cf-btn-danger"><i data-lucide="trash-2" class="h-4 w-4"></i>Delete permanently</button>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" @click="mode = 'cancel'" class="cf-btn cf-btn-secondary"><i data-lucide="ban" class="h-4 w-4"></i>Cancel appointment</button>
+        <button type="button" @click="mode = 'reschedule'" class="cf-btn cf-btn-primary"><i data-lucide="calendar-clock" class="h-4 w-4"></i>Reschedule</button>
+      </div>
+    </div>
   </div>
 
   <!-- Cancel Mode -->
@@ -146,6 +153,51 @@
       <div class="cf-modal-footer">
         <button type="button" @click="mode = 'detail'" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="arrow-left" class="h-4 w-4"></i>Back</button>
         <button type="submit" class="cf-btn cf-btn-danger flex-1"><i data-lucide="ban" class="h-4 w-4"></i>Confirm Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Delete Mode -->
+  <div x-show="mode === 'delete'" x-cloak>
+    <div class="cf-modal-header flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="grid h-10 w-10 place-items-center rounded-full bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]">
+          <i data-lucide="trash-2" class="h-5 w-5"></i>
+        </div>
+        <div>
+          <h3 id="delete-appointment-title" class="cf-modal-title">Delete appointment</h3>
+          <p class="text-sm text-[var(--cf-muted)]">This permanently removes the appointment and its internal notes.</p>
+        </div>
+      </div>
+      <button type="button" @click="detailOpen=false" class="cf-icon-btn" aria-label="Close">
+        <i data-lucide="x" class="h-5 w-5"></i>
+      </button>
+    </div>
+    <form method="post" action="{% url 'dashboard:delete_appointment' appointment.id %}"
+          hx-post="{% url 'dashboard:delete_appointment' appointment.id %}"
+          {% if source == 'calendar' %}
+          hx-target="#delete-error"
+          {% elif source == 'patient' %}
+          hx-target="#patient-detail-content"
+          {% else %}
+          hx-target="#appointments-table"
+          hx-include="#filter-form"
+          {% endif %}
+          hx-swap="innerHTML">
+      {% csrf_token %}
+      {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
+      <div class="cf-modal-body space-y-4">
+        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+          <p class="break-words text-sm text-[var(--cf-muted)]">Patient: <strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></p>
+          <p class="break-words text-sm text-[var(--cf-muted)]">Service: <strong class="text-[var(--cf-ink)]">{{ appointment.service.name }}</strong></p>
+          <p class="break-words text-sm text-[var(--cf-muted)]">Date: <strong class="text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</strong></p>
+        </div>
+        <p class="text-sm text-[var(--cf-muted)]">Use cancellation for normal operational removal. Delete only mistaken or duplicate bookings that should not remain in clinic history.</p>
+        <div id="delete-error" class="cf-error"></div>
+      </div>
+      <div class="cf-modal-footer">
+        <button type="button" @click="mode = 'detail'" class="cf-btn cf-btn-secondary flex-1"><i data-lucide="arrow-left" class="h-4 w-4"></i>Back</button>
+        <button type="submit" class="cf-btn cf-btn-danger flex-1"><i data-lucide="trash-2" class="h-4 w-4"></i>Delete permanently</button>
       </div>
     </form>
   </div>
