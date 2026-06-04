@@ -91,6 +91,100 @@ class WidgetTests(TestCase):
         self.assertNotContains(resp, "Doctor")
         self.assertNotContains(resp, "First available")
 
+    def test_widget_minimize_preserves_in_memory_state(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        minimize_start = content.index("minimize() {")
+        minimize_end = content.index("startChat()", minimize_start)
+        minimize_block = content[minimize_start:minimize_end]
+
+        self.assertIn("clinicflow-minimize", minimize_block)
+        self.assertNotIn("this.mode = 'home'", minimize_block)
+
+    def test_widget_header_includes_home_and_minimize_controls(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        header_start = content.index("<header")
+        header_end = content.index("</header>", header_start)
+        header = content[header_start:header_end]
+
+        self.assertIn('class="flex items-center gap-1"', header)
+        self.assertIn('@click="goHome()"', header)
+        self.assertIn('aria-label="Go to widget home"', header)
+        self.assertIn('data-lucide="home"', header)
+        self.assertIn('@click="minimize()"', header)
+        self.assertIn('aria-label="Minimize"', header)
+        self.assertLess(header.index('@click="goHome()"'), header.index('@click="minimize()"'))
+
+    def test_widget_home_button_resets_in_memory_state(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        selected_date = response.context["selected_date"].strftime("%Y-%m-%d")
+
+        go_home_start = content.index("goHome() {")
+        go_home_end = content.index("minimize()", go_home_start)
+        go_home_block = content[go_home_start:go_home_end]
+
+        expected_resets = [
+            "this.mode = 'home';",
+            "this.bookStep = 1;",
+            "this.selectedService = '';",
+            f"this.date = '{selected_date}';",
+            "this.slot = '';",
+            "this.chatTab = 'conversation';",
+            "this.chatHistory = [];",
+            "this.chatOptions = [];",
+            "this.chatState = 'greeting';",
+            "this.chatInput = '';",
+            "this.faqQuery = '';",
+            "this.collectInfo = { full_name: '', phone: '', email: '' };",
+        ]
+        for reset in expected_resets:
+            with self.subTest(reset=reset):
+                self.assertIn(reset, go_home_block)
+
+        self.assertNotIn("localStorage", go_home_block)
+        self.assertNotIn("sessionStorage", go_home_block)
+        self.assertNotIn("fetch(", go_home_block)
+        self.assertNotIn("htmx.ajax", go_home_block)
+        self.assertNotIn("this.loadSlots", go_home_block)
+        self.assertNotIn("this.sendChatAction", go_home_block)
+        self.assertNotIn("this.startChat", go_home_block)
+
+        minimize_start = content.index("minimize() {")
+        minimize_end = content.index("startChat()", minimize_start)
+        minimize_block = content[minimize_start:minimize_end]
+        self.assertNotIn("goHome()", minimize_block)
+        self.assertNotIn("this.mode = 'home'", minimize_block)
+
+    def test_widget_home_reset_ignores_in_flight_chat_responses(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        self.assertIn("stateResetVersion: 0,", content)
+
+        go_home_start = content.index("goHome() {")
+        go_home_end = content.index("minimize()", go_home_start)
+        go_home_block = content[go_home_start:go_home_end]
+        self.assertIn("this.stateResetVersion += 1;", go_home_block)
+
+        send_chat_start = content.index("async sendChatAction(")
+        send_chat_end = content.index("selectChatOption", send_chat_start)
+        send_chat_block = content[send_chat_start:send_chat_end]
+
+        self.assertIn("const stateResetVersion = this.stateResetVersion;", send_chat_block)
+        self.assertIn("if (stateResetVersion !== this.stateResetVersion) return;", send_chat_block)
+        self.assertLess(
+            send_chat_block.index("const stateResetVersion = this.stateResetVersion;"),
+            send_chat_block.index("const resp = await fetch"),
+        )
+        self.assertLess(
+            send_chat_block.index("if (stateResetVersion !== this.stateResetVersion) return;"),
+            send_chat_block.index("this.chatState = data.state;"),
+        )
+
     def test_onboarding_clinic_public_widget_endpoints_are_unavailable(self):
         Clinic.objects.filter(pk=self.clinic.pk).update(requires_onboarding=True)
 

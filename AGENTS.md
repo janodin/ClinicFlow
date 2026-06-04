@@ -156,5 +156,6 @@ The `gsd-*` skills provide a complete project management workflow: `gsd-new-proj
 
 - **Skills override default behavior** but your explicit instructions always take priority
 - **Process skills first** (brainstorming, debugging), then implementation skills (frontend-design)
+- Do not pause to ask for the browser visual companion prompt (`Some of what we're working on might be easier to explain if I can show it to you in a web browser...`). Continue without opening a local browser URL unless the user explicitly asks for browser-based mockups, diagrams, comparisons, or other visuals.
 - Some skills are **rigid** (TDD, debugging) and must be followed exactly; others are **flexible**
 - You can say things like: "Use brainstorming, then frontend-design to build a patient dashboard"

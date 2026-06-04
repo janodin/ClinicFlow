@@ -65,8 +65,10 @@ class ServiceTests(TestCase):
         content = response.content.decode()
 
         self.assertEqual(response.status_code, 200)
-        self.assertLess(content.index('class="cf-page-actions"'), content.index('class="cf-tabs"'))
-        self.assertLess(content.index('class="cf-tabs"'), content.index("Add service"))
+        page_actions_index = content.index('class="cf-page-actions"')
+        tabs_index = content.index("cf-tabs", page_actions_index)
+        self.assertLess(page_actions_index, tabs_index)
+        self.assertLess(tabs_index, content.index("Add service"))
 
     def test_service_archive_hides_from_active_lists(self):
         self.assertIn(self.service, self.clinic.services.filter(is_archived=False))

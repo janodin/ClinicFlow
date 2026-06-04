@@ -207,6 +207,10 @@ def calendar_events(request):
         colors = color_map.get(appointment.status, {})
         local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
         starts_at_label = local_start.strftime("%I:%M %p").lstrip("0").lower()
+        is_reschedulable = appointment.status not in {
+            Appointment.STATUS_COMPLETED,
+            Appointment.STATUS_CANCELLED,
+        }
         events.append(
             {
                 "id": appointment.id,
@@ -214,6 +218,8 @@ def calendar_events(request):
                 "start": appointment.starts_at.isoformat(),
                 "end": appointment.ends_at.isoformat(),
                 "className": f"status-{appointment.status}",
+                "editable": is_reschedulable,
+                "extendedProps": {"status": appointment.status},
                 "url": f"{reverse('dashboard:appointment_detail', args=[appointment.id])}?source=calendar",
                 **colors,
             }

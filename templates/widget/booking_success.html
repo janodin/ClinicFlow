@@ -7,7 +7,7 @@
       {% if clinic.logo %}
         <img src="{{ clinic.logo.url }}" alt="{{ clinic.name }}" class="mx-auto h-20 w-20 rounded-full object-cover">
       {% else %}
-        <div class="mx-auto grid h-20 w-20 place-items-center rounded-full text-white" style="background-color: {{ clinic.safe_widget_accent_color }}">
+        <div class="mx-auto grid h-20 w-20 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)]">
           <i data-lucide="check" class="h-10 w-10"></i>
         </div>
       {% endif %}
@@ -15,9 +15,9 @@
       <p class="mt-2 text-[var(--cf-muted)]">Your appointment has been successfully booked.</p>
     </div>
 
-    <div class="mt-4 rounded-2xl p-4 text-white" style="background-color: {{ clinic.safe_widget_accent_color }}">
+    <div class="mt-4 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-4 text-[var(--cf-ink)]">
       <p class="text-sm font-medium opacity-90">Reference Code</p>
-      <p class="text-2xl font-black tracking-wider" data-testid="reference-code">{{ appointment.reference_code }}</p>
+      <p class="break-all text-2xl font-black tracking-wider" data-testid="reference-code">{{ appointment.reference_code }}</p>
     </div>
 
     <div class="mt-6 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-5 text-left text-sm">
@@ -28,7 +28,7 @@
       <div class="flex justify-between gap-3 py-2"><span class="shrink-0 text-[var(--cf-muted)]">Patient</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></div>
     </div>
 
-    <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full" style="background-color: {{ clinic.safe_widget_accent_color }}"><i data-lucide="calendar-plus" class="h-4 w-4"></i>Book Another Appointment</a>
+    <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full"><i data-lucide="calendar-plus" class="h-4 w-4"></i>Book Another Appointment</a>
   </section>
 </main>
 {% endblock %}

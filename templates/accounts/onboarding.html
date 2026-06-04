@@ -19,7 +19,7 @@
     <form method="post" class="space-y-6">
       {% csrf_token %}
       {% if form.non_field_errors %}
-        <div class="cf-card border-[var(--cf-status-cancelled-border)] bg-[var(--cf-status-cancelled-bg)] p-4 text-sm text-[var(--cf-status-cancelled-text)]">{{ form.non_field_errors.0 }}</div>
+        <div class="cf-card border-[var(--cf-status-cancelled-text)] bg-[var(--cf-status-cancelled-bg)] p-4 text-sm text-[var(--cf-status-cancelled-text)]">{{ form.non_field_errors.0 }}</div>
       {% endif %}
 
       <section class="cf-card bg-[var(--cf-bg)] p-6">

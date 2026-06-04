@@ -8,8 +8,8 @@
               @click="selectSlot('{{ slot.starts_at.isoformat }}')"
               :aria-pressed="(slot === '{{ slot.starts_at.isoformat }}').toString()"
               class="cf-slot-button"
-              :class="slot === '{{ slot.starts_at.isoformat }}' ? 'text-white border-transparent' : ''"
-              :style="slot === '{{ slot.starts_at.isoformat }}' ? 'background-color:' + accentColor + '; border-color:' + accentColor : ''">
+              :class="slot === '{{ slot.starts_at.isoformat }}' ? 'border-transparent' : ''"
+              :style="slot === '{{ slot.starts_at.isoformat }}' ? 'background-color:' + accentColor + '; border-color:' + accentColor + '; color:' + accentForeground() : ''">
         {{ slot.label }}
       </button>
     {% endfor %}

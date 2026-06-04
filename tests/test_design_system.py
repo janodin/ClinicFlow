@@ -210,7 +210,6 @@ def test_mobile_responsive_css_has_shared_baseline_contracts():
     mobile_break = css_rule_block(".cf-mobile-break")
     scroll_hint = css_rule_block(".cf-mobile-scroll-hint")
     table_scroll_hint = css_rule_block(".cf-table-scroll::after")
-    sticky_action = css_rule_block(".cf-sticky-action-col")
     mobile_block = css_media_block("max-width: 640px")
 
     assert "min-width: 0;" in mobile_break
@@ -218,9 +217,7 @@ def test_mobile_responsive_css_has_shared_baseline_contracts():
     assert "word-break: break-word;" in mobile_break
     assert "color: var(--cf-muted);" in scroll_hint
     assert "background: linear-gradient(90deg, transparent, var(--cf-surface));" in table_scroll_hint
-    assert "position: sticky;" in sticky_action
-    assert "right: 0;" in sticky_action
-    assert "box-shadow:" in sticky_action
+    assert ".cf-sticky-action-col" not in css
     assert ".cf-row-actions .cf-btn-xs" in mobile_block
     assert "min-height: 2.75rem;" in mobile_block
     assert "min-height: 2.5rem;" in mobile_block
@@ -253,18 +250,95 @@ def test_calendar_mobile_viewport_contracts():
     css = css_text()
     mobile_css = css_media_block("max-width: 640px")
 
-    assert "calendarScreen = window.matchMedia('(max-width: 640px)')" in template
+    assert "calendarScreen = window.matchMedia('(max-width: 768px)')" in template
+    assert "calendarCoarsePointer = window.matchMedia('(pointer: coarse)')" in template
+    assert "const isPhone = () => calendarScreen.matches;" in template
+    assert "const isCoarsePointer = () => calendarCoarsePointer.matches;" in template
+    assert "initialView: 'dayGridMonth'" in template
+    assert "initialView: isPhone() ? 'timeGridDay' : 'dayGridMonth'" not in template
+    assert "calendar.changeView('timeGridDay')" not in template
     assert "syncCalendarViewport" in template
     assert "calendar.setOption('height', phone ? 'auto' : '100%')" in template
     assert "calendar.setOption('dayMaxEvents', phone ? 2 : 5)" in template
-    assert "data-calendar-desktop-view" in template
-    assert "cf-calendar-desktop-view" in template
-    assert "hidden sm:inline-flex" in template
-    assert "let desktopView = 'dayGridMonth';" in template
-    assert "desktopView = info.view.type;" in template
-    assert "calendar.changeView(desktopView);" in template
-    assert ".cf-calendar-desktop-view { display: inline-flex; }" in css
-    assert ".cf-calendar-desktop-view { display: none !important; }" in mobile_css
+    assert "calendar.updateSize();" in template
+    assert "calendarScreen.addEventListener('change', syncCalendarViewport)" in template
+    assert "calendarScreen.addListener(syncCalendarViewport)" in template
+    assert "window.addEventListener('orientationchange'" in template
+    assert "window.setTimeout(syncCalendarViewport, 150)" in template
+    assert "data-calendar-view=\"dayGridMonth\"" in template
+    assert "data-calendar-view=\"timeGridWeek\"" in template
+    assert "data-calendar-view=\"timeGridDay\"" in template
+    assert "data-calendar-desktop-view" not in template
+    assert "cf-calendar-desktop-view" not in template
+    assert ".cf-calendar-view-button[aria-pressed=\"true\"]" in css
+    assert ".cf-calendar-view-button[aria-pressed=\"false\"]" in css
+    assert ".cf-calendar-grid-scroll" in css
+    assert "min-width: 42rem;" in mobile_css
+
+
+def test_calendar_responsive_css_collapses_header_filters_and_safe_month_scroll():
+    css = css_text()
+    tablet_css = css_media_block("max-width: 768px")
+    mobile_css = css_media_block("max-width: 640px")
+
+    card = css_rule_block(".cf-calendar-card")
+    scroll = css_rule_block(".cf-calendar-grid-scroll")
+    title = css_rule_block(".cf-calendar-title")
+    legend_badge = css_rule_block(".cf-calendar-legend-badge")
+    time_label = css_rule_block("#calendar .fc-timegrid-slot-label")
+    time_event = css_rule_block("#calendar .fc-timegrid-event")
+
+    assert "height: calc(100dvh - 15rem);" in card
+    assert "min-height: 32rem;" in card
+    assert "overflow: hidden;" in scroll
+    assert "font-weight: 400;" in title
+    assert "position: relative;" in legend_badge
+    assert "font-variant-numeric: tabular-nums;" in time_label
+    assert "border-radius: var(--cf-radius-sm);" in time_event
+    assert "height: calc(100dvh - 8.5rem);" in tablet_css
+    assert "min-height: calc(100dvh - 8.5rem);" in tablet_css
+    assert ".cf-calendar-header" in tablet_css
+    assert "grid-template-columns: 1fr;" in tablet_css
+    assert "#calendar.cf-calendar-grid-scroll" in tablet_css
+    assert ".cf-calendar-grid-scroll" in tablet_css
+    assert "overflow-x: auto;" in tablet_css
+    assert "min-width: 44rem;" in tablet_css
+    assert "#calendar .fc-dayGridMonth-view .fc-scroller" in tablet_css
+    assert "overflow-y: visible !important;" in tablet_css
+    assert ".cf-calendar-title" in mobile_css
+    assert "height: calc(100dvh - 8.5rem);" in mobile_css
+    assert "min-height: calc(100dvh - 8.5rem);" in mobile_css
+    assert "white-space: normal;" in mobile_css
+    assert "overflow-wrap: anywhere;" in mobile_css
+    assert "min-width: 42rem;" in mobile_css
+
+
+def test_calendar_interaction_contracts_for_loading_active_views_and_touch_drag():
+    template = source_text("templates/dashboard/calendar.html")
+
+    assert "id=\"calendar-today\" aria-pressed=\"false\" class=\"cf-btn cf-btn-sm cf-calendar-view-button\"" in template
+    assert "const todayButton = document.getElementById('calendar-today');" in template
+    assert "function syncCalendarTodayButton(view)" in template
+    assert "const active = view.currentStart <= today && today < view.currentEnd;" in template
+    assert "todayButton.setAttribute('aria-pressed', active ? 'true' : 'false');" in template
+    assert "todayButton.classList.toggle('cf-calendar-view-active', active);" in template
+    assert "syncCalendarTodayButton(info.view);" in template
+    assert "aria-pressed=\"true\"" in template
+    assert "aria-pressed=\"false\"" in template
+    assert "syncCalendarViewButtons(info.view.type);" in template
+    assert "button.setAttribute('aria-pressed', active ? 'true' : 'false');" in template
+    assert "button.classList.toggle('cf-calendar-view-active', active);" in template
+    assert "loading: function(isLoading)" in template
+    assert "setCalendarBusy(isLoading);" in template
+    assert "showCalendarError('Calendar events could not be loaded. Please try again.');" in template
+    assert "eventAllow: function(dropInfo, draggedEvent)" in template
+    assert "return isCalendarEventEditable(draggedEvent);" in template
+    assert "editable: !isCoarsePointer()" in template
+    assert "calendarCoarsePointer.addEventListener('change', syncCalendarEditability)" in template
+    assert "calendarCoarsePointer.addListener(syncCalendarEditability)" in template
+    assert "showCalendarDetailError" in template
+    assert "htmx:responseError" in template
+    assert "htmx:sendError" in template
 
 
 def test_appointments_mobile_filter_and_sticky_action_contracts():
@@ -281,8 +355,11 @@ def test_appointments_mobile_filter_and_sticky_action_contracts():
     assert "id=\"appointment-advanced-filters\"" in template
     assert ".cf-mobile-filter-toggle { display: none; }" in css
     assert ".cf-mobile-filter-toggle { display: inline-flex; }" in mobile_css
-    assert "cf-sticky-action-col" in list_template
-    assert "cf-sticky-action-col" in row_template
+    assert "cf-sticky-action-col" not in list_template
+    assert "cf-sticky-action-col" not in row_template
+    assert "cf-row-actions cf-appointment-row-actions" in row_template
+    assert "cf-appointment-view-action" in row_template
+    assert "cf-btn-danger" in row_template
 
 
 def test_patient_and_service_mobile_contracts():
@@ -290,6 +367,7 @@ def test_patient_and_service_mobile_contracts():
     add_patient = source_text("templates/dashboard/partials/add_patient_modal.html")
     patient_detail = source_text("templates/dashboard/partials/patient_detail_content.html")
     patient_list = source_text("templates/dashboard/partials/patient_list.html")
+    patient_row = source_text("templates/dashboard/partials/patient_row.html")
     service_row = source_text("templates/dashboard/partials/service_row.html")
     services = source_text("templates/dashboard/services.html")
     duplicate_list = source_text("templates/dashboard/partials/duplicate_list.html")
@@ -301,7 +379,12 @@ def test_patient_and_service_mobile_contracts():
     assert "@htmx:after-swap.window=\"if (editOpen && $event.target.id === 'edit-modal-body') focusModal($el)\"" in patients
     assert "trapModalFocus" in add_patient
     assert "cf-mobile-break" in patient_detail
-    assert "cf-sticky-action-col" in patient_list
+    assert "cf-sticky-action-col" not in patient_list
+    assert "cf-sticky-action-col" not in patient_row
+    assert "cf-row-actions" in patient_list
+    assert "cf-row-actions" in patient_row
+    assert "cf-appointment-view-action" in patient_list
+    assert "cf-service-edit-action" in patient_list
     assert "<div class=\"cf-row-actions shrink-0\">" in duplicate_list
     assert "class=\"cf-btn cf-btn-sm cf-btn-primary\"" in duplicate_list
     assert "cf-row-actions hidden" not in duplicate_list
@@ -339,6 +422,70 @@ def test_auth_public_and_widget_mobile_contracts():
     assert "break-all" in widget_success
     assert "break-words" in widget_error
     assert "@media (max-width: 640px)" in widget_views
+
+
+def test_widget_mobile_embed_contracts_are_specific():
+    widget = source_text("templates/widget/widget.html")
+    partial_success = source_text("templates/widget/partials/booking_success.html")
+    full_success = source_text("templates/widget/booking_success.html")
+    widget_error = source_text("templates/widget/partials/booking_error.html")
+    widget_embed = source_text("templates/dashboard/widget_embed.html")
+    widget_views = source_text("widget/views.py")
+
+    assert "flex min-w-0 items-center gap-3" in widget
+    assert "shrink-0 rounded-full" in widget
+    assert "<div class=\"min-w-0\">" in widget
+    assert "<h1 class=\"max-w-full truncate" in widget
+    assert "name=\"phone\" type=\"tel\" required autocomplete=\"tel\"" in widget
+    assert "name=\"email\" type=\"email\" autocomplete=\"email\"" in widget
+    assert "x-model=\"collectInfo.phone\"" in widget
+    assert "type=\"tel\" autocomplete=\"tel\"" in widget
+    assert "x-model=\"collectInfo.email\"" in widget
+    assert "type=\"email\" autocomplete=\"email\"" in widget
+    assert "accentForeground()" in widget
+    assert "background-color:' + accentColor + '; color:' + accentForeground()" in widget
+    assert "min-h-10 flex-1 rounded-lg" in widget
+    assert "min-h-10 rounded-xl border" in widget
+    assert "min-h-11 w-full rounded-xl" in widget
+    assert "min-h-11 min-w-11" in widget
+    assert "text-white text-sm font-black\" style=\"background-color: {{ clinic.safe_widget_accent_color }}" not in widget
+    assert "break-all" in partial_success
+    assert "break-all" in full_success
+    assert "text-white\" style=\"background-color: {{ clinic.safe_widget_accent_color }}" not in partial_success
+    assert "text-white\" style=\"background-color: {{ clinic.safe_widget_accent_color }}" not in full_success
+    assert "cf-btn cf-btn-primary mt-4 w-full\" style=\"background-color: {{ clinic.safe_widget_accent_color }}" not in partial_success
+    assert "cf-btn cf-btn-primary mt-4 w-full\" style=\"background-color: {{ clinic.safe_widget_accent_color }}" not in full_success
+    assert "border-[var(--cf-danger)]" in widget_error
+    assert "bg-[var(--cf-danger-soft)]" in widget_error
+    assert "text-[var(--cf-danger)]" in widget_error
+    assert "height:min(500px, 70dvh)" in widget_embed
+    assert "clinicflow-widget-frame" in widget_views
+    assert "@media (max-width: 640px)" in widget_views
+
+
+def test_widget_header_controls_use_system_hover_treatment():
+    widget = source_text("templates/widget/widget.html")
+    css = css_text()
+
+    assert '@click="goHome()" class="cf-widget-header-control min-h-10 min-w-10 rounded-xl"' in widget
+    assert '@click="minimize()" class="cf-widget-header-control min-h-10 min-w-10 rounded-xl"' in widget
+
+    control = css_rule_block(".cf-widget-header-control")
+    assert "display: inline-grid;" in control
+    assert "border: 1px solid transparent;" in control
+    assert "color: currentColor;" in control
+
+    hover = css_rule_block(".cf-widget-header-control:hover,\n.cf-widget-header-control:focus-visible")
+    assert "background: rgba(255, 255, 255, .22);" in hover
+    assert "border-color: rgba(255, 255, 255, .38);" in hover
+    assert "transform: translateY(-1px);" in hover
+
+    assert re.search(
+        r"(?m)^\.cf-widget-header-control:focus-visible\s*\{\s*\n"
+        r"\s*outline: none;\s*\n"
+        r"\s*box-shadow: 0 0 0 3px var\(--cf-focus\), var\(--cf-shadow-subtle\);",
+        css,
+    )
 
 
 def css_rule_block(selector):
@@ -2181,9 +2328,10 @@ def test_mobile_responsive_calendar_and_widget_use_safe_viewports():
     assistant_settings = source_text("templates/dashboard/assistant_settings.html")
     widget_embed = source_text("templates/dashboard/widget_embed.html")
 
-    assert "const calendarScreen = window.matchMedia('(max-width: 640px)');" in calendar
+    assert "const calendarScreen = window.matchMedia('(max-width: 768px)');" in calendar
     assert "const isPhone = () => calendarScreen.matches;" in calendar
-    assert "initialView: isPhone() ? 'timeGridDay' : 'dayGridMonth'" in calendar
+    assert "initialView: 'dayGridMonth'" in calendar
+    assert "initialView: isPhone() ? 'timeGridDay' : 'dayGridMonth'" not in calendar
     assert "dayMaxEvents: isPhone() ? 2 : 5" in calendar
     assert "syncCalendarViewport();" in calendar
     assert "max-h-[calc(100dvh-1rem)]" in widget

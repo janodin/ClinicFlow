@@ -2,9 +2,6 @@
 {% block title %}Calendar{% endblock %}
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
-<style>
-  .fc-event { cursor: pointer; }
-</style>
 {% endblock %}
 {% block content %}
 <div x-data="{ detailOpen: false, trapCalendarFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" @open-modal.window="detailOpen = true" @close-calendar-modal.window="detailOpen = false" @keydown.escape.window="detailOpen = false" class="cf-page">
@@ -41,31 +38,31 @@
     </div>
   </div>
 
-  <div class="cf-card cf-calendar-card flex flex-col" style="height: calc(100vh - 240px);">
+  <div class="cf-card cf-calendar-card flex flex-col">
 
   <div class="cf-calendar-header">
     <div class="cf-calendar-nav" aria-label="Calendar navigation">
       <button type="button" id="calendar-prev" class="cf-btn cf-btn-primary cf-btn-sm" aria-label="Previous calendar period"><i data-lucide="chevron-left" class="h-4 w-4"></i></button>
       <button type="button" id="calendar-next" class="cf-btn cf-btn-primary cf-btn-sm" aria-label="Next calendar period"><i data-lucide="chevron-right" class="h-4 w-4"></i></button>
-      <button type="button" id="calendar-today" class="cf-btn cf-btn-primary cf-btn-sm"><i data-lucide="calendar-clock" class="h-4 w-4"></i>today</button>
+      <button type="button" id="calendar-today" aria-pressed="false" class="cf-btn cf-btn-sm cf-calendar-view-button"><i data-lucide="calendar-clock" class="h-4 w-4"></i>today</button>
     </div>
     <h2 id="calendar-title" class="cf-calendar-title" aria-live="polite">Calendar</h2>
     <div class="cf-calendar-views" aria-label="Calendar views">
-      <button type="button" data-calendar-view="dayGridMonth" data-calendar-desktop-view class="hidden sm:inline-flex cf-btn cf-btn-primary cf-btn-sm cf-calendar-desktop-view"><i data-lucide="calendar-days" class="h-4 w-4"></i>month</button>
-      <button type="button" data-calendar-view="timeGridWeek" data-calendar-desktop-view class="hidden sm:inline-flex cf-btn cf-btn-primary cf-btn-sm cf-calendar-desktop-view"><i data-lucide="calendar-range" class="h-4 w-4"></i>week</button>
-      <button type="button" data-calendar-view="timeGridDay" class="cf-btn cf-btn-primary cf-btn-sm"><i data-lucide="calendar" class="h-4 w-4"></i>day</button>
+      <button type="button" data-calendar-view="dayGridMonth" aria-pressed="true" class="cf-btn cf-btn-sm cf-calendar-view-button cf-calendar-view-active"><i data-lucide="calendar-days" class="h-4 w-4"></i>month</button>
+      <button type="button" data-calendar-view="timeGridWeek" aria-pressed="false" class="cf-btn cf-btn-sm cf-calendar-view-button"><i data-lucide="calendar-range" class="h-4 w-4"></i>week</button>
+      <button type="button" data-calendar-view="timeGridDay" aria-pressed="false" class="cf-btn cf-btn-sm cf-calendar-view-button"><i data-lucide="calendar" class="h-4 w-4"></i>day</button>
     </div>
   </div>
 
   <div class="cf-calendar-legend" aria-label="Appointment status legend">
-    <span class="cf-badge cf-status-booked">Booked</span>
-    <span class="cf-badge cf-status-confirmed">Confirmed</span>
-    <span class="cf-badge cf-status-completed">Completed</span>
-    <span class="cf-badge cf-status-cancelled">Cancelled</span>
-    <span class="cf-badge cf-status-no-show">No-show</span>
+    <span class="cf-badge cf-calendar-legend-badge cf-status-booked"><span class="cf-calendar-status-dot" aria-hidden="true"></span>Booked</span>
+    <span class="cf-badge cf-calendar-legend-badge cf-status-confirmed"><span class="cf-calendar-status-dot" aria-hidden="true"></span>Confirmed</span>
+    <span class="cf-badge cf-calendar-legend-badge cf-status-completed"><span class="cf-calendar-status-dot" aria-hidden="true"></span>Completed</span>
+    <span class="cf-badge cf-calendar-legend-badge cf-status-cancelled"><span class="cf-calendar-status-dot" aria-hidden="true"></span>Cancelled</span>
+    <span class="cf-badge cf-calendar-legend-badge cf-status-no-show"><span class="cf-calendar-status-dot" aria-hidden="true"></span>No-show</span>
   </div>
   <div id="calendar-loading" role="status" aria-live="polite" class="mb-3 hidden rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] px-4 py-2 text-sm font-semibold text-[var(--cf-muted)]">Updating calendar...</div>
-  <div id="calendar" class="min-h-0 flex-1" style="height: 100%;"></div>
+  <div id="calendar" class="cf-calendar-grid-scroll min-h-0 flex-1"></div>
 
   <div x-show="detailOpen" x-cloak class="cf-modal-backdrop" @click.self="detailOpen = false" @keydown.tab="trapCalendarFocus($event, $el)" tabindex="-1" x-effect="if (detailOpen) $nextTick(() => $el.querySelector('button, [href], input, select, textarea')?.focus())">
     <div class="cf-modal cf-modal-lg" role="dialog" aria-modal="true" aria-labelledby="appointment-detail-title" @click.stop>
@@ -91,32 +88,89 @@ document.addEventListener('DOMContentLoaded', function() {
   const calendarEl = document.getElementById('calendar');
   const loadingEl = document.getElementById('calendar-loading');
   const titleEl = document.getElementById('calendar-title');
+  const todayButton = document.getElementById('calendar-today');
+  const calendarScreen = window.matchMedia('(max-width: 768px)');
+  const calendarCoarsePointer = window.matchMedia('(pointer: coarse)');
+  const isPhone = () => calendarScreen.matches;
+  const isCoarsePointer = () => calendarCoarsePointer.matches;
+  const viewButtons = document.querySelectorAll('[data-calendar-view]');
+  let calendarErrorVisible = false;
   function updateCalendarTitle(title) {
     if (titleEl) titleEl.textContent = title;
   }
   function setCalendarBusy(isBusy) {
     calendarEl.setAttribute('aria-busy', isBusy ? 'true' : 'false');
-    if (loadingEl) loadingEl.classList.toggle('hidden', !isBusy);
+    if (!loadingEl) return;
+    if (isBusy) {
+      calendarErrorVisible = false;
+      loadingEl.textContent = 'Updating calendar...';
+      loadingEl.classList.remove('cf-calendar-message-error');
+      loadingEl.classList.remove('hidden');
+    } else if (!calendarErrorVisible) {
+      loadingEl.classList.add('hidden');
+    }
   }
-  const calendarScreen = window.matchMedia('(max-width: 640px)');
-  const isPhone = () => calendarScreen.matches;
-  let desktopView = 'dayGridMonth';
+  function showCalendarError(message) {
+    calendarErrorVisible = true;
+    if (loadingEl) {
+      loadingEl.textContent = message;
+      loadingEl.classList.add('cf-calendar-message-error');
+      loadingEl.classList.remove('hidden');
+    }
+    window.dispatchEvent(new CustomEvent('toast-message', {
+      detail: { message, type: 'error' }
+    }));
+  }
+  function showCalendarDetailError() {
+    document.getElementById('detail-modal-body').innerHTML = `
+      <div class="cf-modal-body">
+        <h2 id="appointment-detail-title" class="cf-modal-title">Appointment details unavailable</h2>
+        <p class="cf-muted mt-2">We could not load this appointment. Close the modal and try again.</p>
+      </div>
+    `;
+  }
+  function isCalendarEventEditable(event) {
+    const status = event.extendedProps ? event.extendedProps.status : null;
+    return !isCoarsePointer() && status !== 'completed' && status !== 'cancelled';
+  }
+  function syncCalendarViewButtons(activeView) {
+    viewButtons.forEach(function(button) {
+      const active = button.dataset.calendarView === activeView;
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.classList.toggle('cf-calendar-view-active', active);
+    });
+  }
+  function syncCalendarTodayButton(view) {
+    const today = new Date();
+    const active = view.currentStart <= today && today < view.currentEnd;
+    todayButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+    todayButton.classList.toggle('cf-calendar-view-active', active);
+  }
   const calendar = new FullCalendar.Calendar(calendarEl, {
-    initialView: isPhone() ? 'timeGridDay' : 'dayGridMonth',
+    initialView: 'dayGridMonth',
     height: isPhone() ? 'auto' : '100%',
     expandRows: true,
     dayMaxEvents: isPhone() ? 2 : 5,
     displayEventTime: false,
     moreLinkText: '+{num} more',
     headerToolbar: false,
-    editable: true,
+    editable: !isCoarsePointer(),
+    eventAllow: function(dropInfo, draggedEvent) {
+      return isCalendarEventEditable(draggedEvent);
+    },
+    loading: function(isLoading) {
+      setCalendarBusy(isLoading);
+    },
     datesSet: function(info) {
       updateCalendarTitle(info.view.title);
-      if (!isPhone()) {
-        desktopView = info.view.type;
-      }
+      syncCalendarViewButtons(info.view.type);
+      syncCalendarTodayButton(info.view);
     },
     eventDrop: function(info) {
+      if (!isCalendarEventEditable(info.event)) {
+        info.revert();
+        return;
+      }
       if (!window.confirm('Reschedule this appointment to the new time?')) {
         info.revert();
         return;
@@ -191,7 +245,10 @@ document.addEventListener('DOMContentLoaded', function() {
           return response.json();
         })
         .then(data => successCallback(data))
-        .catch(err => failureCallback(err));
+        .catch(err => {
+          showCalendarError('Calendar events could not be loaded. Please try again.');
+          failureCallback(err);
+        });
     }
   });
   calendar.render();
@@ -200,13 +257,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const phone = isPhone();
     calendar.setOption('height', phone ? 'auto' : '100%');
     calendar.setOption('dayMaxEvents', phone ? 2 : 5);
-    if (phone && calendar.view.type !== 'timeGridDay') {
-      desktopView = calendar.view.type;
-      calendar.changeView('timeGridDay');
-    } else if (!phone && calendar.view.type === 'timeGridDay' && desktopView !== 'timeGridDay') {
-      calendar.changeView(desktopView);
-    }
     calendar.updateSize();
+  }
+
+  function syncCalendarEditability() {
+    calendar.setOption('editable', !isCoarsePointer());
   }
 
   syncCalendarViewport();
@@ -218,6 +273,11 @@ document.addEventListener('DOMContentLoaded', function() {
   window.addEventListener('orientationchange', function() {
     window.setTimeout(syncCalendarViewport, 150);
   });
+  if (calendarCoarsePointer.addEventListener) {
+    calendarCoarsePointer.addEventListener('change', syncCalendarEditability);
+  } else {
+    calendarCoarsePointer.addListener(syncCalendarEditability);
+  }
 
   document.getElementById('filter-service').addEventListener('change', () => calendar.refetchEvents());
   document.getElementById('filter-status').addEventListener('change', () => calendar.refetchEvents());
@@ -227,11 +287,20 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('calendar-today').addEventListener('click', () => calendar.today());
   document.querySelectorAll('[data-calendar-view]').forEach(function(button) {
     button.addEventListener('click', function() {
-      if (!isPhone()) {
-        desktopView = button.dataset.calendarView;
-      }
       calendar.changeView(button.dataset.calendarView);
     });
+  });
+  document.body.addEventListener('htmx:responseError', function(event) {
+    const target = event.detail && event.detail.target;
+    if (target && target.id === 'detail-modal-body') {
+      showCalendarDetailError();
+    }
+  });
+  document.body.addEventListener('htmx:sendError', function(event) {
+    const target = event.detail && event.detail.target;
+    if (target && target.id === 'detail-modal-body') {
+      showCalendarDetailError();
+    }
   });
 });
 </script>

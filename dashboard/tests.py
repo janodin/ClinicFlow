@@ -171,6 +171,36 @@ def test_calendar_events_title_shows_time_and_patient_only(calendar_setup, clien
 
 
 @pytest.mark.django_db
+def test_calendar_events_include_status_metadata_and_editable_flag(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events"))
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["extendedProps"]["status"] == appointment.status
+    assert data[0]["editable"] is True
+
+
+@pytest.mark.django_db
+def test_calendar_events_mark_completed_and_cancelled_as_not_editable(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+
+    for blocked_status in [Appointment.STATUS_COMPLETED, Appointment.STATUS_CANCELLED]:
+        appointment.status = blocked_status
+        appointment.save(update_fields=["status"])
+
+        response = client.get(reverse("dashboard:calendar_events"))
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["extendedProps"]["status"] == blocked_status
+        assert data[0]["editable"] is False
+
+
+@pytest.mark.django_db
 def test_calendar_events_use_neon_aqua_status_colors(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     pending_start = appointment.starts_at + timedelta(hours=1)
@@ -980,8 +1010,8 @@ def test_messenger_settings_active_connection_shows_page_block_without_setup_hel
     page_block_start = content.index('class="cf-messenger-page-strip"')
     page_block_end = content.index('<form id="messenger-connection-form"')
     page_block = content[page_block_start:page_block_end]
-    summary_start = page_block.index('class="cf-messenger-page-summary"')
-    details_start = page_block.index('class="cf-messenger-page-details"')
+    summary_start = page_block.index("cf-messenger-page-summary")
+    details_start = page_block.index("cf-messenger-page-details")
 
     assert "GrowKit" in page_block
     assert "Facebook Page:" in page_block
