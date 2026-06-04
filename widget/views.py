@@ -278,12 +278,12 @@ def _widget_ai_initial_message(clinic):
 
 def _widget_ai_message_from_action(action, value):
     text = (value or "").strip()
+    if action == "start_booking" or text == "start_booking":
+        return "I want to book an appointment"
+    if action == "view_faqs" or text == "view_faqs":
+        return "I have a question about the clinic"
     if text:
         return text
-    if action == "start_booking":
-        return "I want to book an appointment"
-    if action == "view_faqs":
-        return "I have a question about the clinic"
     return ""
 
 

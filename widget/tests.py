@@ -205,6 +205,24 @@ class WidgetTests(TestCase):
         self.assertEqual(payload["clinic_slug"], self.clinic.slug)
         self.assertEqual(payload["message"], "I want to book an appointment")
 
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_ai_legacy_booking_control_maps_to_natural_text(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "Sure, what service would you like?"}
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "select_option", "value": "start_booking"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["state"], "ai")
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["message"], "I want to book an appointment")
+
     def test_chat_step_rejects_short_phone_before_confirmation(self):
         url = self._drive_chat_to_collect_info()
 
