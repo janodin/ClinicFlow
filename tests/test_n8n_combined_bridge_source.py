@@ -8,7 +8,7 @@ LEGACY_SOURCE = Path(__file__).resolve().parents[1] / "messenger-workflow.ts"
 def test_combined_bridge_uses_one_shared_ai_core():
     source = SOURCE.read_text(encoding="utf-8")
 
-    assert "name: 'ClinicFlow Shared AI Agent'" in source
+    assert "name: 'KliniAssist Shared AI Agent'" in source
     assert "name: 'Shared Chat Model'" in source
     assert "name: 'Shared Conversation Memory'" in source
     assert "name: 'Clinic Messenger AI Agent'" not in source
@@ -70,7 +70,7 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
 
 def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmation():
     source = SOURCE.read_text(encoding="utf-8")
-    agent_start = source.index("name: 'ClinicFlow Shared AI Agent'")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
     agent_end = source.index("const prepareSharedFallback")
     agent_block = source[agent_start:agent_end]
 

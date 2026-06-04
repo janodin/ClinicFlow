@@ -2493,7 +2493,7 @@ def test_full_booking_flow_via_webhook():
     client = Client()
     user = User.objects.create_user(username="owner_flow", email="owner_flow@test.com", password="pass")
     group = ClinicGroup.objects.create(name="GroupFlow", owner=user)
-    clinic = Clinic.objects.create(group=group, name="ClinicFlow", timezone="Asia/Manila", booking_approval_mode=Clinic.APPROVAL_AUTO)
+    clinic = Clinic.objects.create(group=group, name="KliniAssist", timezone="Asia/Manila", booking_approval_mode=Clinic.APPROVAL_AUTO)
     conn = MessengerConnection.objects.create(
         clinic=clinic,
         app_secret="test_secret",
