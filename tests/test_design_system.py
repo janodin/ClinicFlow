@@ -67,8 +67,10 @@ def test_visible_brand_copy_uses_kliniassist():
 
     combined = "\n".join(source_text(path) for path in brand_files)
 
+    legacy_brand = "Clinic" + "Flow"
+
     assert "KliniAssist" in combined
-    assert "ClinicFlow" not in combined
+    assert legacy_brand not in combined
 
 
 def div_block_containing(template, marker):
@@ -1499,7 +1501,8 @@ def test_service_row_toggle_button_uses_stateful_action_styles():
 def test_archived_service_row_has_guarded_delete_confirmation():
     template = partial_text("service_row.html")
 
-    archived_start = template.index("{% else %}")
+    active_branch_start = template.index("{% if not service.is_archived %}")
+    archived_start = template.index("{% else %}", active_branch_start)
     archived_block = template[archived_start:]
 
     assert "dashboard:delete_service" in archived_block
