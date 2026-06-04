@@ -1067,6 +1067,56 @@ def restore_service(request, pk):
     return redirect("dashboard:services")
 
 
+def _service_list_response(request, clinic, message, *, toast_type="success"):
+    active_services = clinic.services.filter(is_archived=False).select_related("clinic")
+    archived_services = clinic.services.filter(is_archived=True).select_related("clinic")
+    membership = get_active_membership(request.user)
+    response = render(
+        request,
+        "dashboard/partials/service_list.html",
+        {
+            "clinic": clinic,
+            "active_services": active_services,
+            "archived_services": archived_services,
+            "form": ServiceForm(clinic),
+            "can_manage": user_can_manage_daily_ops(membership),
+        },
+    )
+    response["HX-Retarget"] = "#services-list-container"
+    response["HX-Reswap"] = "innerHTML"
+    response["HX-Trigger"] = json.dumps({
+        "toast-message": {"message": message, "type": toast_type}
+    })
+    return response
+
+
+@login_required
+@require_POST
+def delete_service(request, pk):
+    clinic = _clinic_or_redirect(request)
+    service = get_object_or_404(clinic.services, pk=pk)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
+    if not service.is_archived:
+        message = "Archive this service before deleting it permanently."
+        if request.headers.get("HX-Request"):
+            return _service_list_response(request, clinic, message, toast_type="error")
+        messages.error(request, message)
+        return redirect("dashboard:services")
+    if service.appointments.exists():
+        message = "Services with appointment history cannot be deleted. Keep it archived for records."
+        if request.headers.get("HX-Request"):
+            return _service_list_response(request, clinic, message, toast_type="error")
+        messages.error(request, message)
+        return redirect("dashboard:services")
+    service.delete()
+    if request.headers.get("HX-Request"):
+        return _service_list_response(request, clinic, "Service deleted.")
+    messages.success(request, "Service deleted.")
+    return redirect("dashboard:services")
+
+
 @login_required
 def settings(request):
     clinic = _clinic_or_redirect(request)

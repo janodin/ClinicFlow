@@ -106,7 +106,7 @@
               <input type="hidden" name="starts_at" :value="slot">
               <div class="cf-field"><label for="widget-full-name" class="cf-label">Full Name</label><input id="widget-full-name" name="full_name" required autocomplete="name" class="cf-input"></div>
               <div class="cf-field"><label for="widget-phone" class="cf-label">Phone</label><input id="widget-phone" name="phone" type="tel" required autocomplete="tel" class="cf-input"></div>
-              <div class="cf-field"><label for="widget-email" class="cf-label">Email</label><input id="widget-email" name="email" type="email" autocomplete="email" class="cf-input"></div>
+              <div class="cf-field"><label for="widget-email" class="cf-label">Email</label><input id="widget-email" name="email" type="email" required autocomplete="email" class="cf-input"></div>
               <div class="cf-field"><label for="widget-reason" class="cf-label">Reason for visit</label><textarea id="widget-reason" name="reason" rows="3" class="cf-textarea" placeholder="Optional details for the clinic"></textarea></div>
               <button type="submit" class="cf-btn w-full" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="check-circle-2" class="h-4 w-4"></i>Confirm Appointment</button>
             </form>

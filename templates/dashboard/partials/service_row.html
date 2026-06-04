@@ -1,4 +1,4 @@
-<article id="service-card-{{ service.id }}" class="cf-card p-5 flex flex-col">
+<article id="service-card-{{ service.id }}" x-data="{deleting:false}" class="cf-card p-5 flex flex-col">
   <div class="flex-1">
     <div class="flex items-center justify-between">
       <div class="grid h-14 w-14 place-items-center rounded-2xl text-[var(--cf-surface)]" style="background-color: {{ service.color }};">
@@ -59,6 +59,42 @@
         {% csrf_token %}
         <button type="submit" class="cf-btn cf-btn-xs cf-btn-primary"><i data-lucide="rotate-ccw" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Restore</button>
       </form>
+      <button type="button" @click="deleting = true" class="cf-btn cf-btn-xs cf-btn-danger"><i data-lucide="trash-2" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Delete service</button>
     {% endif %}
   </div>
+
+  {% if service.is_archived %}
+      <div x-show="deleting" x-cloak class="cf-modal-backdrop" @click.self="deleting = false">
+        <div class="cf-modal cf-modal-sm" role="dialog" aria-modal="true" aria-labelledby="delete-service-title-{{ service.id }}" @click.stop>
+          <div class="cf-modal-header flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="cf-icon-box h-10 w-10 bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-red)]">
+                <i data-lucide="trash-2" class="h-5 w-5" aria-hidden="true"></i>
+              </div>
+              <h3 id="delete-service-title-{{ service.id }}" class="cf-modal-title">Delete service</h3>
+            </div>
+            <button type="button" @click="deleting = false" class="cf-icon-btn" aria-label="Close delete service modal">
+              <i data-lucide="x" class="h-5 w-5" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="cf-modal-body">
+            <p class="cf-muted">This permanently deletes the service only if it has no appointment history.</p>
+          </div>
+          <div class="cf-modal-footer">
+            <button type="button" @click="deleting = false" class="cf-btn cf-btn-secondary"><i data-lucide="x-circle" class="h-4 w-4" aria-hidden="true"></i>Cancel</button>
+            <form
+              method="post"
+              action="{% url 'dashboard:delete_service' service.id %}"
+              hx-post="{% url 'dashboard:delete_service' service.id %}"
+              hx-target="#services-list-container"
+              hx-swap="innerHTML"
+              class="inline"
+            >
+              {% csrf_token %}
+              <button type="submit" class="cf-btn cf-btn-danger"><i data-lucide="trash-2" class="h-4 w-4" aria-hidden="true"></i>Delete</button>
+            </form>
+          </div>
+        </div>
+      </div>
+  {% endif %}
 </article>

@@ -437,7 +437,7 @@ def test_widget_mobile_embed_contracts_are_specific():
     assert "<div class=\"min-w-0\">" in widget
     assert "<h1 class=\"max-w-full truncate" in widget
     assert "name=\"phone\" type=\"tel\" required autocomplete=\"tel\"" in widget
-    assert "name=\"email\" type=\"email\" autocomplete=\"email\"" in widget
+    assert "name=\"email\" type=\"email\" required autocomplete=\"email\"" in widget
     assert "x-model=\"collectInfo.phone\"" in widget
     assert "type=\"tel\" autocomplete=\"tel\"" in widget
     assert "x-model=\"collectInfo.email\"" in widget
@@ -1472,6 +1472,21 @@ def test_service_row_toggle_button_uses_stateful_action_styles():
     assert "background: var(--cf-ink-secondary);" in archive_hover
     assert "border-color: var(--cf-ink-secondary);" in archive_hover
     assert "color: #fff;" in archive_hover
+
+
+def test_archived_service_row_has_guarded_delete_confirmation():
+    template = partial_text("service_row.html")
+
+    archived_start = template.index("{% else %}")
+    archived_block = template[archived_start:]
+
+    assert "dashboard:delete_service" in archived_block
+    assert "Delete service" in archived_block
+    assert "This permanently deletes the service only if it has no appointment history." in archived_block
+    assert "cf-btn cf-btn-xs cf-btn-danger" in archived_block
+    assert "csrf_token" in archived_block
+    assert "hx-post=\"{% url 'dashboard:delete_service' service.id %}\"" in archived_block
+    assert "href=\"{% url 'dashboard:delete_service'" not in template
 
 
 def test_task_3_partial_forms_render_design_system_fields():

@@ -31,6 +31,7 @@ urlpatterns = [
     path("services/<int:pk>/toggle/", views.toggle_service, name="toggle_service"),
     path("services/<int:pk>/archive/", views.archive_service, name="archive_service"),
     path("services/<int:pk>/restore/", views.restore_service, name="restore_service"),
+    path("services/<int:pk>/delete/", views.delete_service, name="delete_service"),
     path("assistant/", views.assistant_settings, name="assistant_settings"),
     path("assistant/faqs/create/", views.create_faq, name="create_faq"),
     path("assistant/faqs/<int:pk>/edit/", views.edit_faq, name="edit_faq"),

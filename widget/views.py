@@ -114,11 +114,12 @@ def _validate_guest_identity(full_name, phone, email):
         return "Please provide your full name and phone number."
     if len(normalize_phone(phone)) < MIN_BOOKING_PHONE_DIGITS:
         return "Please enter a valid phone number."
-    if email:
-        try:
-            validate_email(email)
-        except ValidationError:
-            return "Please enter a valid email address."
+    if not email:
+        return "Please provide your email address."
+    try:
+        validate_email(email)
+    except ValidationError:
+        return "Please enter a valid email address."
     return ""
 
 

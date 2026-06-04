@@ -502,6 +502,27 @@ class WidgetTests(TestCase):
         self.assertFalse(Patient.objects.filter(clinic=self.clinic).exists())
         self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
 
+    def test_widget_booking_rejects_blank_email(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Blank Email",
+                "phone": "09170001111",
+                "email": "   ",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertContains(resp, "Please provide your email address.", status_code=409)
+        self.assertFalse(Patient.objects.filter(clinic=self.clinic).exists())
+        self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
+
     def test_widget_booking_rejects_invalid_email(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
         slot = generate_slots(self.clinic, self.service, tomorrow)[0]

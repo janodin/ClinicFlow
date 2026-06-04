@@ -1,8 +1,13 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
+from appointments.models import Appointment
 from clinics.models import Clinic, ClinicGroup, ClinicMembership
+from patients.models import Patient
 from services.models import Service
 
 User = get_user_model()
@@ -210,6 +215,67 @@ class ServiceTests(TestCase):
         self.service.refresh_from_db()
         self.assertFalse(self.service.is_archived)
 
+    def test_delete_archived_service_without_appointments(self):
+        self.service.is_archived = True
+        self.service.save(update_fields=["is_archived"])
+        url = reverse("dashboard:delete_service", args=[self.service.id])
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("dashboard:services"))
+        self.assertFalse(Service.objects.filter(pk=self.service.pk).exists())
+
+    def test_delete_active_service_is_blocked_until_archived(self):
+        url = reverse("dashboard:delete_service", args=[self.service.id])
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.service.refresh_from_db()
+        self.assertFalse(self.service.is_archived)
+
+    def test_delete_service_with_appointments_is_blocked(self):
+        self.service.is_archived = True
+        self.service.save(update_fields=["is_archived"])
+        patient = Patient.objects.create(clinic=self.clinic, full_name="Test Patient", phone="09171234567")
+        starts_at = timezone.now() + timedelta(days=1)
+        Appointment.objects.create(
+            clinic=self.clinic,
+            patient=patient,
+            service=self.service,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(minutes=self.service.duration_minutes),
+        )
+        url = reverse("dashboard:delete_service", args=[self.service.id])
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(Service.objects.filter(pk=self.service.pk).exists())
+
+    def test_delete_service_requires_post(self):
+        self.service.is_archived = True
+        self.service.save(update_fields=["is_archived"])
+        url = reverse("dashboard:delete_service", args=[self.service.id])
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(Service.objects.filter(pk=self.service.pk).exists())
+
+    def test_delete_service_htmx_refreshes_service_list(self):
+        self.service.is_archived = True
+        self.service.save(update_fields=["is_archived"])
+        url = reverse("dashboard:delete_service", args=[self.service.id])
+
+        response = self.client.post(url, HTTP_HX_REQUEST="true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["HX-Retarget"], "#services-list-container")
+        self.assertIn("Service deleted.", response.headers["HX-Trigger"])
+        self.assertFalse(Service.objects.filter(pk=self.service.pk).exists())
+
     def test_create_service_duplicate_name_rejected(self):
         url = reverse("dashboard:create_service")
         response = self.client.post(url, {
@@ -223,7 +289,7 @@ class ServiceTests(TestCase):
 
     def test_unauthenticated_access_denied(self):
         self.client.logout()
-        for url_name in ["services", "create_service", "toggle_service", "archive_service", "restore_service"]:
+        for url_name in ["services", "create_service", "toggle_service", "archive_service", "restore_service", "delete_service"]:
             args = [self.service.id] if url_name != "services" and url_name != "create_service" else []
             url = reverse(f"dashboard:{url_name}", args=args)
             method = "get" if url_name == "services" or url_name == "edit_service" else "post"
@@ -232,7 +298,7 @@ class ServiceTests(TestCase):
 
     def test_service_clinic_isolation_expanded(self):
         other_service = Service.objects.create(clinic=self.other_clinic, name="Other Service", duration_minutes=30)
-        for url_name in ["edit_service", "toggle_service", "archive_service", "restore_service"]:
+        for url_name in ["edit_service", "toggle_service", "archive_service", "restore_service", "delete_service"]:
             url = reverse(f"dashboard:{url_name}", args=[other_service.id])
             if url_name == "edit_service":
                 self.assertEqual(self.client.get(url).status_code, 404)
