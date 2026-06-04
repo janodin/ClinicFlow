@@ -249,17 +249,19 @@ class WidgetTests(TestCase):
 
         self.assertNotContains(response, 'name="reason"')
 
-    def test_widget_chat_suggestions_route_as_ai_prompts(self):
+    def test_widget_chat_initial_state_has_no_quick_button_suggestions(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()
 
         self.assertIn("opt.type === 'ai_prompt'", content)
         self.assertIn("this.sendChatAction('text_input', opt.value);", content)
         self.assertIn("chatState !== 'collect_info'", content)
+        self.assertNotIn("Book an appointment</button>", content)
+        self.assertNotIn("Ask about services</button>", content)
 
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
-    def test_chat_step_ai_init_does_not_enter_guided_state(self, mock_post):
+    def test_chat_step_ai_init_does_not_return_quick_button_options(self, mock_post):
         ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
 
         response = self.client.post(reverse("widget:chat_step", args=[self.clinic.slug]), {"action": "init"})
@@ -269,7 +271,7 @@ class WidgetTests(TestCase):
         self.assertEqual(data["state"], "ai")
         self.assertEqual(data["next_action"], "text_input")
         self.assertIn("book", data["message"].lower())
-        self.assertIn({"label": "Book an appointment", "value": "I want to book an appointment", "type": "ai_prompt"}, data["options"])
+        self.assertEqual(data["options"], [])
         self.assertNotIn(data["state"], ["select_service", "select_date", "select_time", "collect_info", "confirm"])
         mock_post.assert_not_called()
 

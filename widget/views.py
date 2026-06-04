@@ -250,10 +250,7 @@ def _save_widget_chat_history(request, clinic, history):
 
 
 WIDGET_AI_STATE = "ai"
-WIDGET_AI_SUGGESTIONS = [
-    {"label": "Book an appointment", "value": "I want to book an appointment", "type": "ai_prompt"},
-    {"label": "Ask about services", "value": "What services are available?", "type": "ai_prompt"},
-]
+WIDGET_AI_SUGGESTIONS = []
 
 
 def _widget_ai_json(message, options=None):
