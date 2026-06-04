@@ -1219,6 +1219,21 @@ def test_build_ai_context_uses_default_prompt_when_settings_missing():
 
 
 @pytest.mark.django_db
+def test_build_ai_context_uses_default_fallback_when_message_blank():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context
+    from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_blank_fallback_context", "PAGEAI_BLANK_FALLBACK")
+    ClinicAISettings.objects.create(clinic=clinic, fallback_message="")
+
+    result = build_ai_context("PAGEAI_BLANK_FALLBACK")
+
+    assert result["found"] is True
+    assert result["ai"]["fallback_message"] == DEFAULT_AI_FALLBACK_MESSAGE
+
+
+@pytest.mark.django_db
 def test_build_ai_context_marks_messenger_ai_disabled_for_quick_reply_mode():
     from clinics.models import ClinicAISettings
     from messenger.ai_tools import build_ai_context
