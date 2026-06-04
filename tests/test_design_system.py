@@ -165,6 +165,27 @@ def test_signup_terms_checkbox_uses_inline_soft_consent_row():
     assert "mt-0.5 shrink-0" not in template
 
 
+def test_global_checkboxes_use_custom_neon_aqua_control():
+    css = css_text()
+    checkbox = css_rule_block('input[type="checkbox"]')
+    checked = css_rule_block('input[type="checkbox"]:checked')
+    focus = css_rule_block('input[type="checkbox"]:focus-visible')
+    disabled = css_rule_block('input[type="checkbox"]:disabled')
+
+    assert "appearance: none;" in checkbox
+    assert "-webkit-appearance: none;" in checkbox
+    assert "width: 1.25rem;" in checkbox
+    assert "height: 1.25rem;" in checkbox
+    assert "border: 1.5px solid var(--cf-input-line);" in checkbox
+    assert "border-radius: var(--cf-radius-sm);" in checkbox
+    assert "background-color: var(--cf-surface);" in checkbox
+    assert "background-color: var(--cf-brand);" in checked
+    assert "stroke='%23ffffff'" in checked
+    assert "box-shadow: 0 0 0 3px var(--cf-focus);" in focus
+    assert "cursor: not-allowed;" in disabled
+    assert ".cf-checkbox { accent-color: var(--cf-brand); }" not in css
+
+
 def css_rule_block(selector):
     css = css_text()
     match = re.search(rf"(?m)^{re.escape(selector)}\s*\{{(?P<body>.*?)^\}}", css, re.DOTALL)
