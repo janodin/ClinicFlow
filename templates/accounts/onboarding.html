@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Complete clinic setup{% endblock %}
 {% block body %}
-<div class="cf-auth-panel min-h-screen px-4 py-8">
+<div class="cf-auth-panel flex min-h-dvh items-start justify-center px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-6 sm:items-center sm:py-8">
   <div class="mx-auto w-full max-w-5xl">
     <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -95,7 +95,11 @@
                 {% for row in weekday_rows %}
                   <tr>
                     <th scope="row" class="p-4 font-semibold text-[var(--cf-ink)]">{{ row.label }}</th>
-                    <td class="p-4">{{ row.is_open }}</td>
+                    <td class="p-4">
+                      <label class="grid min-h-11 min-w-11 place-items-center rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface)]">
+                        {{ row.is_open }}
+                      </label>
+                    </td>
                     <td class="p-4">
                       <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
                         {{ row.open_time }}

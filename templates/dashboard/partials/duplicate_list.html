@@ -1,7 +1,7 @@
 <div class="cf-card space-y-4">
   <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
     <h2 class="cf-section-title">Potential Duplicates</h2>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <button hx-get="{% url 'dashboard:find_duplicates' %}" hx-target="#duplicate-panel" hx-swap="innerHTML" hx-disabled-elt="this"
               hx-on::before-request="this.querySelector('.refresh-icon').style.display='none'; this.querySelector('.refresh-spinner').style.display='inline-flex'; this.querySelector('.refresh-text').style.display='none';"
               hx-on::after-request="this.querySelector('.refresh-icon').style.display='inline-flex'; this.querySelector('.refresh-spinner').style.display='none'; this.querySelector('.refresh-text').style.display='inline';"
@@ -24,7 +24,7 @@
             <p class="cf-muted">{{ duplicate.formatted_phone }} · {{ duplicate.email|default:"No email" }}</p>
           </div>
           <div class="cf-row-actions shrink-0">
-            <button hx-get="{% url 'dashboard:patient_merge' %}?primary_id={{ primary.id }}&duplicate_id={{ duplicate.id }}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="cf-btn cf-btn-xs cf-btn-primary"><i data-lucide="git-merge" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Merge</button>
+            <button hx-get="{% url 'dashboard:patient_merge' %}?primary_id={{ primary.id }}&duplicate_id={{ duplicate.id }}" hx-target="#duplicate-panel" hx-swap="innerHTML" class="cf-btn cf-btn-sm cf-btn-primary"><i data-lucide="git-merge" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Merge</button>
           </div>
         </div>
       {% endfor %}

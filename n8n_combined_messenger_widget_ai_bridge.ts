@@ -595,24 +595,26 @@ const prepareMessengerQuickReplies = node({
     position: [1968, 520],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const sources = $items('Resolve Assistant Mode');
-const items = [];
-for (const [itemIndex, inputItem] of $input.all().entries()) {
+      jsCode: `const items = [];
+for (const inputItem of $input.all()) {
   const input = inputItem.json || {};
-  const source = sources[itemIndex]?.json || {};
   const actions = Array.isArray(input.replies) ? input.replies : [];
-  const pageToken = input.page_token || source.context?.page_token || '';
-  const psid = source.psid || '';
+  const pageToken = input.page_token || '';
+  const psid = input.psid || '';
+  if (!pageToken || !psid) { continue; }
   for (const action of actions) {
     if (action.type === 'text') {
       items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: String(action.text || '') } } } });
     }
     if (action.type === 'quick_replies') {
-      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: String(action.text || ''), quick_replies: (action.options || []).slice(0, 13).map((option) => ({ content_type: 'text', title: String(option.title || '').slice(0, 20), payload: String(option.payload || '') })) } } } });
+      const quickReplies = (action.options || []).slice(0, 13).map((option) => ({ content_type: 'text', title: String(option.title || '').slice(0, 20), payload: String(option.payload || '') }));
+      const message = { text: String(action.text || '') };
+      if (quickReplies.length) { message.quick_replies = quickReplies; }
+      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message } } });
     }
   }
   if (!actions.length) {
-    const fallback = source.fallback_message || '${MESSENGER_FALLBACK}';
+    const fallback = input.fallback_message || '${MESSENGER_FALLBACK}';
     items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: fallback } } } });
   }
 }

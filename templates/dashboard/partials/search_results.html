@@ -5,9 +5,9 @@
       {% for patient in patients %}
         <a href="{% url 'dashboard:patient_detail' patient.id %}" class="cf-search-result flex items-center gap-3 px-4 py-2.5 text-sm">
           <i data-lucide="user" class="h-4 w-4 cf-muted"></i>
-          <div>
-            <div class="font-semibold text-[var(--cf-ink)]">{{ patient.full_name }}</div>
-            <div class="text-xs cf-muted">{{ patient.phone }}</div>
+          <div class="min-w-0 flex-1">
+            <div class="cf-mobile-break font-semibold text-[var(--cf-ink)]">{{ patient.full_name }}</div>
+            <div class="cf-mobile-break text-xs cf-muted">{{ patient.phone }}</div>
           </div>
         </a>
       {% endfor %}
@@ -17,9 +17,9 @@
       {% for service in services %}
         <a href="{% url 'dashboard:services' %}#service-card-{{ service.id }}" class="cf-search-result flex items-center gap-3 px-4 py-2.5 text-sm">
           <i data-lucide="stethoscope" class="h-4 w-4 cf-muted"></i>
-          <div>
-            <div class="font-semibold text-[var(--cf-ink)]">{{ service.name }}</div>
-            <div class="text-xs cf-muted">{{ service.duration_minutes }} min{% if service.price %} · ₱{{ service.price }}{% endif %}</div>
+          <div class="min-w-0 flex-1">
+            <div class="cf-mobile-break font-semibold text-[var(--cf-ink)]">{{ service.name }}</div>
+            <div class="cf-mobile-break text-xs cf-muted">{{ service.duration_minutes }} min{% if service.price %} · ₱{{ service.price }}{% endif %}</div>
           </div>
         </a>
       {% endfor %}
@@ -29,9 +29,9 @@
       {% for appointment in appointments %}
         <a href="{% url 'dashboard:appointments' %}" class="cf-search-result flex items-center gap-3 px-4 py-2.5 text-sm">
           <i data-lucide="calendar" class="h-4 w-4 cf-muted"></i>
-          <div>
-            <div class="font-semibold text-[var(--cf-ink)]">{{ appointment.patient.full_name }} — {{ appointment.service.name }}</div>
-            <div class="text-xs cf-muted">{{ appointment.starts_at|date:"M j, g:i A" }} · {{ appointment.service.name }}</div>
+          <div class="min-w-0 flex-1">
+            <div class="cf-mobile-break font-semibold text-[var(--cf-ink)]">{{ appointment.patient.full_name }} — {{ appointment.service.name }}</div>
+            <div class="cf-mobile-break text-xs cf-muted">{{ appointment.starts_at|date:"M j, g:i A" }} · {{ appointment.service.name }}</div>
           </div>
         </a>
       {% endfor %}

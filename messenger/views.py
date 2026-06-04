@@ -306,7 +306,9 @@ def _send_facebook_reply(page_token, psid, actions):
                 }
                 for opt in action.get("options", [])[:MESSENGER_QUICK_REPLY_LIMIT]
             ]
-            msg_payload["message"] = {"text": action["text"], "quick_replies": quick_replies}
+            msg_payload["message"] = {"text": action["text"]}
+            if quick_replies:
+                msg_payload["message"]["quick_replies"] = quick_replies
         else:
             continue
         try:
@@ -363,6 +365,8 @@ def n8n_webhook(request):
     return JsonResponse({
         "replies": actions or [],
         "page_token": connection.page_access_token,
+        "page_id": page_id,
+        "psid": psid,
     }, status=200)
 
 

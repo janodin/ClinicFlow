@@ -1,14 +1,14 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Services{% endblock %}
 {% block content %}
-<div x-data="{open:false, editModalOpen:false, tab:'active'}" class="cf-page">
+<div x-data="{open:false, editModalOpen:false, tab:'active', focusModal(root) { this.$nextTick(() => { window.setTimeout(() => root.querySelector('button, [href], input, select, textarea')?.focus(), 0); }); }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }}" class="cf-page">
   <div class="cf-page-header">
     <div>
       <h1 class="cf-page-title ui-page-title">Services</h1>
       <p class="cf-page-description">{{ active_services|length }} active · {{ archived_services|length }} archived</p>
     </div>
     <div class="cf-page-actions">
-      <div class="cf-tabs" aria-label="Service status filter">
+      <div class="cf-tabs w-full sm:w-auto" aria-label="Service status filter">
         <button
           type="button"
           @click="tab='active'"
@@ -35,14 +35,14 @@
   </div>
 
   <!-- Add Modal -->
-  <div x-show="open" class="cf-modal-backdrop" x-cloak @click.self="open=false" x-on:service-created.camel="open=false">
+  <div x-show="open" class="cf-modal-backdrop" x-cloak @click.self="open=false" x-on:service-created.camel="open=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (open) focusModal($el)">
     <div id="add-modal-body" class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="add-service-modal-title" @click.stop>
       {% include "dashboard/partials/service_form.html" with service=None form=form %}
     </div>
   </div>
 
   <!-- Edit Modal -->
-  <div x-show="editModalOpen" class="cf-modal-backdrop" x-cloak @click.self="editModalOpen=false" x-on:service-saved.camel="editModalOpen=false">
+  <div x-show="editModalOpen" class="cf-modal-backdrop" x-cloak @click.self="editModalOpen=false" x-on:service-saved.camel="editModalOpen=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (editModalOpen) focusModal($el)" @htmx:after-swap.window="if (editModalOpen && $event.target.id === 'edit-modal-body') focusModal($el)">
     <div id="edit-modal-body" class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="edit-service-modal-title" @click.stop>
       <div class="cf-modal-header sr-only">
         <h2 id="edit-service-modal-title" class="cf-modal-title">Edit Service</h2>

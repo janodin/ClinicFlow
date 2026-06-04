@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Patients{% endblock %}
 {% block content %}
-<div x-data="{patientOpen:false, editOpen:false}" class="cf-page" @keydown.escape.window="editOpen=false">
+<div x-data="{patientOpen:false, editOpen:false, focusModal(root) { this.$nextTick(() => { window.setTimeout(() => root.querySelector('button, [href], input, select, textarea')?.focus(), 0); }); }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }}" class="cf-page" @keydown.escape.window="editOpen=false">
   <div class="cf-page-header">
     <div><h1 class="cf-page-title ui-page-title">Patients</h1><p class="cf-page-description">{{ page_obj.paginator.count }} patient records registered</p></div>
     <div class="cf-page-actions">
@@ -27,7 +27,7 @@
   {% include "dashboard/partials/add_patient_modal.html" %}
 
   <!-- Edit Modal -->
-  <div x-show="editOpen" class="cf-modal-backdrop" x-cloak @click.self="editOpen=false">
+  <div x-show="editOpen" class="cf-modal-backdrop" x-cloak @click.self="editOpen=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (editOpen) focusModal($el)" @htmx:after-swap.window="if (editOpen && $event.target.id === 'edit-modal-body') focusModal($el)">
     <div class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="patient-edit-modal-title" @click.stop>
       <div id="edit-modal-body">
         <div class="cf-modal-header sr-only">

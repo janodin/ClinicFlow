@@ -10,13 +10,13 @@
         <span class="inline-flex items-center gap-1.5 rounded-full bg-[var(--cf-status-no-show-bg)] px-2.5 py-1 text-xs font-bold text-[var(--cf-status-no-show-text)]"><i data-lucide="x-circle" class="h-3 w-3" aria-hidden="true"></i> Inactive</span>
       {% endif %}
     </div>
-    <h2 class="mt-3 cf-section-title">{{ service.name }}</h2>
+    <h2 class="cf-mobile-break mt-3 cf-section-title">{{ service.name }}</h2>
     <p class="mt-1.5 text-sm text-[var(--cf-muted)]">{{ service.effective_duration }} minutes</p>
     {% if service.display_price %}
       <p class="mt-1 text-sm text-[var(--cf-muted)]">₱ {{ service.price }}</p>
     {% endif %}
     {% if service.description %}
-      <p class="mt-1 text-sm text-[var(--cf-faint)]">{{ service.description|truncatewords:12 }}</p>
+      <p class="cf-mobile-break mt-1 text-sm text-[var(--cf-faint)]">{{ service.description|truncatewords:12 }}</p>
     {% endif %}
   </div>
   <div class="cf-row-actions cf-row-actions-start mt-auto border-t border-[var(--cf-line)] pt-4">

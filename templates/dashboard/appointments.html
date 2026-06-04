@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Appointments{% endblock %}
 {% block content %}
-<div x-data="{open:false, detailOpen:false, patientOpen:false, queryParams() { const form = document.getElementById('filter-form'); const params = new URLSearchParams(new FormData(form)); Array.from(params.keys()).forEach((key) => { if (!params.get(key)) params.delete(key); }); return params; }, exportHref() { const query = this.queryParams().toString(); return '{% url 'dashboard:export_csv' %}' + (query ? '?' + query : ''); }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" class="cf-page">
+<div x-data="{open:false, filtersOpen:false, detailOpen:false, patientOpen:false, queryParams() { const form = document.getElementById('filter-form'); const params = new URLSearchParams(new FormData(form)); Array.from(params.keys()).forEach((key) => { if (!params.get(key)) params.delete(key); }); return params; }, exportHref() { const query = this.queryParams().toString(); return '{% url 'dashboard:export_csv' %}' + (query ? '?' + query : ''); }, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" class="cf-page">
   <div class="cf-page-header">
     <div><h1 class="cf-page-title ui-page-title">Appointments</h1><p class="cf-page-description">Manage and track all clinic appointments</p></div>
     <div class="cf-page-actions">
@@ -16,49 +16,54 @@
       <label for="filter-search" class="cf-label">Search</label>
       <input id="filter-search" type="search" name="q" value="{{ search_query }}" placeholder="Search patient, phone, service, or reference" autocomplete="off" data-cf-preserve-focus="true" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="input changed delay:300ms, search" hx-include="#filter-form" hx-push-url="true" class="cf-input">
     </div>
-    <div class="cf-field">
-      <label for="filter-status" class="cf-label">Status</label>
-      <select id="filter-status" name="status" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
-        <option value="">All Statuses</option>
-        {% for value,label in status_choices %}
-          <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="cf-field">
-      <label for="filter-date-from" class="cf-label">From</label>
-      <input id="filter-date-from" type="date" name="date_from" value="{{ date_from }}" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-input">
-    </div>
-    <div class="cf-field">
-      <label for="filter-date-to" class="cf-label">To</label>
-      <input id="filter-date-to" type="date" name="date_to" value="{{ date_to }}" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-input">
-    </div>
-    <div class="cf-field">
-      <label for="filter-service" class="cf-label">Service</label>
-      <select id="filter-service" name="service" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
-        <option value="">All Services</option>
-        {% for s in services %}
-          <option value="{{ s.id }}" {% if service_filter == s.id|stringformat:"s" %}selected{% endif %}>{{ s.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="cf-field">
-      <label for="filter-source" class="cf-label">Source</label>
-      <select id="filter-source" name="source" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
-        <option value="">All Sources</option>
-        {% for value,label in source_choices %}
-          <option value="{{ value }}" {% if source_filter == value %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="cf-field">
-      <label for="filter-payment" class="cf-label">Payment</label>
-      <select id="filter-payment" name="payment_state" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
-        <option value="">All Payments</option>
-        {% for value,label in payment_choices %}
-          <option value="{{ value }}" {% if payment_filter == value %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
+    <button type="button" class="cf-btn cf-btn-secondary sm:hidden cf-mobile-filter-toggle" @click="filtersOpen = !filtersOpen" :aria-expanded="filtersOpen.toString()" aria-controls="appointment-advanced-filters">
+      <i data-lucide="sliders-horizontal" class="h-4 w-4"></i>Filters
+    </button>
+    <div id="appointment-advanced-filters" class="cf-advanced-filters sm:flex sm:flex-wrap sm:items-end sm:gap-3" :class="filtersOpen ? 'cf-advanced-filters-open' : ''">
+      <div class="cf-field">
+        <label for="filter-status" class="cf-label">Status</label>
+        <select id="filter-status" name="status" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
+          <option value="">All Statuses</option>
+          {% for value,label in status_choices %}
+            <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="cf-field">
+        <label for="filter-date-from" class="cf-label">From</label>
+        <input id="filter-date-from" type="date" name="date_from" value="{{ date_from }}" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-input">
+      </div>
+      <div class="cf-field">
+        <label for="filter-date-to" class="cf-label">To</label>
+        <input id="filter-date-to" type="date" name="date_to" value="{{ date_to }}" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-input">
+      </div>
+      <div class="cf-field">
+        <label for="filter-service" class="cf-label">Service</label>
+        <select id="filter-service" name="service" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
+          <option value="">All Services</option>
+          {% for s in services %}
+            <option value="{{ s.id }}" {% if service_filter == s.id|stringformat:"s" %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="cf-field">
+        <label for="filter-source" class="cf-label">Source</label>
+        <select id="filter-source" name="source" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
+          <option value="">All Sources</option>
+          {% for value,label in source_choices %}
+            <option value="{{ value }}" {% if source_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="cf-field">
+        <label for="filter-payment" class="cf-label">Payment</label>
+        <select id="filter-payment" name="payment_state" hx-get="{% url 'dashboard:appointments' %}" hx-target="#appointments-table" hx-trigger="change" hx-include="#filter-form" hx-push-url="true" class="cf-select">
+          <option value="">All Payments</option>
+          {% for value,label in payment_choices %}
+            <option value="{{ value }}" {% if payment_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
   </form>
 

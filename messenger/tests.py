@@ -181,6 +181,21 @@ class TestSendMessages:
 
     @pytest.mark.django_db
     @patch("messenger.messenger_api.requests.post")
+    def test_send_empty_quick_replies_as_text_only(self, mock_post):
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"recipient_id": "123"}
+        user = User.objects.create_user(username="owner_api_empty_qr", email="owner_api_empty_qr@test.com", password="pass")
+        group = ClinicGroup.objects.create(name="GroupAPIEmptyQR", owner=user)
+        clinic = Clinic.objects.create(group=group, name="ClinicAPIEmptyQR")
+        conn = MessengerConnection.objects.create(clinic=clinic, page_id="PAGE-API-EMPTY-QR", page_access_token="TOKEN")
+
+        send_messages(conn, "PSID1", [{"type": "quick_replies", "text": "Choose a service", "options": []}])
+
+        body = mock_post.call_args.kwargs["json"]
+        assert body["message"] == {"text": "Choose a service"}
+
+    @pytest.mark.django_db
+    @patch("messenger.messenger_api.requests.post")
     def test_send_messages_does_not_log_page_access_token_on_failure(self, mock_post, caplog):
         user = User.objects.create_user(username="owner_api_log", email="owner_api_log@test.com", password="pass")
         group = ClinicGroup.objects.create(name="GroupAPILog", owner=user)
@@ -195,11 +210,34 @@ class TestSendMessages:
         assert "SECRET-TOKEN" not in caplog.text
 
 
+@patch("messenger.views.requests.post")
+def test_direct_facebook_sender_omits_empty_quick_replies(mock_post):
+    from messenger.views import _send_facebook_reply
+
+    _send_facebook_reply("TOKEN", "PSID1", [{"type": "quick_replies", "text": "Choose a service", "options": []}])
+
+    body = mock_post.call_args.kwargs["json"]
+    assert body["message"] == {"text": "Choose a service"}
+
+
 from datetime import date, time, timedelta
 from django.utils import timezone
 from appointments.models import Appointment
 from services.models import Service
 from messenger.bot_engine import handle_message, _parse_name_phone
+
+
+def _assert_next_step_quick_replies(actions):
+    quick_reply = next(
+        action
+        for action in actions
+        if action.get("type") == "quick_replies" and action.get("text") == "What would you like to do next?"
+    )
+    assert [option["payload"] for option in quick_reply["options"]] == [
+        "start_booking",
+        "view_faqs",
+        "clinic_info",
+    ]
 
 
 @pytest.mark.django_db
@@ -262,7 +300,71 @@ def test_faq_quick_reply_payload_returns_selected_answer_from_greeting_state():
 
     actions = handle_message(session, "", f"faq:{faq.id}")
 
-    assert actions == [{"type": "text", "text": "Q: What are your hours?\nA: 8am to 5pm"}]
+    assert actions[0] == {"type": "text", "text": "Q: What are your hours?\nA: 8am to 5pm"}
+    _assert_next_step_quick_replies(actions)
+    assert session.state == MessengerSession.STATE_GREETING
+
+
+@pytest.mark.django_db
+def test_view_faqs_without_faqs_returns_next_step_quick_replies():
+    user = User.objects.create_user(username="owner_be_no_faqs", email="owner_be_no_faqs@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBENoFAQs", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBENoFAQs")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-NO-FAQS", page_access_token="T")
+    session = MessengerSession.objects.create(connection=conn, psid="S-NO-FAQS")
+
+    actions = handle_message(session, "", "view_faqs")
+
+    assert actions[0] == {"type": "text", "text": "Here are some frequently asked questions:"}
+    assert actions[1] == {"type": "text", "text": "No FAQs available right now."}
+    _assert_next_step_quick_replies(actions)
+    assert session.state == MessengerSession.STATE_GREETING
+
+
+@pytest.mark.django_db
+def test_clinic_info_returns_next_step_quick_replies():
+    user = User.objects.create_user(username="owner_be_info", email="owner_be_info@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEInfo", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="ClinicBEInfo",
+        address="123 Main St",
+        phone="09171234567",
+        email="info@test.com",
+        timezone="Asia/Manila",
+    )
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-INFO", page_access_token="T")
+    session = MessengerSession.objects.create(connection=conn, psid="S-INFO")
+
+    actions = handle_message(session, "", "clinic_info")
+
+    assert actions[0]["type"] == "text"
+    assert "*ClinicBEInfo*" in actions[0]["text"]
+    assert "Address: 123 Main St" in actions[0]["text"]
+    _assert_next_step_quick_replies(actions)
+    assert session.state == MessengerSession.STATE_GREETING
+
+
+@pytest.mark.django_db
+def test_select_service_without_active_services_returns_next_steps_not_empty_quick_replies():
+    user = User.objects.create_user(username="owner_be_no_services", email="owner_be_no_services@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBENoServices", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBENoServices")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-NO-SERVICES", page_access_token="T")
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-NO-SERVICES",
+        state=MessengerSession.STATE_SELECT_SERVICE,
+    )
+
+    actions = handle_message(session, "unknown", "")
+
+    assert not [
+        action
+        for action in actions
+        if action.get("type") == "quick_replies" and action.get("options") == []
+    ]
+    _assert_next_step_quick_replies(actions)
     assert session.state == MessengerSession.STATE_GREETING
 
 
@@ -287,6 +389,167 @@ def test_date_quick_reply_returns_time_options_without_reusing_date_as_time():
     assert actions[0]["type"] == "quick_replies"
     assert actions[0]["text"] == "Here are the available times:"
     assert session.state == MessengerSession.STATE_SELECT_TIME
+
+
+@pytest.mark.django_db
+def test_select_date_with_no_future_slots_returns_next_steps_and_resets_session():
+    user = User.objects.create_user(username="owner_be_no_date_slots", email="owner_be_no_date_slots@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBENoDateSlots", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBENoDateSlots", timezone="Asia/Manila")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-NO-DATE-SLOTS", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-NO-DATE-SLOTS",
+        state=MessengerSession.STATE_SELECT_DATE,
+        data={"service_id": service.id},
+    )
+
+    actions = handle_message(session, "", target_date.isoformat())
+
+    assert actions[0] == {"type": "text", "text": "Sorry, no slots are available in the near future."}
+    _assert_next_step_quick_replies(actions)
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_GREETING
+    assert session.data == {}
+
+
+@pytest.mark.django_db
+def test_select_time_with_no_future_slots_returns_next_steps_and_resets_session():
+    user = User.objects.create_user(username="owner_be_no_time_slots", email="owner_be_no_time_slots@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBENoTimeSlots", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBENoTimeSlots", timezone="Asia/Manila")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-NO-TIME-SLOTS", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-NO-TIME-SLOTS",
+        state=MessengerSession.STATE_SELECT_TIME,
+        data={"service_id": service.id, "date": target_date.isoformat()},
+    )
+
+    actions = handle_message(session, "", "")
+
+    assert actions[0] == {"type": "text", "text": "Sorry, no slots are available in the near future."}
+    _assert_next_step_quick_replies(actions)
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_GREETING
+    assert session.data == {}
+
+
+@pytest.mark.django_db
+def test_confirmed_booking_returns_booked_text_and_next_step_quick_replies():
+    from scheduling.utils import generate_slots
+
+    user = User.objects.create_user(username="owner_be_booked_next", email="owner_be_booked_next@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEBookedNext", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="ClinicBEBookedNext",
+        timezone="Asia/Manila",
+        booking_approval_mode=Clinic.APPROVAL_AUTO,
+    )
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-BOOKED-NEXT", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = generate_slots(clinic, service, target_date)[0]
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-BOOKED-NEXT",
+        state=MessengerSession.STATE_CONFIRM,
+        data={
+            "service_id": service.id,
+            "date": target_date.isoformat(),
+            "starts_at": slot["starts_at"].isoformat(),
+            "full_name": "Maria Santos",
+            "phone": "09175551234",
+        },
+    )
+
+    actions = handle_message(session, "", "confirm")
+
+    assert actions[0]["type"] == "text"
+    assert "Your appointment is confirmed!" in actions[0]["text"]
+    assert "Reply CANCEL to cancel this appointment." in actions[0]["text"]
+    _assert_next_step_quick_replies(actions)
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_GREETING
+    assert session.data == {}
+
+
+@pytest.mark.django_db
+def test_confirm_slot_conflict_without_alternatives_returns_next_steps_and_resets_session():
+    user = User.objects.create_user(username="owner_be_confirm_conflict", email="owner_be_confirm_conflict@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEConfirmConflict", owner=user)
+    clinic = Clinic.objects.create(
+        group=group,
+        name="ClinicBEConfirmConflict",
+        timezone="Asia/Manila",
+        booking_approval_mode=Clinic.APPROVAL_AUTO,
+    )
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-CONFIRM-CONFLICT", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    starts_at = timezone.datetime.combine(target_date, time(9)).isoformat()
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-CONFIRM-CONFLICT",
+        state=MessengerSession.STATE_CONFIRM,
+        data={
+            "service_id": service.id,
+            "date": target_date.isoformat(),
+            "starts_at": starts_at,
+            "full_name": "Maria Santos",
+            "phone": "09175551234",
+        },
+    )
+
+    actions = handle_message(session, "", "confirm")
+
+    assert actions[0] == {"type": "text", "text": "That slot is no longer available. Please choose another time."}
+    _assert_next_step_quick_replies(actions)
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_GREETING
+    assert session.data == {}
+
+
+@pytest.mark.django_db
+def test_booked_state_restart_returns_service_selection():
+    user = User.objects.create_user(username="owner_be_booked_restart", email="owner_be_booked_restart@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEBookedRestart", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBEBookedRestart")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-BOOKED-RESTART", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    session = MessengerSession.objects.create(connection=conn, psid="S-BOOKED-RESTART", state=MessengerSession.STATE_BOOKED)
+
+    actions = handle_message(session, "", "restart")
+
+    assert actions == [{
+        "type": "quick_replies",
+        "text": "Which service would you like to book?",
+        "options": [{"title": "Cleaning", "payload": str(service.id)}],
+    }]
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_SELECT_SERVICE
+
+
+@pytest.mark.django_db
+def test_booked_state_message_returns_next_step_quick_replies():
+    user = User.objects.create_user(username="owner_be_booked_message", email="owner_be_booked_message@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEBookedMessage", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBEBookedMessage")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-BOOKED-MESSAGE", page_access_token="T")
+    session = MessengerSession.objects.create(connection=conn, psid="S-BOOKED-MESSAGE", state=MessengerSession.STATE_BOOKED)
+
+    actions = handle_message(session, "thanks", "")
+
+    assert actions[0] == {"type": "text", "text": "Thanks for using our booking service!"}
+    _assert_next_step_quick_replies(actions)
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_GREETING
 
 
 @pytest.mark.django_db
@@ -1507,8 +1770,32 @@ def test_n8n_webhook_returns_quick_replies_when_messenger_mode_is_quick_replies(
 
     assert response.status_code == 200
     assert response.json()["page_token"] == "TOKEN-PAGE-N8N-QUICK-MODE"
+    assert response.json()["page_id"] == "PAGE-N8N-QUICK-MODE"
+    assert response.json()["psid"] == "PSID1"
     assert any(reply["type"] == "quick_replies" for reply in response.json()["replies"])
     assert MessengerSession.objects.filter(connection__page_id="PAGE-N8N-QUICK-MODE", psid="PSID1").exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_no_services_returns_next_steps_not_empty_quick_replies():
+    from clinics.models import ClinicAISettings
+
+    clinic, _connection = _create_messenger_clinic("owner_n8n_no_services", "PAGE-N8N-NO-SERVICES")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES)
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-NO-SERVICES", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    replies = response.json()["replies"]
+    assert not [reply for reply in replies if reply.get("type") == "quick_replies" and reply.get("options") == []]
+    _assert_next_step_quick_replies(replies)
 
 
 @pytest.mark.django_db

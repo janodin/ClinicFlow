@@ -84,14 +84,14 @@ const formatReply = node({
     name: 'Format Facebook Reply',
     parameters: {
       jsCode: `
-const payloadItems = $items('Format Django Payload');
 const results = [];
 
 for (const [itemIndex, input] of $input.all().entries()) {
   const djangoResponse = input.json || {};
   const replies = djangoResponse.replies || [];
   const pageToken = djangoResponse.page_token || '';
-  const psid = payloadItems[itemIndex]?.json?.psid || '';
+  const psid = djangoResponse.psid || '';
+  if (!pageToken || !psid) { continue; }
   for (const reply of replies) {
     if (reply.type === 'text') {
       results.push({
@@ -108,14 +108,15 @@ for (const [itemIndex, input] of $input.all().entries()) {
         title: String(opt.title || '').slice(0, 20),
         payload: String(opt.payload || '')
       }));
+      const message = { text: reply.text };
+      if (quickReplies.length) {
+        message.quick_replies = quickReplies;
+      }
       results.push({
         json: {
           messaging_type: 'RESPONSE',
           recipient: { id: psid },
-          message: {
-            text: reply.text,
-            quick_replies: quickReplies
-          },
+          message,
           page_token: pageToken
         }
       });

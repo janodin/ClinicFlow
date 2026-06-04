@@ -74,10 +74,10 @@ def send_messages(connection, psid, actions):
             sent_any = True
             all_sent = bool(_send_message(connection, psid, payload)) and all_sent
         elif msg_type == "quick_replies":
-            payload = {
-                "text": action["text"],
-                "quick_replies": [_quick_reply_option(opt) for opt in action["options"][:QUICK_REPLY_LIMIT]],
-            }
+            quick_replies = [_quick_reply_option(opt) for opt in action["options"][:QUICK_REPLY_LIMIT]]
+            payload = {"text": action["text"]}
+            if quick_replies:
+                payload["quick_replies"] = quick_replies
             sent_any = True
             all_sent = bool(_send_message(connection, psid, payload)) and all_sent
         elif msg_type == "template":

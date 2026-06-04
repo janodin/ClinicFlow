@@ -127,15 +127,27 @@ def test_combined_bridge_facebook_bodies_include_messaging_type_response():
     assert "messaging_type: 'RESPONSE'" in source
 
 
-def test_combined_bridge_uses_paired_items_for_messenger_quick_replies():
+def test_combined_bridge_uses_django_response_identity_for_messenger_quick_replies():
     source = SOURCE.read_text(encoding="utf-8")
     prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
     prepare_end = source.index("const clinicFlowSharedAiAgent")
     prepare_block = source[prepare_start:prepare_end]
 
     assert "$items('Resolve Assistant Mode')[0]" not in prepare_block
-    assert "const sources = $items('Resolve Assistant Mode');" in prepare_block
-    assert "const source = sources[itemIndex]?.json || {};" in prepare_block
+    assert "sources[itemIndex]" not in prepare_block
+    assert "const psid = input.psid || '';" in prepare_block
+    assert "if (!pageToken || !psid) { continue; }" in prepare_block
+
+
+def test_combined_bridge_omits_empty_messenger_quick_replies_for_meta():
+    source = SOURCE.read_text(encoding="utf-8")
+    prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
+    prepare_end = source.index("const clinicFlowSharedAiAgent")
+    prepare_block = source[prepare_start:prepare_end]
+
+    assert "const quickReplies = (action.options || []).slice(0, 13).map" in prepare_block
+    assert "if (quickReplies.length) { message.quick_replies = quickReplies; }" in prepare_block
+    assert "quick_replies: (action.options || []).slice(0, 13).map" not in prepare_block
 
 
 def test_combined_bridge_messenger_ai_mode_is_independent_from_widget_ai_switch():
@@ -153,3 +165,8 @@ def test_legacy_messenger_workflow_handles_quick_reply_payload_and_messaging_typ
     assert "$input.first()" not in source
     assert "$('Format Django Payload').first()" not in source
     assert "return $input.all().map" in source
+    assert "payloadItems[itemIndex]?.json?.psid" not in source
+    assert "const psid = djangoResponse.psid || '';" in source
+    assert "if (!pageToken || !psid) { continue; }" in source
+    assert "if (quickReplies.length)" in source
+    assert "message.quick_replies = quickReplies" in source

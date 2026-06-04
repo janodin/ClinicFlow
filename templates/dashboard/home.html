@@ -117,7 +117,7 @@
       <div class="flex items-center justify-between"><h2 class="text-xl font-black text-[var(--cf-ink)]">Needs attention</h2><a class="text-sm font-black text-[var(--cf-brand)]" href="{% url 'dashboard:appointments' %}">Review all</a></div>
       <div class="mt-5 space-y-4">
         {% for appointment in needs_attention %}
-          <div class="rounded-2xl border border-[var(--cf-line-soft)] bg-[var(--cf-surface-warm)] p-4"><div class="flex items-start justify-between gap-3"><div><p class="font-black text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</p><p class="text-sm text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }} · {{ appointment.service.name }}</p></div><span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span></div></div>
+          <div class="rounded-2xl border border-[var(--cf-line-soft)] bg-[var(--cf-surface-warm)] p-4"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="cf-mobile-break font-black text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</p><p class="cf-mobile-break text-sm text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }} · {{ appointment.service.name }}</p></div><span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span></div></div>
         {% empty %}
           <p class="rounded-2xl border border-[var(--cf-line-soft)] bg-[var(--cf-surface-warm)] p-4 text-sm text-[var(--cf-muted)]">No pending or no-show items need front-desk review.</p>
         {% endfor %}
@@ -127,7 +127,7 @@
       <div class="flex items-center justify-between"><h2 class="text-xl font-black text-[var(--cf-ink)]">Upcoming</h2><a class="text-sm font-black text-[var(--cf-brand)]" href="{% url 'dashboard:appointments' %}">See all</a></div>
       <div class="mt-5 space-y-4">
         {% for appointment in upcoming %}
-          <div class="flex gap-3"><span class="mt-2 h-2.5 w-2.5 rounded-full bg-[var(--cf-brand)]"></span><div><p class="font-black text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</p><p class="text-sm text-[var(--cf-muted)]">{{ appointment.service.name }} · {{ appointment.starts_at|date:"M j, g:i A" }}</p></div></div>
+          <div class="flex gap-3"><span class="mt-2 h-2.5 w-2.5 rounded-full bg-[var(--cf-brand)]"></span><div class="min-w-0"><p class="cf-mobile-break font-black text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</p><p class="cf-mobile-break text-sm text-[var(--cf-muted)]">{{ appointment.service.name }} · {{ appointment.starts_at|date:"M j, g:i A" }}</p></div></div>
         {% empty %}
         <div class="flex flex-col items-center justify-center py-8 text-center">
           <div class="grid h-14 w-14 place-items-center rounded-2xl bg-[var(--cf-brand-soft)] text-[var(--cf-brand)]">
@@ -142,7 +142,7 @@
     <section class="cf-card p-5">
       <p class="text-xs font-black uppercase tracking-widest text-[var(--cf-faint)]">Widget</p>
       <h2 class="mt-2 text-xl font-black text-[var(--cf-ink)]">Booking widget active</h2>
-      <p class="mt-2 text-sm text-[var(--cf-muted)]">Your widget is linked to <code>{{ clinic.slug }}</code>.</p>
+      <p class="mt-2 text-sm text-[var(--cf-muted)]">Your widget is linked to <code class="cf-mobile-break">{{ clinic.slug }}</code>.</p>
       <a href="{% url 'dashboard:assistant_settings' %}" class="cf-btn cf-btn-primary mt-4"><i data-lucide="settings" class="h-4 w-4"></i>Configure Widget</a>
     </section>
   </aside>

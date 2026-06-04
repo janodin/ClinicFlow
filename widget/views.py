@@ -187,6 +187,9 @@ def embed_js(request, clinic_slug):
   var accent = {json.dumps(accent)};
   var src = {json.dumps(src)};
   var iframe;
+  var style = document.createElement('style');
+  style.textContent = '@media (max-width: 640px) {{ .clinicflow-widget-frame {{ width:calc(100vw - 24px - env(safe-area-inset-right)) !important; height:calc(100dvh - 24px - env(safe-area-inset-bottom)) !important; right:max(12px, env(safe-area-inset-right)) !important; bottom:max(12px, env(safe-area-inset-bottom)) !important; border-radius:20px !important; }} }}';
+  document.head.appendChild(style);
   var launcher = document.createElement('button');
   launcher.setAttribute('type', 'button');
   launcher.setAttribute('aria-label', 'Open booking widget');
@@ -200,6 +203,7 @@ def embed_js(request, clinic_slug):
   launcher.addEventListener('click', function() {{
     if (!iframe) {{
       iframe = document.createElement('iframe');
+      iframe.className = 'clinicflow-widget-frame';
       iframe.src = src;
       iframe.style.cssText = 'position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);opacity:0;transform:translateY(20px);transition:opacity .3s, transform .3s;';
       iframe.allow = 'clipboard-write';

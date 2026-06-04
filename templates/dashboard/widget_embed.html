@@ -16,7 +16,7 @@
     <p class="cf-muted mt-2 text-sm">Adds a small bottom-right booking button. The full widget opens after click.</p>
     <div class="relative mt-4">
       <pre class="overflow-x-auto rounded-xl bg-[var(--cf-dashboard-dark)] p-5 text-sm text-white shadow-[var(--cf-shadow-raised)]" id="script-code">&lt;script src="{{ script_url }}"&gt;&lt;/script&gt;</pre>
-      <button @click="navigator.clipboard.writeText(document.getElementById('script-code').innerText).then(() => {copied='script'; setTimeout(() => copied='', 2000)})" class="absolute right-3 top-3 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20">Copy</button>
+      <button @click="navigator.clipboard.writeText(document.getElementById('script-code').innerText).then(() => {copied='script'; setTimeout(() => copied='', 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-3 sm:top-3 sm:mt-0">Copy</button>
       <span x-show="copied==='script'" x-transition class="absolute right-3 top-12 rounded-lg bg-green-600 px-2 py-1 text-xs font-bold text-white">Copied!</span>
     </div>
   </section>
@@ -25,7 +25,7 @@
     <p class="cf-muted mt-2 text-sm">Embeds the full panel directly and can be visible immediately. Use only for custom placements where you intentionally want the widget panel shown.</p>
     <div class="relative mt-4">
       <pre class="overflow-x-auto rounded-xl bg-[var(--cf-dashboard-dark)] p-5 text-sm text-white shadow-[var(--cf-shadow-raised)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
-      <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {copied='iframe'; setTimeout(() => copied='', 2000)})" class="absolute right-3 top-3 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20">Copy</button>
+      <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {copied='iframe'; setTimeout(() => copied='', 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-3 sm:top-3 sm:mt-0">Copy</button>
       <span x-show="copied==='iframe'" x-transition class="absolute right-3 top-12 rounded-lg bg-green-600 px-2 py-1 text-xs font-bold text-white">Copied!</span>
     </div>
   </section>

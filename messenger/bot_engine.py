@@ -30,17 +30,43 @@ def _text(text):
     return {"type": "text", "text": text}
 
 
+def _next_step_options():
+    return [
+        {"title": "Book an appointment", "payload": "start_booking"},
+        {"title": "View FAQs", "payload": "view_faqs"},
+        {"title": "Clinic info", "payload": "clinic_info"},
+    ]
+
+
+def _next_step_quick_reply(text="What would you like to do next?"):
+    return _quick_reply(text, _next_step_options())
+
+
+def _reset_with_next_steps(session, actions):
+    session.reset()
+    actions.append(_next_step_quick_reply())
+    return actions
+
+
+def _service_selection_or_next_steps(session, actions, message="Which service would you like to book?"):
+    service_options = _service_options(session.connection.clinic)
+    if service_options:
+        session.state = MessengerSession.STATE_SELECT_SERVICE
+        session.data = {}
+        actions.append(_quick_reply(message, service_options))
+        session.save()
+        return actions
+    actions.append(_text("No bookable services are available right now."))
+    return _reset_with_next_steps(session, actions)
+
+
 def _service_options(clinic):
     services = clinic.services.filter(is_active=True, is_archived=False)
     return [{"title": s.name, "payload": str(s.id)} for s in services]
 
 
 def _reset_to_service_selection(session, actions, message="That service is no longer available. Please choose another:"):
-    session.state = MessengerSession.STATE_SELECT_SERVICE
-    session.data = {}
-    actions.append(_quick_reply(message, _service_options(session.connection.clinic)))
-    session.save()
-    return actions
+    return _service_selection_or_next_steps(session, actions, message)
 
 
 def _time_options(slots):
@@ -92,11 +118,7 @@ def handle_message(session, text, postback):
         else:
             actions.append(_text("I couldn't find a pending or confirmed appointment to cancel."))
         session.reset()
-        actions.append(_quick_reply("What would you like to do next?", [
-            {"title": "Book an appointment", "payload": "start_booking"},
-            {"title": "View FAQs", "payload": "view_faqs"},
-            {"title": "Clinic info", "payload": "clinic_info"},
-        ]))
+        actions.append(_next_step_quick_reply())
         return actions
 
     if postback and postback.startswith("faq:"):
@@ -108,6 +130,7 @@ def handle_message(session, text, postback):
             actions.append(_text("Sorry, that FAQ is no longer available."))
         session.state = MessengerSession.STATE_GREETING
         session.save()
+        actions.append(_next_step_quick_reply())
         return actions
 
     if state == MessengerSession.STATE_GREETING:
@@ -117,6 +140,7 @@ def handle_message(session, text, postback):
             faq = match_faq(clinic, text) if text else None
             if faq:
                 actions.append(_text(f"Q: {faq.question}\nA: {faq.answer}"))
+                actions.append(_next_step_quick_reply())
             else:
                 actions.append(_text("Here are some frequently asked questions:"))
                 faqs = clinic.faqs.filter(is_active=True)
@@ -125,6 +149,7 @@ def handle_message(session, text, postback):
                     actions.append(_quick_reply("Select a question:", options))
                 else:
                     actions.append(_text("No FAQs available right now."))
+                    actions.append(_next_step_quick_reply())
             session.state = state
             session.save()
             return actions
@@ -140,6 +165,7 @@ def handle_message(session, text, postback):
             actions.append(_text("\n".join(info_parts)))
             session.state = state
             session.save()
+            actions.append(_next_step_quick_reply())
             return actions
         else:
             faq = match_faq(clinic, text) if text else None
@@ -147,13 +173,10 @@ def handle_message(session, text, postback):
                 actions.append(_text(f"Q: {faq.question}\nA: {faq.answer}"))
                 session.state = state
                 session.save()
+                actions.append(_next_step_quick_reply())
                 return actions
             actions.append(_text(clinic.widget_welcome_message or "Welcome! How can we help you today?"))
-            actions.append(_quick_reply("Choose an option:", [
-                {"title": "Book an appointment", "payload": "start_booking"},
-                {"title": "View FAQs", "payload": "view_faqs"},
-                {"title": "Clinic info", "payload": "clinic_info"},
-            ]))
+            actions.append(_quick_reply("Choose an option:", _next_step_options()))
             session.state = state
             session.save()
             return actions
@@ -170,11 +193,7 @@ def handle_message(session, text, postback):
             data["service_id"] = service.id
             state = MessengerSession.STATE_SELECT_DATE
         else:
-            actions.append(_quick_reply("Which service would you like to book?", _service_options(clinic)))
-            session.state = state
-            session.data = data
-            session.save()
-            return actions
+            return _service_selection_or_next_steps(session, actions)
 
     if state == MessengerSession.STATE_SELECT_DATE:
         selected_date = None
@@ -203,8 +222,7 @@ def handle_message(session, text, postback):
                     state = MessengerSession.STATE_SELECT_DATE
                 else:
                     actions.append(_text("Sorry, no slots are available in the near future."))
-                    session.reset()
-                    return actions
+                    return _reset_with_next_steps(session, actions)
             session.state = state
             session.data = data
             session.save()
@@ -255,7 +273,7 @@ def handle_message(session, text, postback):
                         state = MessengerSession.STATE_SELECT_DATE
                     else:
                         actions.append(_text("Sorry, no slots are available in the near future."))
-                        session.reset()
+                        return _reset_with_next_steps(session, actions)
                 session.state = state
                 session.data = data
                 session.save()
@@ -275,7 +293,7 @@ def handle_message(session, text, postback):
                     state = MessengerSession.STATE_SELECT_DATE
                 else:
                     actions.append(_text("Sorry, no slots are available in the near future."))
-                    session.reset()
+                    return _reset_with_next_steps(session, actions)
             session.state = state
             session.data = data
             session.save()
@@ -316,13 +334,14 @@ def handle_message(session, text, postback):
                 slots = generate_slots(clinic, service, selected_date)
                 if slots:
                     actions.append(_quick_reply("Please choose another time:", _time_options(slots)))
+                else:
+                    return _reset_with_next_steps(session, actions)
                 session.state = state
                 session.data = data
                 session.save()
                 return actions
             appointment.messenger_psid = session.psid
             appointment.save(update_fields=["messenger_psid", "updated_at"])
-            state = MessengerSession.STATE_BOOKED
             local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
             actions.append(_text(
                 f"Your appointment is confirmed!\n"
@@ -331,18 +350,11 @@ def handle_message(session, text, postback):
                 f"Reference: {appointment.reference_code}\n\n"
                 f"Reply CANCEL to cancel this appointment."
             ))
-            session.state = state
-            session.data = data
-            session.save()
-            return actions
+            return _reset_with_next_steps(session, actions)
         elif postback == "cancel" or lower == "cancel":
             session.reset()
             actions.append(_text("Booking cancelled."))
-            actions.append(_quick_reply("What would you like to do next?", [
-                {"title": "Book an appointment", "payload": "start_booking"},
-                {"title": "View FAQs", "payload": "view_faqs"},
-                {"title": "Clinic info", "payload": "clinic_info"},
-            ]))
+            actions.append(_next_step_quick_reply())
             session.save()
             return actions
         else:
@@ -361,22 +373,14 @@ def handle_message(session, text, postback):
             return actions
 
     if state == MessengerSession.STATE_BOOKED:
-        if postback == "restart" or lower in ("book", "another", "book another"):
-            session.reset()
-            state = MessengerSession.STATE_SELECT_SERVICE
-        else:
-            actions.append(_text("Thanks for using our booking service!"))
-            session.state = state
-            session.save()
-            return actions
+        if postback in ("restart", "start_booking") or lower in ("book", "another", "book another"):
+            return _service_selection_or_next_steps(session, actions)
+        actions.append(_text("Thanks for using our booking service!"))
+        return _reset_with_next_steps(session, actions)
 
     # Fallback
     session.reset()
     actions.append(_text("I didn't understand that. Let's start over."))
-    actions.append(_quick_reply("Choose an option:", [
-        {"title": "Book an appointment", "payload": "start_booking"},
-        {"title": "View FAQs", "payload": "view_faqs"},
-        {"title": "Clinic info", "payload": "clinic_info"},
-    ]))
+    actions.append(_quick_reply("Choose an option:", _next_step_options()))
     session.save()
     return actions

@@ -1,4 +1,4 @@
-<div x-show="patientOpen" class="cf-modal-backdrop" x-cloak @click.self="patientOpen=false">
+<div x-show="patientOpen" class="cf-modal-backdrop" x-cloak @click.self="patientOpen=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (patientOpen) $nextTick(() => $el.querySelector('button, [href], input, select, textarea')?.focus())">
   <form method="post" action="{% url 'dashboard:create_patient' %}" class="cf-modal cf-modal-md" role="dialog" aria-modal="true" aria-labelledby="add-patient-modal-title">
     {% csrf_token %}
     <div class="cf-modal-header flex items-center justify-between">

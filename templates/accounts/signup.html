@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Create account{% endblock %}
 {% block body %}
-<div class="cf-auth-panel flex min-h-screen items-center justify-center px-4 py-8">
+<div class="cf-auth-panel flex min-h-dvh items-start sm:items-center justify-center px-4 py-6 sm:py-8">
   <div class="w-full max-w-lg">
     <!-- Branding -->
     <div class="mb-8 text-center">
@@ -11,7 +11,7 @@
         </span>
         ClinicFlow
       </div>
-      <h1 class="mt-6 text-3xl font-black leading-tight text-[var(--cf-ink)]">Start with a cleaner schedule.</h1>
+      <h1 class="mt-6 text-3xl font-light leading-tight text-[var(--cf-ink)]">Start with a cleaner schedule.</h1>
       <p class="mt-3 text-base leading-7 text-[var(--cf-muted)]">Set up your clinic, add services, configure schedules, and start accepting patient bookings.</p>
     </div>
 
@@ -25,7 +25,7 @@
         {% for field in form %}
           {% if field.name == 'terms_accepted' %}
             <div class="rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] px-4 py-3">
-              <label for="{{ field.id_for_label }}" class="m-0 flex items-center gap-3 cursor-pointer">
+              <label for="{{ field.id_for_label }}" class="m-0 flex items-center gap-3 cursor-pointer min-h-11">
                 <span class="grid h-5 shrink-0 place-items-center">{{ field }}</span>
                 <span class="text-sm font-medium leading-5 text-[var(--cf-muted)] normal-case tracking-normal">{{ field.label }}</span>
               </label>
@@ -43,7 +43,7 @@
             </div>
           {% endif %}
         {% endfor %}
-        <button class="cf-btn cf-btn-primary w-full"><i data-lucide="user-plus" class="h-4 w-4"></i>Create Account</button>
+        <button class="cf-btn cf-btn-primary min-h-11 w-full"><i data-lucide="user-plus" class="h-4 w-4"></i>Create Account</button>
         <p class="text-center text-sm text-[var(--cf-muted)]">
           Already have an account?
           <a class="font-bold text-[var(--cf-brand)] hover:text-[var(--cf-brand-strong)] transition-colors" href="{% url 'accounts:login' %}">Sign in</a>

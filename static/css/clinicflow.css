@@ -95,7 +95,7 @@ button {
   transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 
-a { color: var(--cf-brand); }
+a { color: var(--cf-brand-strong); }
 a:hover { color: var(--cf-brand-strong); }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
@@ -627,7 +627,7 @@ code,
 .cf-btn-primary,
 .ui-button-primary {
   background: var(--cf-brand);
-  color: #fff;
+  color: var(--cf-dashboard-dark);
 }
 
 .cf-btn-primary:hover,
@@ -765,6 +765,9 @@ code,
   width: .75rem;
   height: .75rem;
 }
+
+.cf-calendar-desktop-view { display: inline-flex; }
+.cf-mobile-filter-toggle { display: none; }
 
 .cf-row-actions {
   display: flex;
@@ -1764,6 +1767,44 @@ a.cf-slot-button:hover,
   40% { opacity: 1; transform: translateY(-3px); }
 }
 
+.cf-mobile-break {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.cf-mobile-scroll-hint {
+  color: var(--cf-muted);
+  font-size: .75rem;
+  font-weight: 500;
+}
+
+.cf-table-scroll {
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cf-table-scroll::after {
+  content: "";
+  position: sticky;
+  right: 0;
+  display: block;
+  width: 1.5rem;
+  height: 1px;
+  margin-top: -1px;
+  margin-left: auto;
+  background: linear-gradient(90deg, transparent, var(--cf-surface));
+  pointer-events: none;
+}
+
+.cf-sticky-action-col {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--cf-surface);
+  box-shadow: -10px 0 18px rgba(8, 51, 68, .08);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;
@@ -1818,6 +1859,40 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
 @media (max-width: 640px) {
   .cf-page { gap: 1rem; }
   .cf-card { padding: 1rem; }
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea,
+  .cf-input,
+  .cf-select,
+  .cf-textarea,
+  .cf-btn,
+  .ui-button {
+    min-height: 2.75rem;
+  }
+
+  .cf-btn-xs,
+  .cf-row-actions .cf-btn-xs {
+    min-height: 2.5rem;
+    padding: .45rem .75rem;
+    font-size: .75rem;
+  }
+
+  .cf-row-actions .cf-btn-xs svg,
+  .cf-btn-xs svg {
+    width: .875rem;
+    height: .875rem;
+  }
+
+  .cf-faq-icon-action {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .cf-messenger-page-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   .cf-table { min-width: max(100%, 36rem); }
   .cf-table-compact { min-width: 100%; }
   .cf-table-form { min-width: max(100%, 42rem); }
@@ -1836,6 +1911,8 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
   .cf-btn-xs {
     width: auto;
   }
+  .cf-calendar-desktop-view { display: none !important; }
+  .cf-mobile-filter-toggle { display: inline-flex; }
   .cf-toast-container {
     top: calc(var(--cf-topbar-height) + env(safe-area-inset-top) + .75rem);
     right: 1rem;
@@ -1878,4 +1955,63 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
   .cf-faq-composer-footer .cf-btn {
     width: 100%;
   }
+  .cf-advanced-filters {
+    display: none;
+    width: 100%;
+  }
+
+  .cf-advanced-filters.cf-advanced-filters-open {
+    display: grid;
+    gap: .75rem;
+  }
+
+  .cf-auth-panel {
+    align-items: flex-start;
+    overflow: visible;
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+    padding-bottom: max(2rem, env(safe-area-inset-bottom));
+  }
+
+  .cf-auth-panel::after {
+    opacity: .55;
+    pointer-events: none;
+  }
+
+  .cf-calendar-title {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .cf-calendar-card {
+    min-height: calc(100dvh - 12rem);
+  }
+
+  #calendar {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .cf-widget-shell {
+    width: min(var(--cf-widget-width), 100%);
+    max-width: 100%;
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .cf-widget-scroll {
+    scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .cf-slot-grid {
+    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  }
+
+  .cf-slot-button {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 340px) {
+  .cf-slot-grid { grid-template-columns: 1fr; }
 }

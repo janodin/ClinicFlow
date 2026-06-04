@@ -51,8 +51,8 @@
     </div>
     <h2 id="calendar-title" class="cf-calendar-title" aria-live="polite">Calendar</h2>
     <div class="cf-calendar-views" aria-label="Calendar views">
-      <button type="button" data-calendar-view="dayGridMonth" class="cf-btn cf-btn-primary cf-btn-sm"><i data-lucide="calendar-days" class="h-4 w-4"></i>month</button>
-      <button type="button" data-calendar-view="timeGridWeek" class="cf-btn cf-btn-primary cf-btn-sm"><i data-lucide="calendar-range" class="h-4 w-4"></i>week</button>
+      <button type="button" data-calendar-view="dayGridMonth" data-calendar-desktop-view class="hidden sm:inline-flex cf-btn cf-btn-primary cf-btn-sm cf-calendar-desktop-view"><i data-lucide="calendar-days" class="h-4 w-4"></i>month</button>
+      <button type="button" data-calendar-view="timeGridWeek" data-calendar-desktop-view class="hidden sm:inline-flex cf-btn cf-btn-primary cf-btn-sm cf-calendar-desktop-view"><i data-lucide="calendar-range" class="h-4 w-4"></i>week</button>
       <button type="button" data-calendar-view="timeGridDay" class="cf-btn cf-btn-primary cf-btn-sm"><i data-lucide="calendar" class="h-4 w-4"></i>day</button>
     </div>
   </div>
@@ -98,18 +98,23 @@ document.addEventListener('DOMContentLoaded', function() {
     calendarEl.setAttribute('aria-busy', isBusy ? 'true' : 'false');
     if (loadingEl) loadingEl.classList.toggle('hidden', !isBusy);
   }
-  const isSmallScreen = window.matchMedia('(max-width: 640px)').matches;
+  const calendarScreen = window.matchMedia('(max-width: 640px)');
+  const isPhone = () => calendarScreen.matches;
+  let desktopView = 'dayGridMonth';
   const calendar = new FullCalendar.Calendar(calendarEl, {
-    initialView: isSmallScreen ? 'timeGridDay' : 'dayGridMonth',
-    height: '100%',
+    initialView: isPhone() ? 'timeGridDay' : 'dayGridMonth',
+    height: isPhone() ? 'auto' : '100%',
     expandRows: true,
-    dayMaxEvents: isSmallScreen ? 2 : 5,
+    dayMaxEvents: isPhone() ? 2 : 5,
     displayEventTime: false,
     moreLinkText: '+{num} more',
     headerToolbar: false,
     editable: true,
     datesSet: function(info) {
       updateCalendarTitle(info.view.title);
+      if (!isPhone()) {
+        desktopView = info.view.type;
+      }
     },
     eventDrop: function(info) {
       if (!window.confirm('Reschedule this appointment to the new time?')) {
@@ -191,6 +196,29 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   calendar.render();
 
+  function syncCalendarViewport() {
+    const phone = isPhone();
+    calendar.setOption('height', phone ? 'auto' : '100%');
+    calendar.setOption('dayMaxEvents', phone ? 2 : 5);
+    if (phone && calendar.view.type !== 'timeGridDay') {
+      desktopView = calendar.view.type;
+      calendar.changeView('timeGridDay');
+    } else if (!phone && calendar.view.type === 'timeGridDay' && desktopView !== 'timeGridDay') {
+      calendar.changeView(desktopView);
+    }
+    calendar.updateSize();
+  }
+
+  syncCalendarViewport();
+  if (calendarScreen.addEventListener) {
+    calendarScreen.addEventListener('change', syncCalendarViewport);
+  } else {
+    calendarScreen.addListener(syncCalendarViewport);
+  }
+  window.addEventListener('orientationchange', function() {
+    window.setTimeout(syncCalendarViewport, 150);
+  });
+
   document.getElementById('filter-service').addEventListener('change', () => calendar.refetchEvents());
   document.getElementById('filter-status').addEventListener('change', () => calendar.refetchEvents());
   document.body.addEventListener('calendar-refetch', () => calendar.refetchEvents());
@@ -199,6 +227,9 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('calendar-today').addEventListener('click', () => calendar.today());
   document.querySelectorAll('[data-calendar-view]').forEach(function(button) {
     button.addEventListener('click', function() {
+      if (!isPhone()) {
+        desktopView = button.dataset.calendarView;
+      }
       calendar.changeView(button.dataset.calendarView);
     });
   });

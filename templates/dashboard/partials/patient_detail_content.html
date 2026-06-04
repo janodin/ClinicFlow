@@ -1,9 +1,9 @@
   <div class="cf-page-header">
-    <div class="flex items-center gap-4">
+    <div class="flex min-w-0 items-center gap-4">
       <span class="grid h-14 w-14 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-xl font-black text-[var(--cf-brand)]" aria-hidden="true">{{ patient.full_name|first }}</span>
-      <div>
-        <h1 class="cf-page-title ui-page-title">{{ patient.full_name }}</h1>
-        <p class="cf-page-description">
+      <div class="min-w-0">
+        <h1 class="cf-page-title ui-page-title cf-mobile-break">{{ patient.full_name }}</h1>
+        <p class="cf-page-description cf-mobile-break">
           Patient #{{ patient.id }}
           {% if patient.created_at %} &middot; Since {{ patient.created_at|date:"M j, Y" }}{% endif %}
         </p>
@@ -69,7 +69,7 @@
         </div>
         <div class="min-w-0">
           <dt class="cf-label">Phone</dt>
-          <dd class="mt-0.5 truncate text-[var(--cf-ink)]">{{ patient.formatted_phone }}</dd>
+          <dd class="cf-mobile-break mt-0.5 text-[var(--cf-ink)]">{{ patient.formatted_phone }}</dd>
         </div>
       </div>
       <div class="flex items-center gap-3 rounded-[var(--cf-radius-md)] bg-[var(--cf-surface-muted)] p-3">
@@ -78,7 +78,7 @@
         </div>
         <div class="min-w-0">
           <dt class="cf-label">Email</dt>
-          <dd class="mt-0.5 truncate text-[var(--cf-ink)]">{{ patient.email|default:"Not provided" }}</dd>
+          <dd class="cf-mobile-break mt-0.5 text-[var(--cf-ink)]">{{ patient.email|default:"Not provided" }}</dd>
         </div>
       </div>
       <div class="flex items-center gap-3 rounded-[var(--cf-radius-md)] bg-[var(--cf-surface-muted)] p-3">
@@ -134,12 +134,12 @@
               {% for appointment in patient.appointments.all|dictsortreversed:"starts_at" %}
                 <tr>
                   <td class="p-5">
-                    <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="font-semibold text-[var(--cf-brand)] hover:underline">{{ appointment.starts_at|date:"M j, Y" }}</button>
+                    <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-mobile-break font-semibold text-[var(--cf-brand)] hover:underline">{{ appointment.starts_at|date:"M j, Y" }}</button>
                   </td>
-                  <td class="text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }}</td>
-                  <td class="text-[var(--cf-muted)]">{{ appointment.service.name }}</td>
+                  <td class="cf-mobile-break text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }}</td>
+                  <td class="cf-mobile-break text-[var(--cf-muted)]">{{ appointment.service.name }}</td>
                   <td><span class="cf-badge cf-status-{{ appointment.status }}">{{ appointment.get_status_display }}</span></td>
-                  <td class="text-[var(--cf-muted)] text-xs">{{ appointment.get_source_display }}</td>
+                  <td class="cf-mobile-break text-xs text-[var(--cf-muted)]">{{ appointment.get_source_display }}</td>
                   <td class="pr-5">
                     <div class="cf-row-actions">
                       <button @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>View</button>

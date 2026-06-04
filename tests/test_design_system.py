@@ -14,6 +14,25 @@ def css_text():
     return CSS_PATH.read_text(encoding="utf-8")
 
 
+def css_media_block(query):
+    css = css_text()
+    marker = f"@media ({query}) {{"
+    start = css.index(marker)
+    body_start = start + len(marker)
+    depth = 1
+    index = body_start
+    while index < len(css):
+        char = css[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return css[body_start:index]
+        index += 1
+    raise AssertionError(f"Could not find closing brace for {marker}")
+
+
 def dashboard_base_text():
     return DASHBOARD_BASE_PATH.read_text(encoding="utf-8")
 
@@ -184,6 +203,142 @@ def test_global_checkboxes_use_custom_neon_aqua_control():
     assert "box-shadow: 0 0 0 3px var(--cf-focus);" in focus
     assert "cursor: not-allowed;" in disabled
     assert ".cf-checkbox { accent-color: var(--cf-brand); }" not in css
+
+
+def test_mobile_responsive_css_has_shared_baseline_contracts():
+    css = css_text()
+    mobile_break = css_rule_block(".cf-mobile-break")
+    scroll_hint = css_rule_block(".cf-mobile-scroll-hint")
+    table_scroll_hint = css_rule_block(".cf-table-scroll::after")
+    sticky_action = css_rule_block(".cf-sticky-action-col")
+    mobile_block = css_media_block("max-width: 640px")
+
+    assert "min-width: 0;" in mobile_break
+    assert "overflow-wrap: anywhere;" in mobile_break
+    assert "word-break: break-word;" in mobile_break
+    assert "color: var(--cf-muted);" in scroll_hint
+    assert "background: linear-gradient(90deg, transparent, var(--cf-surface));" in table_scroll_hint
+    assert "position: sticky;" in sticky_action
+    assert "right: 0;" in sticky_action
+    assert "box-shadow:" in sticky_action
+    assert ".cf-row-actions .cf-btn-xs" in mobile_block
+    assert "min-height: 2.75rem;" in mobile_block
+    assert "min-height: 2.5rem;" in mobile_block
+    assert re.search(r"(?m)^\s*\.cf-faq-icon-action\s*\{", mobile_block) is not None
+
+
+def test_mobile_dashboard_shell_contracts():
+    template = dashboard_base_text()
+    overlay_start = template.index("<!-- Mobile overlay -->")
+    overlay_end = template.index("<aside", overlay_start)
+    overlay_block = template[overlay_start:overlay_end]
+    assert "z-[45]" in overlay_block
+
+    nav_start = template.index("<!-- Bottom mobile nav -->")
+    nav_end = template.index("</nav>", nav_start) + len("</nav>")
+    bottom_nav_block = template[nav_start:nav_end]
+    assert "fixed bottom-0" in bottom_nav_block
+
+    settings_href = "{% url 'dashboard:settings' %}"
+    settings_href_index = bottom_nav_block.index(settings_href)
+    settings_anchor_start = bottom_nav_block.rfind("<a ", 0, settings_href_index)
+    settings_anchor_end = bottom_nav_block.index("</a>", settings_href_index) + len("</a>")
+    settings_anchor = bottom_nav_block[settings_anchor_start:settings_anchor_end]
+    assert settings_href in settings_anchor
+    assert ">More</span>" in settings_anchor
+
+
+def test_calendar_mobile_viewport_contracts():
+    template = source_text("templates/dashboard/calendar.html")
+    css = css_text()
+    mobile_css = css_media_block("max-width: 640px")
+
+    assert "calendarScreen = window.matchMedia('(max-width: 640px)')" in template
+    assert "syncCalendarViewport" in template
+    assert "calendar.setOption('height', phone ? 'auto' : '100%')" in template
+    assert "calendar.setOption('dayMaxEvents', phone ? 2 : 5)" in template
+    assert "data-calendar-desktop-view" in template
+    assert "cf-calendar-desktop-view" in template
+    assert "hidden sm:inline-flex" in template
+    assert "let desktopView = 'dayGridMonth';" in template
+    assert "desktopView = info.view.type;" in template
+    assert "calendar.changeView(desktopView);" in template
+    assert ".cf-calendar-desktop-view { display: inline-flex; }" in css
+    assert ".cf-calendar-desktop-view { display: none !important; }" in mobile_css
+
+
+def test_appointments_mobile_filter_and_sticky_action_contracts():
+    template = source_text("templates/dashboard/appointments.html")
+    list_template = source_text("templates/dashboard/partials/appointment_list.html")
+    row_template = source_text("templates/dashboard/partials/appointment_row.html")
+    css = css_text()
+    mobile_css = css_media_block("max-width: 640px")
+
+    assert "filtersOpen" in template
+    assert "cf-advanced-filters" in template
+    assert "cf-mobile-filter-toggle" in template
+    assert "aria-controls=\"appointment-advanced-filters\"" in template
+    assert "id=\"appointment-advanced-filters\"" in template
+    assert ".cf-mobile-filter-toggle { display: none; }" in css
+    assert ".cf-mobile-filter-toggle { display: inline-flex; }" in mobile_css
+    assert "cf-sticky-action-col" in list_template
+    assert "cf-sticky-action-col" in row_template
+
+
+def test_patient_and_service_mobile_contracts():
+    patients = source_text("templates/dashboard/patients.html")
+    add_patient = source_text("templates/dashboard/partials/add_patient_modal.html")
+    patient_detail = source_text("templates/dashboard/partials/patient_detail_content.html")
+    patient_list = source_text("templates/dashboard/partials/patient_list.html")
+    service_row = source_text("templates/dashboard/partials/service_row.html")
+    services = source_text("templates/dashboard/services.html")
+    duplicate_list = source_text("templates/dashboard/partials/duplicate_list.html")
+
+    assert "trapModalFocus" in patients
+    assert "focusModal(root)" in patients
+    assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in patients
+    assert "x-effect=\"if (editOpen) focusModal($el)\"" in patients
+    assert "@htmx:after-swap.window=\"if (editOpen && $event.target.id === 'edit-modal-body') focusModal($el)\"" in patients
+    assert "trapModalFocus" in add_patient
+    assert "cf-mobile-break" in patient_detail
+    assert "cf-sticky-action-col" in patient_list
+    assert "<div class=\"cf-row-actions shrink-0\">" in duplicate_list
+    assert "class=\"cf-btn cf-btn-sm cf-btn-primary\"" in duplicate_list
+    assert "cf-row-actions hidden" not in duplicate_list
+    assert "cf-btn-sm sm:cf-btn-xs" not in service_row
+    assert "cf-row-actions" in service_row
+    assert "cf-mobile-break" in service_row
+    assert "w-full sm:w-auto" in services
+    assert "focusModal(root)" in services
+    assert "@htmx:after-swap.window=\"if (editModalOpen && $event.target.id === 'edit-modal-body') focusModal($el)\"" in services
+    assert "x-effect=\"if (open) focusModal($el)\"" in services
+    assert "x-effect=\"if (editModalOpen) focusModal($el)\"" in services
+
+
+def test_auth_public_and_widget_mobile_contracts():
+    login = source_text("templates/accounts/login.html")
+    signup = source_text("templates/accounts/signup.html")
+    onboarding = source_text("templates/accounts/onboarding.html")
+    privacy = source_text("templates/privacy_policy.html")
+    widget = source_text("templates/widget/widget.html")
+    widget_success = source_text("templates/widget/partials/booking_success.html")
+    widget_error = source_text("templates/widget/partials/booking_error.html")
+    widget_views = source_text("widget/views.py")
+
+    assert "min-h-dvh" in login
+    assert "items-start sm:items-center" in login
+    assert "min-h-dvh" in signup
+    assert "min-h-11" in signup
+    assert "min-h-dvh" in onboarding
+    assert "env(safe-area-inset-bottom)" in onboarding
+    assert "{% extends \"base.html\" %}" in privacy
+    assert "cf-policy-shell" in privacy
+    assert "cf-widget-scroll" in widget
+    assert "autocomplete=\"name\"" in widget
+    assert "autocomplete=\"tel\"" in widget
+    assert "break-all" in widget_success
+    assert "break-words" in widget_error
+    assert "@media (max-width: 640px)" in widget_views
 
 
 def css_rule_block(selector):
@@ -1470,6 +1625,10 @@ def test_item_level_action_clusters_match_appointment_button_size():
                 block,
             ):
                 attrs = match.group("attrs")
+                if relative_path == "templates/dashboard/partials/duplicate_list.html":
+                    assert "cf-btn-sm" in attrs, f"{relative_path}: {match.group(0)}"
+                    assert "!min-h-0" not in attrs, f"{relative_path}: {match.group(0)}"
+                    continue
                 assert "cf-btn-xs" in attrs, f"{relative_path}: {match.group(0)}"
                 assert "cf-btn-sm" not in attrs, f"{relative_path}: {match.group(0)}"
                 assert "!min-h-0" not in attrs, f"{relative_path}: {match.group(0)}"
@@ -1979,19 +2138,25 @@ def test_task_9_widget_preserves_behavior_hooks_and_neon_aqua_patterns():
 
 
 def test_mobile_responsive_css_scopes_full_width_buttons_and_keeps_tap_targets():
-    css = css_text()
-    mobile = re.search(r"@media \(max-width: 640px\) \{(?P<body>.*?)^\}", css, re.DOTALL | re.MULTILINE).group("body")
+    mobile = css_media_block("max-width: 640px")
 
-    assert re.search(r"(?m)^\s*\.cf-btn\s*\{\s*width:\s*100%;\s*\}", mobile) is None
-    for snippet in [
-        ".cf-page-actions .cf-btn",
-        ".cf-toolbar .cf-btn",
-        ".cf-modal-footer .cf-btn",
-        ".cf-table .cf-btn",
-        ".cf-row-actions .cf-btn",
-        "width: auto;",
-    ]:
-        assert snippet in mobile
+    for rule in re.finditer(r"(?ms)^(?P<selectors>[^{}]+)\{(?P<body>.*?)^\s*\}", mobile):
+        selectors = [selector.strip() for selector in rule.group("selectors").split(",")]
+        if ".cf-btn" in selectors:
+            assert "width: 100%;" not in rule.group("body")
+    full_width_rule = re.search(
+        r"(?ms)^\s*\.cf-page-actions \.cf-btn,\s*^\s*\.cf-toolbar \.cf-btn,\s*^\s*\.cf-modal-footer \.cf-btn\s*\{(?P<body>.*?)^\s*\}",
+        mobile,
+    )
+    assert full_width_rule is not None
+    assert "width: 100%;" in full_width_rule.group("body")
+
+    auto_width_rule = re.search(
+        r"(?ms)^\s*\.cf-table \.cf-btn,\s*^\s*\.cf-row-actions \.cf-btn,\s*^\s*\.cf-btn-sm,\s*^\s*\.cf-btn-xs\s*\{(?P<body>.*?)^\s*\}",
+        mobile,
+    )
+    assert auto_width_rule is not None
+    assert "width: auto;" in auto_width_rule.group("body")
 
     assert "min-height: 2.5rem;" in css_rule_block(".cf-btn-sm")
     assert "min-height: 1.75rem;" in css_rule_block(".cf-btn-xs")
@@ -2016,9 +2181,11 @@ def test_mobile_responsive_calendar_and_widget_use_safe_viewports():
     assistant_settings = source_text("templates/dashboard/assistant_settings.html")
     widget_embed = source_text("templates/dashboard/widget_embed.html")
 
-    assert "const isSmallScreen = window.matchMedia('(max-width: 640px)').matches;" in calendar
-    assert "initialView: isSmallScreen ? 'timeGridDay' : 'dayGridMonth'" in calendar
-    assert "dayMaxEvents: isSmallScreen ? 2 : 5" in calendar
+    assert "const calendarScreen = window.matchMedia('(max-width: 640px)');" in calendar
+    assert "const isPhone = () => calendarScreen.matches;" in calendar
+    assert "initialView: isPhone() ? 'timeGridDay' : 'dayGridMonth'" in calendar
+    assert "dayMaxEvents: isPhone() ? 2 : 5" in calendar
+    assert "syncCalendarViewport();" in calendar
     assert "max-h-[calc(100dvh-1rem)]" in widget
     assert "bottom:max(16px, env(safe-area-inset-bottom))" in embed_js
     assert "right:max(16px, env(safe-area-inset-right))" in embed_js
