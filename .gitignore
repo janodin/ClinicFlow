@@ -38,6 +38,14 @@ db.sqlite3-journal
 media/
 staticfiles/
 
+# Local agent/debug artifacts
+.superpowers/
+.playwright-mcp/
+tmp_visual_checks/
+test_output.txt
+deploy-vps.ps1
+mobile-*.png
+
 # IDE
 .vscode/
 .idea/

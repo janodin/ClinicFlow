@@ -92,6 +92,7 @@
 
 ## GIT / WORKTREE HYGIENE
 
+- Always work directly on the `main` branch; do not create or use git worktrees
 - The worktree may contain user or agent changes; never revert or overwrite changes you did not make unless explicitly asked
 - Before committing, inspect `git status`, `git diff`, and recent commits; stage only intended files
 - Do not commit local databases, generated brainstorm artifacts, debug screenshots, temporary output, secrets, or unrelated files
