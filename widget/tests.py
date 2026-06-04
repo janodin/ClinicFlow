@@ -155,6 +155,14 @@ class WidgetTests(TestCase):
 
         self.assertNotContains(response, 'name="reason"')
 
+    def test_widget_chat_suggestions_route_as_ai_prompts(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        self.assertIn("opt.type === 'ai_prompt'", content)
+        self.assertIn("this.sendChatAction('text_input', opt.value);", content)
+        self.assertIn("chatState !== 'collect_info'", content)
+
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
     def test_chat_step_ai_init_does_not_enter_guided_state(self, mock_post):

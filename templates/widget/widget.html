@@ -286,7 +286,11 @@
           this.sendChatAction('init');
           return;
         }
-        this.sendChatAction('select_option', opt.value);
+        if (opt.type === 'ai_prompt') {
+          this.sendChatAction('text_input', opt.value);
+          return;
+        }
+        this.sendChatAction('text_input', opt.value || opt.label);
       },
       async sendChat() {
         const text = this.chatInput.trim();
