@@ -10,7 +10,7 @@ Apply semantic Lucide icons to `cf-btn` controls across dashboard, auth, booking
 
 ## Design Direction
 
-Use a left-aligned Lucide icon before the text label for text buttons. Standard icon size is `h-4 w-4`; compact inline utility buttons may use `h-3 w-3` when already established. Buttons keep the existing `cf-btn` spacing, pill geometry, color states, and touch targets from `static/css/clinicflow.css`.
+Use a left-aligned Lucide icon before the text label for text buttons. Standard icon size is `h-4 w-4`; compact inline utility buttons may use `h-3 w-3` when already established. Buttons keep the existing `cf-btn` spacing, pill geometry, color states, and touch targets from `static/css/kliniassist.css`.
 
 ## Icon Mapping
 

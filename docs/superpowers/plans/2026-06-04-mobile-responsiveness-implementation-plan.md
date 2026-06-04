@@ -4,7 +4,7 @@
 
 **Goal:** Make KliniAssist responsive and usable on phones and small tablets across dashboard, scheduling, auth, and widget pages while preserving the existing Django template stack and Neon Aqua Clinical design system.
 
-**Architecture:** Add a shared mobile baseline in `static/css/clinicflow.css`, then apply focused template changes by page family. Keep dense dashboard screens table-first, but add mobile-safe touch targets, wrapping, sticky actions, filter disclosures, safe viewport sizing, and widget iframe safeguards.
+**Architecture:** Add a shared mobile baseline in `static/css/kliniassist.css`, then apply focused template changes by page family. Keep dense dashboard screens table-first, but add mobile-safe touch targets, wrapping, sticky actions, filter disclosures, safe viewport sizing, and widget iframe safeguards.
 
 **Tech Stack:** Django templates, Tailwind utility classes, HTMX, Alpine.js, FullCalendar, `pytest`, Playwright/manual browser viewport checks.
 
@@ -17,7 +17,7 @@ Do not commit during execution unless the user explicitly requests commits. Repl
 ## File Structure
 
 - Modify `tests/test_design_system.py` to add static regression coverage for mobile CSS and mobile-critical template contracts.
-- Modify `static/css/clinicflow.css` for shared mobile baseline, touch targets, table scroll affordances, sticky action columns, calendar sizing, widget sizing, auth contrast, and slot grid behavior.
+- Modify `static/css/kliniassist.css` for shared mobile baseline, touch targets, table scroll affordances, sticky action columns, calendar sizing, widget sizing, auth contrast, and slot grid behavior.
 - Modify `templates/dashboard/base.html` for overlay stacking and mobile `More` navigation.
 - Modify `templates/dashboard/home.html`, `templates/dashboard/widget_embed.html`, `templates/dashboard/assistant_settings.html`, and `dashboard/templates/dashboard/messenger_settings.html` for wrapping, code block, and copy-button touch fixes.
 - Modify `templates/dashboard/calendar.html` for FullCalendar mobile sizing, view button behavior, and media query synchronization.
@@ -165,7 +165,7 @@ Expected: no whitespace errors.
 ## Task 2: Implement Shared Mobile CSS Baseline
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 
 - [ ] **Step 1: Add shared wrapping, scroll, and sticky-action helpers**
 
@@ -612,7 +612,7 @@ Expected: PASS.
 - Modify: `templates/accounts/signup.html`
 - Modify: `templates/accounts/onboarding.html`
 - Modify: `templates/privacy_policy.html`
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 
 - [ ] **Step 1: Update login and signup viewport behavior**
 
@@ -676,7 +676,7 @@ Use `text-[var(--cf-brand-strong)]` for policy links and headings. Preserve the 
 
 - [ ] **Step 5: Strengthen small-text link and primary button contrast without changing brand token values**
 
-In `static/css/clinicflow.css`, update:
+In `static/css/kliniassist.css`, update:
 
 ```css
 a { color: var(--cf-brand); }
@@ -724,7 +724,7 @@ Expected: PASS.
 - Modify: `templates/widget/partials/booking_error.html`
 - Modify: `templates/dashboard/widget_embed.html`
 - Modify: `widget/views.py`
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 
 - [ ] **Step 1: Fix widget shell clipping and scroll padding**
 
@@ -870,7 +870,7 @@ Use browser or Playwright at `390x844` and `768x1024` to inspect:
 - Appointments: search visible; advanced filters disclose; action column remains reachable.
 - Patients/services: actions are tappable; long names wrap; add/edit modals trap focus.
 - Login/signup/onboarding: no clipped forms; keyboard-safe top/bottom spacing; checkboxes are tappable.
-- Widget: no horizontal clipping; slot grid adapts; lower form fields and confirm button are reachable with mobile keyboard; minimize still posts `clinicflow-minimize`.
+- Widget: no horizontal clipping; slot grid adapts; lower form fields and confirm button are reachable with mobile keyboard; minimize still posts `kliniassist-minimize`.
 
 - [ ] **Step 6: Final checkpoint**
 

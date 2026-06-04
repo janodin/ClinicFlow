@@ -64,7 +64,7 @@ FAQ accordion open states are not part of the reset contract for the first versi
 
 Minimize must remain separate from Home.
 
-- `minimize()` continues to post `{type: 'clinicflow-minimize'}` to the parent frame.
+- `minimize()` continues to post `{type: 'kliniassist-minimize'}` to the parent frame.
 - `minimize()` must not set `mode = 'home'`.
 - `minimize()` must not call `goHome()`.
 - Reopening the same iframe after minimize should preserve the current screen and typed values.
@@ -85,7 +85,7 @@ Add or update targeted widget template contract tests:
 - The widget header contains a Home button with `aria-label="Go to widget home"` and a Lucide `home` icon.
 - The Home button calls `goHome()`.
 - The `goHome()` method resets booking state, chat state, typed chat input, FAQ query, and collect-info fields.
-- The existing minimize regression still proves `minimize()` posts `clinicflow-minimize` and does not reset `mode` to `home`.
+- The existing minimize regression still proves `minimize()` posts `kliniassist-minimize` and does not reset `mode` to `home`.
 
 Run at minimum after implementation:
 

@@ -6,7 +6,7 @@
 
 **Architecture:** Update static design tests first, then remove `cf-sticky-action-col` from affected table headers/cells and remove the sticky CSS helper if no longer used. Preserve existing `.cf-row-actions`, HTMX targets, Alpine modal triggers, URLs, labels, and dense table layout.
 
-**Tech Stack:** Django templates, Tailwind utility classes, `static/css/clinicflow.css`, pytest static design-system tests.
+**Tech Stack:** Django templates, Tailwind utility classes, `static/css/kliniassist.css`, pytest static design-system tests.
 
 ---
 
@@ -84,7 +84,7 @@ Expected: FAIL because templates/CSS still contain `cf-sticky-action-col`.
 - Modify: `templates/dashboard/partials/appointment_row.html`
 - Modify: `templates/dashboard/partials/patient_list.html`
 - Modify: `templates/dashboard/partials/patient_row.html`
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 
 - [ ] **Step 1: Remove sticky classes from appointment table**
 
@@ -152,7 +152,7 @@ to:
 
 - [ ] **Step 3: Remove sticky CSS helper**
 
-Delete this block from `static/css/clinicflow.css`:
+Delete this block from `static/css/kliniassist.css`:
 
 ```css
 .cf-sticky-action-col {

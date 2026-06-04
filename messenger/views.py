@@ -18,11 +18,17 @@ from .ai_tools import (
     build_widget_ai_context,
     book_confirmed_appointment,
     book_widget_confirmed_appointment,
+    cancel_verified_appointment,
+    cancel_widget_verified_appointment,
     check_availability,
     check_widget_availability,
+    find_verified_appointment,
+    find_widget_verified_appointment,
     get_or_create_clinic_ai_settings,
     match_services,
     match_widget_services,
+    reschedule_verified_appointment,
+    reschedule_widget_verified_appointment,
 )
 from .bot_engine import handle_message
 from .messenger_api import verify_signature
@@ -208,6 +214,40 @@ def ai_book(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+def ai_appointment_lookup(request):
+    return _ai_tool_response(request, lambda data: find_verified_appointment(
+        data.get("page_id", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ai_appointment_cancel(request):
+    return _ai_tool_response(request, lambda data: cancel_verified_appointment(
+        data.get("page_id", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
+        data.get("reason", ""),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ai_appointment_reschedule(request):
+    return _ai_tool_response(request, lambda data: reschedule_verified_appointment(
+        data.get("page_id", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+        data.get("starts_at", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
 def meta_signature_verify(request):
     if not _verify_ai_tool_secret(request):
         return JsonResponse({"error": "Unauthorized"}, status=401)
@@ -276,6 +316,40 @@ def widget_ai_book(request):
         _normalize_confirmed(data.get("confirmed", False)),
         data.get("email", ""),
         data.get("reason", ""),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def widget_ai_appointment_lookup(request):
+    return _ai_tool_response(request, lambda data: find_widget_verified_appointment(
+        data.get("clinic_slug", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def widget_ai_appointment_cancel(request):
+    return _ai_tool_response(request, lambda data: cancel_widget_verified_appointment(
+        data.get("clinic_slug", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
+        data.get("reason", ""),
+    ))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def widget_ai_appointment_reschedule(request):
+    return _ai_tool_response(request, lambda data: reschedule_widget_verified_appointment(
+        data.get("clinic_slug", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+        data.get("starts_at", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
     ))
 
 

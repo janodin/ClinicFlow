@@ -19,7 +19,7 @@ Use **Option A: Screenshot Header + Visible Filters**.
 Primary implementation files:
 
 - `templates/dashboard/calendar.html`
-- `static/css/clinicflow.css`
+- `static/css/kliniassist.css`
 - Calendar/design-system tests that assert the current toolbar structure or visual hooks
 
 The change is presentation-only. It must preserve:

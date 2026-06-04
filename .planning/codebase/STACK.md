@@ -9,7 +9,7 @@
 
 **Secondary:**
 - JavaScript - Alpine.js and HTMX for frontend interactivity
-- CSS - Custom styles and design tokens (`static/css/clinicflow.css`)
+- CSS - Custom styles and design tokens (`static/css/kliniassist.css`)
 - HTML - Django templates
 
 ## Runtime

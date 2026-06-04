@@ -2,7 +2,7 @@
 
 ## Context
 
-KliniAssist is a Django, Tailwind CSS, HTMX, Alpine.js, and FullCalendar clinic appointment SaaS. The UI uses the Neon Aqua Clinical system from `DESIGN.md`, with reusable `cf-*` styles in `static/css/clinicflow.css`.
+KliniAssist is a Django, Tailwind CSS, HTMX, Alpine.js, and FullCalendar clinic appointment SaaS. The UI uses the Neon Aqua Clinical system from `DESIGN.md`, with reusable `cf-*` styles in `static/css/kliniassist.css`.
 
 Five read-only audits reviewed mobile responsiveness across:
 
@@ -105,7 +105,7 @@ Protect the guest booking flow in narrow iframes and mobile keyboard contexts:
 
 ## Risks And Constraints
 
-- Existing uncommitted changes are present in the worktree, including `static/css/clinicflow.css` and design tests. Changes must be made carefully without reverting unrelated work.
+- Existing uncommitted changes are present in the worktree, including `static/css/kliniassist.css` and design tests. Changes must be made carefully without reverting unrelated work.
 - Wide operational tables are intentional for clinic staff workflows. The design should make table overflow usable, not blindly convert every table into cards.
 - Widget changes must preserve guest booking safeguards, field names, HTMX targets, and embedded launcher behavior.
 - Calendar changes must preserve FullCalendar hooks and event loading behavior.

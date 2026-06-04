@@ -20,13 +20,13 @@ The current KliniAssist `DESIGN.md` is intentionally replaced because the reques
 
 This is a token-first migration, not a component-framework migration.
 
-KliniAssist does not currently have `package.json`, Tailwind config, PostCSS config, or a frontend build pipeline. It uses Django templates, CDN Tailwind, and `static/css/clinicflow.css`. The Stripe design system installed by `getdesign` is a markdown reference, not generated UI components. Therefore, the implementation adapts the existing CSS and templates instead of introducing React, Next.js, shadcn, npm component packages, or a separate frontend.
+KliniAssist does not currently have `package.json`, Tailwind config, PostCSS config, or a frontend build pipeline. It uses Django templates, CDN Tailwind, and `static/css/kliniassist.css`. The Stripe design system installed by `getdesign` is a markdown reference, not generated UI components. Therefore, the implementation adapts the existing CSS and templates instead of introducing React, Next.js, shadcn, npm component packages, or a separate frontend.
 
 The existing `cf-*` CSS layer remains the canonical implementation layer for reusable UI. This keeps dashboard partials, HTMX swaps, forms, modals, tables, toasts, and widget screens stable while changing their visual language.
 
 ## Token Mapping
 
-`static/css/clinicflow.css` is remapped from Stone-Sage to Stripe-inspired tokens:
+`static/css/kliniassist.css` is remapped from Stone-Sage to Stripe-inspired tokens:
 
 | Existing Role | Stripe-Based Value |
 | --- | --- |

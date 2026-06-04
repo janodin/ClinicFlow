@@ -6,7 +6,7 @@
 
 **Architecture:** Use the existing design-system CSS and templates. Promote the current Appointments-only compact row-action sizing to the shared `.cf-row-actions` selector, then apply that wrapper and `cf-btn-xs` to every item-level action cluster in scope.
 
-**Tech Stack:** Django templates, Tailwind utility classes, shared `static/css/clinicflow.css`, pytest design-system tests.
+**Tech Stack:** Django templates, Tailwind utility classes, shared `static/css/kliniassist.css`, pytest design-system tests.
 
 **Repo Policy:** Do not commit unless the user explicitly requests a commit.
 
@@ -14,7 +14,7 @@
 
 ## File Structure
 
-- Modify `static/css/clinicflow.css`: move Appointments compact action sizing from `.cf-appointment-row-actions` to `.cf-row-actions`, keeping existing mobile button-width behavior.
+- Modify `static/css/kliniassist.css`: move Appointments compact action sizing from `.cf-appointment-row-actions` to `.cf-row-actions`, keeping existing mobile button-width behavior.
 - Modify `templates/dashboard/partials/appointment_row.html`: keep action buttons visually unchanged while adding the shared `cf-row-actions` wrapper.
 - Modify `templates/dashboard/partials/patient_list.html`: shrink Patients table actions to the Appointments action size.
 - Modify `templates/dashboard/partials/patient_row.html`: shrink HTMX replacement patient-row actions to the Appointments action size.
@@ -93,7 +93,7 @@ Expected: FAIL because several row/action templates still use `cf-btn-sm`, custo
 ### Task 2: Promote Shared Row-Action CSS
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 - Test: `tests/test_design_system.py`
 
 - [ ] **Step 1: Replace Appointments-only compact selectors**
@@ -286,7 +286,7 @@ Expected: PASS with no system check issues.
 
 - [ ] **Step 3: Inspect changed files**
 
-Run: `git diff -- static/css/clinicflow.css templates/dashboard/partials/appointment_row.html templates/dashboard/partials/patient_list.html templates/dashboard/partials/patient_row.html templates/dashboard/partials/patient_detail_content.html templates/dashboard/partials/service_row.html templates/dashboard/partials/faq_row.html templates/dashboard/settings.html templates/dashboard/unavailable_dates.html tests/test_design_system.py docs/superpowers/specs/2026-06-03-action-button-size-consistency-design.md docs/superpowers/plans/2026-06-03-action-button-size-consistency.md`
+Run: `git diff -- static/css/kliniassist.css templates/dashboard/partials/appointment_row.html templates/dashboard/partials/patient_list.html templates/dashboard/partials/patient_row.html templates/dashboard/partials/patient_detail_content.html templates/dashboard/partials/service_row.html templates/dashboard/partials/faq_row.html templates/dashboard/settings.html templates/dashboard/unavailable_dates.html tests/test_design_system.py docs/superpowers/specs/2026-06-03-action-button-size-consistency-design.md docs/superpowers/plans/2026-06-03-action-button-size-consistency.md`
 
 Expected: Diff only contains action-button consistency changes and the two planning documents.
 

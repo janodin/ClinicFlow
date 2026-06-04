@@ -96,7 +96,7 @@ class AppointmentInvariantTests(TestCase):
             data={
                 "patient_name": "New Patient",
                 "patient_phone": "09172222222",
-                "patient_email": "",
+                "patient_email": "new.patient@example.com",
                 "date": target_date.isoformat(),
                 "time": "09:00",
                 "service": archived_service.id,
@@ -109,3 +109,32 @@ class AppointmentInvariantTests(TestCase):
 
         self.assertFalse(post_form.is_valid())
         self.assertIn("service", post_form.errors)
+
+    def test_staff_form_requires_patient_email(self):
+        target_date = timezone.localdate() + timedelta(days=1)
+        ClinicBusinessHour.objects.create(
+            clinic=self.clinic,
+            weekday=target_date.weekday(),
+            is_open=True,
+            open_time=time(9),
+            close_time=time(17),
+        )
+
+        form = StaffAppointmentForm(
+            self.clinic,
+            data={
+                "patient_name": "New Patient",
+                "patient_phone": "09172222222",
+                "patient_email": "",
+                "date": target_date.isoformat(),
+                "time": "09:00",
+                "service": self.service.id,
+                "status": Appointment.STATUS_PENDING,
+                "payment_state": Appointment.PAYMENT_UNPAID,
+                "source": Appointment.SOURCE_STAFF,
+                "reason": "",
+            },
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("patient_email", form.errors)

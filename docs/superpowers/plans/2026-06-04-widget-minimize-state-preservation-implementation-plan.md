@@ -19,14 +19,14 @@ Core requirements:
 - Same-page only state preservation.
 - Preserve current booking/chat screen and typed but unsubmitted field values.
 - Do not add `localStorage`, `sessionStorage`, database drafts, server-side drafts, models, or migrations.
-- Keep the existing `clinicflow-minimize` parent message.
+- Keep the existing `kliniassist-minimize` parent message.
 - Do not change booking validation, slot validation, patient matching, or appointment creation.
 
 ## File Structure
 
 - Modify: `widget/tests.py`
   - Add one regression test to `WidgetTests` that inspects the rendered widget JavaScript `minimize()` block.
-  - The test proves `minimize()` still emits `clinicflow-minimize` and no longer sets `this.mode = 'home'`.
+  - The test proves `minimize()` still emits `kliniassist-minimize` and no longer sets `this.mode = 'home'`.
 - Modify: `templates/widget/widget.html`
   - Remove the `this.mode = 'home';` line from `minimize()`.
   - Keep the existing parent `postMessage` behavior unchanged.
@@ -53,7 +53,7 @@ Add this test inside `class WidgetTests(TestCase)` in `widget/tests.py`, after `
         minimize_end = content.index("startChat()", minimize_start)
         minimize_block = content[minimize_start:minimize_end]
 
-        self.assertIn("clinicflow-minimize", minimize_block)
+        self.assertIn("kliniassist-minimize", minimize_block)
         self.assertNotIn("this.mode = 'home'", minimize_block)
 ```
 
@@ -87,7 +87,7 @@ Change the `minimize()` method in `templates/widget/widget.html` from:
 ```javascript
       minimize() {
         if (window.parent !== window) {
-          window.parent.postMessage({type: 'clinicflow-minimize'}, '*');
+          window.parent.postMessage({type: 'kliniassist-minimize'}, '*');
         }
         this.mode = 'home';
       },
@@ -98,7 +98,7 @@ to:
 ```javascript
       minimize() {
         if (window.parent !== window) {
-          window.parent.postMessage({type: 'clinicflow-minimize'}, '*');
+          window.parent.postMessage({type: 'kliniassist-minimize'}, '*');
         }
       },
 ```
@@ -194,6 +194,6 @@ If the user has not explicitly requested a commit, do not commit.
 
 - Reopening the same iframe after minimize resumes the current booking or chat screen.
 - Typed but unsubmitted DOM input values remain intact because the iframe was hidden, not recreated.
-- `minimize()` still sends `clinicflow-minimize` to the parent page.
+- `minimize()` still sends `kliniassist-minimize` to the parent page.
 - No persistent draft storage is introduced.
 - Targeted widget tests, widget design-system tests, and `manage.py check` pass.

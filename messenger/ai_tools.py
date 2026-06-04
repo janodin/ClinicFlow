@@ -1,13 +1,15 @@
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
 
 from appointments.models import Appointment
 from clinics.models import Clinic, ClinicAISettings
 from patients.models import normalize_phone
-from scheduling.utils import generate_slots
+from scheduling.utils import generate_slots, validate_slot
 from widget.views import _process_guest_booking
 
 from .defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
@@ -81,6 +83,21 @@ def _parse_datetime(value):
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed)
     return parsed.astimezone(dt_timezone.utc)
+
+
+def _parse_clinic_datetime(clinic, value):
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, ZoneInfo(clinic.timezone))
+    return parsed.astimezone(dt_timezone.utc)
+
+
+def _validation_error_text(error):
+    if hasattr(error, "messages"):
+        return " ".join(str(message) for message in error.messages)
+    return str(error)
 
 
 APPOINTMENT_LOOKUP_ERROR = "Appointment not found. Please check the reference code and phone number."
@@ -253,7 +270,16 @@ def check_availability(page_id, service_id, preferred_starts_at=None, preferred_
 def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None, preferred_date=None):
     service = clinic.services.filter(pk=service_id, is_active=True, is_archived=False).first()
     if not service:
-        return {"found": True, "available": False, "error": "Service not found.", "alternatives": []}
+        return {
+            "found": True,
+            "available": False,
+            "error": "Service not found.",
+            "selected_slot": None,
+            "alternatives": [],
+            "suggestion_type": "none",
+            "requested_date": None,
+            "suggested_date": None,
+        }
 
     try:
         requested_start = _parse_datetime(preferred_starts_at) if preferred_starts_at else None
@@ -264,27 +290,56 @@ def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None,
         else:
             target_date = _clinic_localdate(clinic) + timedelta(days=1)
     except (ValueError, TypeError):
-        return {"found": True, "available": False, "error": "Invalid date or time.", "alternatives": []}
+        return {
+            "found": True,
+            "available": False,
+            "error": "Invalid date or time.",
+            "selected_slot": None,
+            "alternatives": [],
+            "suggestion_type": "none",
+            "requested_date": None,
+            "suggested_date": None,
+        }
 
     raw_slots = generate_slots(clinic, service, target_date)
     selected = None
     if requested_start:
         selected = next((slot for slot in raw_slots if slot["starts_at"] == requested_start), None)
-    alternatives = raw_slots
+
+    suggestion_type = "none"
+    suggested_date = None
     if requested_start:
         alternatives = sorted(raw_slots, key=lambda slot: abs(slot["starts_at"] - requested_start))
         alternatives = [slot for slot in alternatives if slot["starts_at"] != requested_start]
+        if alternatives:
+            suggestion_type = "requested_date" if selected else "nearest_time"
+            suggested_date = target_date
+    else:
+        alternatives = raw_slots
+        if alternatives:
+            suggestion_type = "requested_date"
+            suggested_date = target_date
 
-    search_date = target_date
-    while len(alternatives) < 3 and search_date < target_date + timedelta(days=14):
-        search_date += timedelta(days=1)
-        alternatives.extend(generate_slots(clinic, service, search_date))
+    if not alternatives and not selected:
+        search_date = target_date
+        while search_date < target_date + timedelta(days=14):
+            search_date += timedelta(days=1)
+            alternatives = generate_slots(clinic, service, search_date)
+            if alternatives:
+                suggestion_type = "next_available_date"
+                suggested_date = search_date
+                break
+
+    available = selected is not None or (requested_start is None and suggested_date == target_date)
 
     return {
         "found": True,
-        "available": selected is not None or (requested_start is None and bool(alternatives)),
+        "available": available,
         "selected_slot": _slot_payload(clinic, selected) if selected else None,
         "alternatives": [_slot_payload(clinic, slot) for slot in alternatives[:3]],
+        "suggestion_type": suggestion_type,
+        "requested_date": target_date.isoformat(),
+        "suggested_date": suggested_date.isoformat() if suggested_date else None,
     }
 
 
@@ -313,6 +368,87 @@ def find_widget_verified_appointment(clinic_slug, reference_code, phone):
     if disabled:
         return {**disabled, "found": False, "error": "AI is disabled for this clinic."}
     return _find_verified_appointment_for_clinic(clinic, reference_code, phone)
+
+
+def cancel_verified_appointment(page_id, reference_code, phone, confirmed, reason=""):
+    connection = get_connection_for_page(page_id)
+    if not connection:
+        return {"cancelled": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    return _cancel_verified_appointment_for_clinic(connection.clinic, reference_code, phone, confirmed, reason)
+
+
+def cancel_widget_verified_appointment(clinic_slug, reference_code, phone, confirmed, reason=""):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"cancelled": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    disabled = _website_ai_disabled_response_for_clinic(clinic)
+    if disabled:
+        return {**disabled, "cancelled": False, "error": "AI is disabled for this clinic."}
+    return _cancel_verified_appointment_for_clinic(clinic, reference_code, phone, confirmed, reason)
+
+
+def _cancel_verified_appointment_for_clinic(clinic, reference_code, phone, confirmed, reason=""):
+    if confirmed is not True:
+        return {"cancelled": False, "error": CONFIRMATION_REQUIRED_ERROR}
+
+    with transaction.atomic():
+        locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+        appointment, error = _verified_appointment_for_clinic(locked_clinic, reference_code, phone)
+        if error:
+            return {"cancelled": False, "error": error}
+        if not appointment.can_transition_to(Appointment.STATUS_CANCELLED):
+            return {"cancelled": False, "error": "This appointment cannot be cancelled through the assistant."}
+        appointment.status = Appointment.STATUS_CANCELLED
+        appointment.cancellation_reason = str(reason or "").strip()[:500]
+        appointment.save(update_fields=["status", "cancellation_reason", "updated_at"])
+        return {"cancelled": True, "appointment": _appointment_summary(locked_clinic, appointment)}
+
+
+def reschedule_verified_appointment(page_id, reference_code, phone, starts_at, confirmed):
+    connection = get_connection_for_page(page_id)
+    if not connection:
+        return {"rescheduled": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    return _reschedule_verified_appointment_for_clinic(connection.clinic, reference_code, phone, starts_at, confirmed)
+
+
+def reschedule_widget_verified_appointment(clinic_slug, reference_code, phone, starts_at, confirmed):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"rescheduled": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    disabled = _website_ai_disabled_response_for_clinic(clinic)
+    if disabled:
+        return {**disabled, "rescheduled": False, "error": "AI is disabled for this clinic."}
+    return _reschedule_verified_appointment_for_clinic(clinic, reference_code, phone, starts_at, confirmed)
+
+
+def _reschedule_verified_appointment_for_clinic(clinic, reference_code, phone, starts_at, confirmed):
+    if confirmed is not True:
+        return {"rescheduled": False, "error": CONFIRMATION_REQUIRED_ERROR}
+
+    try:
+        new_starts_at = _parse_clinic_datetime(clinic, starts_at)
+    except (ValueError, TypeError):
+        return {"rescheduled": False, "error": "Invalid date or time."}
+    if not new_starts_at:
+        return {"rescheduled": False, "error": "Invalid date or time."}
+    if new_starts_at <= timezone.now():
+        return {"rescheduled": False, "error": "Cannot reschedule to the past."}
+
+    with transaction.atomic():
+        locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+        appointment, error = _verified_appointment_for_clinic(locked_clinic, reference_code, phone)
+        if error:
+            return {"rescheduled": False, "error": error}
+        duration = appointment.service.effective_duration()
+        new_ends_at = new_starts_at + timedelta(minutes=duration)
+        try:
+            validate_slot(locked_clinic, new_starts_at, new_ends_at, exclude_appointment=appointment)
+        except ValidationError as exc:
+            return {"rescheduled": False, "error": _validation_error_text(exc)}
+        appointment.starts_at = new_starts_at
+        appointment.ends_at = new_ends_at
+        appointment.save(update_fields=["starts_at", "ends_at", "updated_at"])
+        return {"rescheduled": True, "appointment": _appointment_summary(locked_clinic, appointment)}
 
 
 def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone, confirmed, email="", reason="", psid=""):

@@ -43,7 +43,7 @@ def test_assistant_settings_page_explains_launcher_first_embed_options(clinic_se
     assert "previewOpen: false" in content
     assert "@click=\"previewOpen = true\"" in content
     assert "@click=\"previewOpen = false\"" in content
-    assert "clinicflow-minimize" in content
+    assert "kliniassist-minimize" in content
     assert "Click the launcher to preview how patients open the widget." in content
     assert "aria-label=\"Open booking widget preview\"" in content
     assert "Book an appointment" in content
@@ -79,7 +79,7 @@ In `templates/dashboard/assistant_settings.html`, update the `Website Booking Wi
 to:
 
 ```html
-<section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, previewOpen: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;} window.addEventListener('message', event => { if (event.data && event.data.type === 'clinicflow-minimize') { previewOpen = false; } });">
+<section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, previewOpen: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;} window.addEventListener('message', event => { if (event.data && event.data.type === 'kliniassist-minimize') { previewOpen = false; } });">
 ```
 
 - [ ] **Step 4: Replace the live preview markup**

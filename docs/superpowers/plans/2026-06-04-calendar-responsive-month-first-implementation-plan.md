@@ -4,9 +4,9 @@
 
 **Goal:** Make the dashboard Calendar month-first on every screen while improving responsive layout, loading/error UX, active view controls, touch-safe drag/drop, and FullCalendar design-system styling.
 
-**Architecture:** Keep the existing Django template + FullCalendar integration. Add test coverage first, then update the calendar event payload with status/editability metadata, refine `templates/dashboard/calendar.html` JavaScript/markup, and centralize Calendar styling in `static/css/clinicflow.css` using existing Neon Aqua Clinical tokens.
+**Architecture:** Keep the existing Django template + FullCalendar integration. Add test coverage first, then update the calendar event payload with status/editability metadata, refine `templates/dashboard/calendar.html` JavaScript/markup, and centralize Calendar styling in `static/css/kliniassist.css` using existing Neon Aqua Clinical tokens.
 
-**Tech Stack:** Django views/templates, FullCalendar 6, Alpine.js modal state, HTMX modal loading, Tailwind utility classes, `static/css/clinicflow.css`, pytest.
+**Tech Stack:** Django views/templates, FullCalendar 6, Alpine.js modal state, HTMX modal loading, Tailwind utility classes, `static/css/kliniassist.css`, pytest.
 
 ---
 
@@ -16,7 +16,7 @@
 - `dashboard/tests.py`: Calendar events API tests for status metadata and per-event editability.
 - `dashboard/views.py`: Existing `calendar_events` endpoint gains `extendedProps.status` and per-event `editable` booleans.
 - `templates/dashboard/calendar.html`: Month-first FullCalendar config, visible view controls, active view sync, loading/error messages, touch-safe editing, and HTMX detail failure fallback.
-- `static/css/clinicflow.css`: Calendar card sizing, small-screen horizontal month scroll, active view buttons, legend dots, time-grid styling, and readable status token refinements.
+- `static/css/kliniassist.css`: Calendar card sizing, small-screen horizontal month scroll, active view buttons, legend dots, time-grid styling, and readable status token refinements.
 
 No commits will be made unless the user explicitly asks for one.
 
@@ -452,7 +452,7 @@ Expected: PASS after the template behavior is updated.
 ## Task 4: Calendar CSS And Design-System Styling
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 
 - [ ] **Step 1: Strengthen status text tokens for tiny badges**
 

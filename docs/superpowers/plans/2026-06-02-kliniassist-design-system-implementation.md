@@ -4,9 +4,9 @@
 
 **Goal:** Apply the approved Stone-Sage Clinical Ledger design system across KliniAssist while preserving appointment-first behavior, clinic scoping, guest booking, slot validation, and HTMX workflows.
 
-**Architecture:** Implement from the shared foundation outward. First update `static/css/clinicflow.css`, then the authenticated app shell, shared partials, operational pages, public widget, auth/email screens, and finally add drift tests and cleanup. Implementation tasks should run sequentially because many phases touch shared CSS and templates.
+**Architecture:** Implement from the shared foundation outward. First update `static/css/kliniassist.css`, then the authenticated app shell, shared partials, operational pages, public widget, auth/email screens, and finally add drift tests and cleanup. Implementation tasks should run sequentially because many phases touch shared CSS and templates.
 
-**Tech Stack:** Django templates, Tailwind utility layout, `static/css/clinicflow.css`, HTMX, Alpine.js, FullCalendar, Lucide icons, pytest, Django test client.
+**Tech Stack:** Django templates, Tailwind utility layout, `static/css/kliniassist.css`, HTMX, Alpine.js, FullCalendar, Lucide icons, pytest, Django test client.
 
 ---
 
@@ -23,7 +23,7 @@
 ## File Responsibility Map
 
 - `DESIGN.md`: Approved design system source of truth. Already rewritten.
-- `static/css/clinicflow.css`: Global tokens, base elements, reusable `cf-*` classes, temporary compatibility aliases.
+- `static/css/kliniassist.css`: Global tokens, base elements, reusable `cf-*` classes, temporary compatibility aliases.
 - `templates/base.html`: Global static CSS/script loading and root document shell.
 - `templates/dashboard/base.html`: Authenticated app shell, sidebar, topbar, search, toast container, mobile nav, HTMX behavior.
 - `templates/dashboard/partials/*.html`: HTMX-swapped reusable operational UI for appointments, patients, services, FAQs, search, modals.
@@ -59,7 +59,7 @@ pytest -q
 ### Task 1: CSS Foundation
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 - Reference: `DESIGN.md`
 
 **Goal:** Make the shared CSS foundation match Stone-Sage Clinical Ledger while preserving old aliases until templates are migrated.
@@ -70,14 +70,14 @@ Run:
 
 ```powershell
 .\env\Scripts\activate
-rg "--cf-bg|--cf-brand|font-weight:\s*850|soft-card|ui-input|text-cyan|bg-cyan" static/css/clinicflow.css
+rg "--cf-bg|--cf-brand|font-weight:\s*850|soft-card|ui-input|text-cyan|bg-cyan" static/css/kliniassist.css
 ```
 
 Expected: output shows old teal tokens, `850` weights, and compatibility aliases that will be migrated or temporarily preserved.
 
 - [ ] **Step 2: Replace root tokens with Stone-Sage variables**
 
-Update `:root` in `static/css/clinicflow.css` to use the variables from `DESIGN.md` section `19. Implementation Rules`, including:
+Update `:root` in `static/css/kliniassist.css` to use the variables from `DESIGN.md` section `19. Implementation Rules`, including:
 
 ```css
 :root {
@@ -233,8 +233,8 @@ Run:
 .\env\Scripts\activate
 python manage.py check
 pytest -q
-rg "font-weight:\s*850|font-weight:\s*750" static/css/clinicflow.css
-rg "--cf-bg:\s*#eef5f8|--cf-brand:\s*#0f6b55|#0891b2" static/css/clinicflow.css
+rg "font-weight:\s*850|font-weight:\s*750" static/css/kliniassist.css
+rg "--cf-bg:\s*#eef5f8|--cf-brand:\s*#0f6b55|#0891b2" static/css/kliniassist.css
 ```
 
 Expected: `manage.py check` and `pytest` pass. The two `rg` checks return no matches.
@@ -596,7 +596,7 @@ pytest -q
 
 **Files:**
 - Create: `tests/test_design_system.py`
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 - Modify templates only where drift remains
 - Modify: `.gitignore` if the user approves ignoring `.superpowers/`
 
@@ -614,7 +614,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_css_uses_stone_sage_tokens():
-    css = (PROJECT_ROOT / "static" / "css" / "clinicflow.css").read_text(encoding="utf-8")
+    css = (PROJECT_ROOT / "static" / "css" / "kliniassist.css").read_text(encoding="utf-8")
 
     assert "--cf-bg: #ebe7dd" in css
     assert "--cf-brand: #365449" in css
@@ -654,7 +654,7 @@ If existing tests do not cover page rendering, extend `tests/test_flows.py` or c
 Run:
 
 ```powershell
-rg "ui-page-title|ui-input|ui-select|soft-card|font-black|text-slate|bg-cyan|border-slate|text-cyan|bg-emerald" templates static/css/clinicflow.css
+rg "ui-page-title|ui-input|ui-select|soft-card|font-black|text-slate|bg-cyan|border-slate|text-cyan|bg-emerald" templates static/css/kliniassist.css
 ```
 
 Remove compatibility aliases only if no templates need them. Keep aliases if public widget, auth, or email migration still depends on them.

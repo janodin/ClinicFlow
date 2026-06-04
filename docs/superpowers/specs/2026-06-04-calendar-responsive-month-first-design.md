@@ -19,7 +19,7 @@ Use a responsive month grid with safe horizontal scrolling on small screens. Pre
 - Keep Month, Week, and Day controls available, but make the active view visually clear with `aria-pressed` and a selected button treatment.
 - Keep operational density: compact controls, compact legend, and scannable event pills.
 - Use horizontal scrolling on small screens rather than compressing the month grid until event text becomes unreadable.
-- Move inline Calendar height and event cursor styling into `static/css/clinicflow.css`.
+- Move inline Calendar height and event cursor styling into `static/css/kliniassist.css`.
 - Replace fragile fixed viewport height with `100dvh`-based CSS that allows safe scrolling when toolbar/header content wraps.
 - Keep filters above the Calendar card and stack them cleanly on tablet/phone widths.
 - Keep the legend compact but make status mapping clearer with a small status dot or similarly subtle status cue.

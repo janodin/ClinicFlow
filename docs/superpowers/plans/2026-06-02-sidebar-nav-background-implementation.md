@@ -6,7 +6,7 @@
 
 **Architecture:** This is a CSS-only visual refinement protected by the existing design-system regression test. The dashboard templates and sidebar shell remain unchanged; `tests/test_design_system.py` locks the intended CSS declarations.
 
-**Tech Stack:** Django templates, Tailwind utility classes, canonical `static/css/clinicflow.css`, pytest design-system tests.
+**Tech Stack:** Django templates, Tailwind utility classes, canonical `static/css/kliniassist.css`, pytest design-system tests.
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Files:**
 - Modify: `tests/test_design_system.py:348-362`
-- Modify: `static/css/clinicflow.css:685-726`
+- Modify: `static/css/kliniassist.css:685-726`
 
 - [ ] **Step 1: Update the design-system test expectation**
 
@@ -46,11 +46,11 @@ Run:
 .\env\Scripts\python -m pytest tests/test_design_system.py::test_dashboard_sidebar_uses_neon_aqua_shell_treatment -q
 ```
 
-Expected: `FAILED` because `static/css/clinicflow.css` still has the old hover and active background declarations.
+Expected: `FAILED` because `static/css/kliniassist.css` still has the old hover and active background declarations.
 
 - [ ] **Step 3: Update the sidebar nav CSS**
 
-In `static/css/clinicflow.css`, update only the `.cf-nav-link:hover` and `.cf-nav-link-active` `background` declarations while preserving existing text, border, and shadow treatment.
+In `static/css/kliniassist.css`, update only the `.cf-nav-link:hover` and `.cf-nav-link-active` `background` declarations while preserving existing text, border, and shadow treatment.
 
 ```css
 .cf-nav-link:hover {

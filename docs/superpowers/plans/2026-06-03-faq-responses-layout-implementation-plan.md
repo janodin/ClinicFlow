@@ -4,7 +4,7 @@
 
 **Goal:** Redesign the dashboard FAQ Responses section into an approved split composer plus FAQ card list layout with icon-only Edit/Delete controls.
 
-**Architecture:** Keep the existing Django view, form, HTMX partial replacement, and delete modal behavior. Add explicit FAQ counts to the Assistant Settings context, update the FAQ section template structure, promote the row partial into a card, and add focused FAQ layout classes in `static/css/clinicflow.css`.
+**Architecture:** Keep the existing Django view, form, HTMX partial replacement, and delete modal behavior. Add explicit FAQ counts to the Assistant Settings context, update the FAQ section template structure, promote the row partial into a card, and add focused FAQ layout classes in `static/css/kliniassist.css`.
 
 **Tech Stack:** Django views/templates, HTMX, Alpine.js, Tailwind utility classes, shared `cf-*` CSS layer, pytest design-system tests.
 
@@ -18,7 +18,7 @@
 - Modify `dashboard/views.py`: provide `faq_total_count` and `faq_visible_count` in the Assistant Settings template context, including invalid FAQ-create renders.
 - Modify `templates/dashboard/assistant_settings.html`: replace the current flat FAQ section with the approved split composer/list layout while keeping the existing form action, CSRF, and fields.
 - Modify `templates/dashboard/partials/faq_row.html`: convert each row into a card, preserve `id="faq-row-{{ faq.id }}"`, preserve HTMX targets, keep inline edit, use icon-only Edit/Delete, and keep visibility explicit.
-- Modify `static/css/clinicflow.css`: add focused `cf-faq-*` component classes for the section header, responsive split layout, composer panel, card rows, status badges, and icon actions.
+- Modify `static/css/kliniassist.css`: add focused `cf-faq-*` component classes for the section header, responsive split layout, composer panel, card rows, status badges, and icon actions.
 
 ---
 
@@ -406,7 +406,7 @@ Expected: PASS after this partial change and Task 1 test updates are complete.
 ### Task 5: Add FAQ Layout CSS
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 - Test: `tests/test_design_system.py`
 
 - [ ] **Step 1: Add FAQ component styles after the form/error styles**
@@ -659,7 +659,7 @@ Expected: PASS after CSS is added.
 - Verify: `dashboard/views.py`
 - Verify: `templates/dashboard/assistant_settings.html`
 - Verify: `templates/dashboard/partials/faq_row.html`
-- Verify: `static/css/clinicflow.css`
+- Verify: `static/css/kliniassist.css`
 - Verify: `tests/test_design_system.py`
 
 - [ ] **Step 1: Run the FAQ design-system tests**
@@ -697,7 +697,7 @@ Expected: PASS with no system check issues.
 Run:
 
 ```powershell
-git diff -- dashboard/views.py templates/dashboard/assistant_settings.html templates/dashboard/partials/faq_row.html static/css/clinicflow.css tests/test_design_system.py docs/superpowers/specs/2026-06-03-faq-responses-layout-design.md docs/superpowers/plans/2026-06-03-faq-responses-layout-implementation-plan.md
+git diff -- dashboard/views.py templates/dashboard/assistant_settings.html templates/dashboard/partials/faq_row.html static/css/kliniassist.css tests/test_design_system.py docs/superpowers/specs/2026-06-03-faq-responses-layout-design.md docs/superpowers/plans/2026-06-03-faq-responses-layout-implementation-plan.md
 ```
 
 Expected: Diff only contains the approved FAQ Responses layout design, implementation plan, and related test updates.

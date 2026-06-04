@@ -20,7 +20,7 @@ The active state should use `background: linear-gradient(90deg, rgba(5, 47, 58, 
 
 ## Implementation Notes
 
-- Update `static/css/clinicflow.css` only for the sidebar nav hover and active background declarations.
+- Update `static/css/kliniassist.css` only for the sidebar nav hover and active background declarations.
 - Update `tests/test_design_system.py` expectations that lock the sidebar treatment.
 - Do not modify dashboard templates for this change.
 

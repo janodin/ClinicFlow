@@ -85,7 +85,7 @@
 
           <div class="cf-field" role="group" aria-labelledby="widget-slots-label">
             <span id="widget-slots-label" class="cf-label">Available Times</span>
-            <div id="slots-container" class="mt-1" hx-get="{% url 'widget:slots' clinic.slug %}" hx-target="#slots-container" hx-trigger="clinicflow:load-slots">
+            <div id="slots-container" class="mt-1" hx-get="{% url 'widget:slots' clinic.slug %}" hx-target="#slots-container" hx-trigger="kliniassist:load-slots">
               {% include "widget/partials/slots.html" %}
             </div>
           </div>
@@ -311,7 +311,7 @@
       },
       minimize() {
         if (window.parent !== window) {
-          window.parent.postMessage({type: 'clinicflow-minimize'}, '*');
+          window.parent.postMessage({type: 'kliniassist-minimize'}, '*');
         }
       },
       startChat() {

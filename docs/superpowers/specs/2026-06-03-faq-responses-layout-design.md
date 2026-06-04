@@ -101,7 +101,7 @@ The empty state should stay simple but align with the new layout.
 
 ## CSS And Template Approach
 
-Prefer reusable `cf-*` CSS classes in `static/css/clinicflow.css` for the new FAQ layout rather than repeating long raw utility strings.
+Prefer reusable `cf-*` CSS classes in `static/css/kliniassist.css` for the new FAQ layout rather than repeating long raw utility strings.
 
 Suggested class concepts:
 

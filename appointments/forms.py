@@ -19,7 +19,7 @@ class GuestBookingForm(forms.Form):
     selected_slot = forms.CharField(widget=forms.HiddenInput())
     full_name = forms.CharField(max_length=160, widget=forms.TextInput(attrs={"class": _INPUT, "placeholder": "Juan Dela Cruz"}))
     phone = forms.CharField(max_length=40, widget=forms.TextInput(attrs={"class": _INPUT, "placeholder": "09XXXXXXXXX"}))
-    email = forms.EmailField(required=False, widget=forms.EmailInput(attrs={"class": _INPUT, "placeholder": "patient@email.com"}))
+    email = forms.EmailField(widget=forms.EmailInput(attrs={"class": _INPUT, "placeholder": "patient@email.com"}))
     reason = forms.CharField(widget=forms.Textarea(attrs={"class": _TEXTAREA, "placeholder": "Reason for visit", "rows": 3}), required=False)
 
     def __init__(self, clinic, *args, **kwargs):
@@ -31,7 +31,7 @@ class GuestBookingForm(forms.Form):
 class StaffAppointmentForm(forms.ModelForm):
     patient_name = forms.CharField(max_length=160, widget=forms.TextInput(attrs={"class": _INPUT, "placeholder": "Patient name"}))
     patient_phone = forms.CharField(max_length=40, widget=forms.TextInput(attrs={"class": _INPUT, "placeholder": "Phone number"}))
-    patient_email = forms.EmailField(required=False, widget=forms.EmailInput(attrs={"class": _INPUT, "placeholder": "patient@email.com"}))
+    patient_email = forms.EmailField(widget=forms.EmailInput(attrs={"class": _INPUT, "placeholder": "patient@email.com"}))
     date = forms.DateField(widget=forms.DateInput(attrs={"type": "date", "class": _INPUT}))
     time = forms.TimeField(widget=forms.TimeInput(attrs={"type": "time", "class": _INPUT}))
 

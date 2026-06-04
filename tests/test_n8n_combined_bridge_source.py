@@ -16,6 +16,20 @@ def test_combined_bridge_uses_one_shared_ai_core():
     assert "name: 'Widget Chat Model'" not in source
 
 
+def test_combined_bridge_uses_kliniassist_technical_namespace():
+    source = SOURCE.read_text(encoding="utf-8")
+    legacy_prefix = "clinic" + "flow"
+    legacy_agent = "clinic" + "FlowSharedAiAgent"
+
+    assert "path: 'kliniassist-messenger'" in source
+    assert "path: 'kliniassist-widget-assistant'" in source
+    assert "const kliniAssistSharedAiAgent" in source
+    assert ".onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in source
+    assert f"path: '{legacy_prefix}-messenger'" not in source
+    assert f"path: '{legacy_prefix}-widget-assistant'" not in source
+    assert legacy_agent not in source
+
+
 def test_combined_bridge_django_base_url_can_target_local_development():
     source = SOURCE.read_text(encoding="utf-8")
 
@@ -64,7 +78,7 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
     assert workflow_block.count(".to(sharedAiInput)") == 2
     assert workflow_block.count(".to(resolveAssistantMode)") == 1
     assert workflow_block.count(".to(routeAssistantMode") == 1
-    assert ".onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in shared_route_block
+    assert ".onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in shared_route_block
     assert ".onCase(1, returnWidgetReply)" in shared_route_block
 
 
@@ -81,6 +95,59 @@ def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmati
     assert "/messenger/ai/widget/services/" in source
     assert "/messenger/ai/widget/availability/" in source
     assert "/messenger/ai/widget/book/" in source
+
+
+def test_combined_bridge_includes_verified_appointment_management_tools():
+    source = SOURCE.read_text(encoding="utf-8")
+    lookup_start = source.index("name: 'find_verified_appointment'")
+    cancel_start = source.index("name: 'cancel_verified_appointment'")
+    reschedule_start = source.index("name: 'reschedule_verified_appointment'")
+    quick_replies_start = source.index("const getMessengerQuickReplies")
+    lookup_block = source[lookup_start:cancel_start]
+    cancel_block = source[cancel_start:reschedule_start]
+    reschedule_block = source[reschedule_start:quick_replies_start]
+
+    assert "/messenger/ai/appointment/lookup/" in lookup_block
+    assert "/messenger/ai/widget/appointment/lookup/" in lookup_block
+    assert "KliniAssist N8N Webhook Secret" in lookup_block
+    assert "/messenger/ai/appointment/cancel/" in cancel_block
+    assert "/messenger/ai/widget/appointment/cancel/" in cancel_block
+    assert "KliniAssist N8N Webhook Secret" in cancel_block
+    assert "/messenger/ai/appointment/reschedule/" in reschedule_block
+    assert "/messenger/ai/widget/appointment/reschedule/" in reschedule_block
+    assert "KliniAssist N8N Webhook Secret" in reschedule_block
+    for block in [lookup_block, cancel_block, reschedule_block]:
+        assert "fromAi('page_id'" not in block
+        assert "fromAi('clinic_slug'" not in block
+        assert '$("Shared AI Input").item.json.page_id' in block
+        assert '$("Shared AI Input").item.json.clinic_slug' in block
+
+
+def test_combined_bridge_prompt_requires_verified_cancel_and_reschedule_confirmation():
+    source = SOURCE.read_text(encoding="utf-8")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
+    agent_end = source.index("const prepareSharedFallback")
+    agent_block = source[agent_start:agent_end]
+
+    assert "Use find_verified_appointment before canceling or rescheduling." in agent_block
+    assert "Ask for appointment reference code and phone number before appointment management lookup." in agent_block
+    assert "Summarize the verified appointment and requested action before mutation." in agent_block
+    assert "Ask for explicit confirmation before canceling or rescheduling." in agent_block
+    assert "Use cancel_verified_appointment and reschedule_verified_appointment only after explicit confirmation." in agent_block
+    assert "Do not use user-supplied appointment IDs, patient IDs, clinic IDs, or service IDs for appointment management." in agent_block
+
+
+def test_combined_bridge_prompt_uses_availability_suggestion_metadata_and_hides_faq_source():
+    source = SOURCE.read_text(encoding="utf-8")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
+    agent_end = source.index("const prepareSharedFallback")
+    agent_block = source[agent_start:agent_end]
+
+    assert "Use check_availability suggestion_type metadata" in agent_block
+    assert "nearest_time means the requested time is unavailable" in agent_block
+    assert "next_available_date means the requested date has no slots" in agent_block
+    assert "Use FAQ entries as clinic knowledge without citing the source" in agent_block
+    assert "Do not say based on the FAQ, according to the FAQ, the FAQ says" in agent_block
 
 
 def test_combined_bridge_memory_key_changes_when_ai_settings_change():
@@ -203,7 +270,7 @@ def test_combined_bridge_facebook_send_errors_are_not_silenced():
 def test_combined_bridge_caps_messenger_quick_replies_for_meta_limit():
     source = SOURCE.read_text(encoding="utf-8")
     prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
-    prepare_end = source.index("const clinicFlowSharedAiAgent")
+    prepare_end = source.index("const kliniAssistSharedAiAgent")
     prepare_block = source[prepare_start:prepare_end]
 
     assert ".slice(0, 13).map" in prepare_block
@@ -220,7 +287,7 @@ def test_combined_bridge_facebook_bodies_include_messaging_type_response():
 def test_combined_bridge_uses_django_response_identity_for_messenger_quick_replies():
     source = SOURCE.read_text(encoding="utf-8")
     prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
-    prepare_end = source.index("const clinicFlowSharedAiAgent")
+    prepare_end = source.index("const kliniAssistSharedAiAgent")
     prepare_block = source[prepare_start:prepare_end]
 
     assert "$items('Resolve Assistant Mode')[0]" not in prepare_block
@@ -232,7 +299,7 @@ def test_combined_bridge_uses_django_response_identity_for_messenger_quick_repli
 def test_combined_bridge_omits_empty_messenger_quick_replies_for_meta():
     source = SOURCE.read_text(encoding="utf-8")
     prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
-    prepare_end = source.index("const clinicFlowSharedAiAgent")
+    prepare_end = source.index("const kliniAssistSharedAiAgent")
     prepare_block = source[prepare_start:prepare_end]
 
     assert "const quickReplies = (action.options || []).slice(0, 13).map" in prepare_block

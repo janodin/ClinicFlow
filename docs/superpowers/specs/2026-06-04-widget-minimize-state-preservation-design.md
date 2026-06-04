@@ -13,11 +13,11 @@ The behavior is same-page only. A browser refresh, new tab, or new visit does no
 
 ## Current State
 
-The JavaScript embed in `widget.views.embed_js()` creates the widget iframe on the first launcher click, hides the iframe on `clinicflow-minimize`, and shows the same iframe again on the next launcher click.
+The JavaScript embed in `widget.views.embed_js()` creates the widget iframe on the first launcher click, hides the iframe on `kliniassist-minimize`, and shows the same iframe again on the next launcher click.
 
 That means the iframe can already preserve in-memory state while the host page stays loaded.
 
-The reset happens inside `templates/widget/widget.html`: the `minimize()` method posts `{type: 'clinicflow-minimize'}` to the parent page, then sets `this.mode = 'home'`. This forces the widget back to the home screen even though the iframe itself was not destroyed.
+The reset happens inside `templates/widget/widget.html`: the `minimize()` method posts `{type: 'kliniassist-minimize'}` to the parent page, then sets `this.mode = 'home'`. This forces the widget back to the home screen even though the iframe itself was not destroyed.
 
 ## Approved Direction
 
@@ -39,7 +39,7 @@ For the recommended JavaScript launcher embed:
 2. Parent script creates or shows the existing widget iframe.
 3. Visitor starts a booking or chat.
 4. Visitor clicks widget minimize.
-5. Widget posts `{type: 'clinicflow-minimize'}` to the parent frame.
+5. Widget posts `{type: 'kliniassist-minimize'}` to the parent frame.
 6. Parent script hides the iframe and shows the launcher.
 7. Visitor clicks the launcher again.
 8. Parent script shows the same iframe.
@@ -72,7 +72,7 @@ Reset behavior should remain explicit:
 
 The expected code change is small:
 
-- Keep `window.parent.postMessage({type: 'clinicflow-minimize'}, '*')` in `minimize()`.
+- Keep `window.parent.postMessage({type: 'kliniassist-minimize'}, '*')` in `minimize()`.
 - Remove the `this.mode = 'home'` reset from `minimize()`.
 - Do not add browser storage or server-side draft storage.
 
@@ -92,7 +92,7 @@ The change does not alter tenant scoping or booking authority.
 
 No new error paths are introduced.
 
-- If the parent page handles `clinicflow-minimize`, the iframe collapses and can be reopened with its current in-memory state.
+- If the parent page handles `kliniassist-minimize`, the iframe collapses and can be reopened with its current in-memory state.
 - If the widget is opened directly outside an iframe, clicking minimize should not reset the UI. The postMessage branch already only runs when `window.parent !== window`.
 - Existing HTMX booking errors and chat fallback behavior remain unchanged.
 
@@ -100,7 +100,7 @@ No new error paths are introduced.
 
 Add or update targeted tests for the widget template contract:
 
-- `minimize()` still posts `clinicflow-minimize` to the parent frame.
+- `minimize()` still posts `kliniassist-minimize` to the parent frame.
 - `minimize()` no longer sets `this.mode = 'home'`.
 - The widget still exposes the current behavior hooks used by booking, slots, HTMX, and chat.
 

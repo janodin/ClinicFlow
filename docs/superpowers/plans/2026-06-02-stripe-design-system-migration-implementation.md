@@ -4,9 +4,9 @@
 
 **Goal:** Replace KliniAssist's Stone-Sage visual language with the `getdesign` Stripe design system across the Django dashboard, public widget, auth, and email surfaces while preserving all booking and clinic-scoping behavior.
 
-**Architecture:** Use a token-first migration. Replace root `DESIGN.md`, then re-skin the existing `static/css/clinicflow.css` `cf-*` implementation layer and update only the templates, model defaults, and color literals that still expose old teal/sage/slate design decisions. Keep Django templates, CDN Tailwind, HTMX, Alpine.js, Lucide, and FullCalendar; do not introduce a frontend build pipeline.
+**Architecture:** Use a token-first migration. Replace root `DESIGN.md`, then re-skin the existing `static/css/kliniassist.css` `cf-*` implementation layer and update only the templates, model defaults, and color literals that still expose old teal/sage/slate design decisions. Keep Django templates, CDN Tailwind, HTMX, Alpine.js, Lucide, and FullCalendar; do not introduce a frontend build pipeline.
 
-**Tech Stack:** Django 5.2, Django templates, Tailwind CDN utility layout, `static/css/clinicflow.css`, HTMX, Alpine.js, FullCalendar, Lucide icons, pytest, pytest-django.
+**Tech Stack:** Django 5.2, Django templates, Tailwind CDN utility layout, `static/css/kliniassist.css`, HTMX, Alpine.js, FullCalendar, Lucide icons, pytest, pytest-django.
 
 ---
 
@@ -24,7 +24,7 @@
 
 - `DESIGN.md`: Active Stripe design reference installed by `npx getdesign@latest add stripe --force`.
 - `docs/superpowers/specs/2026-06-02-stripe-design-system-migration-design.md`: Approved migration spec.
-- `static/css/clinicflow.css`: Global Stripe tokens, base typography, reusable `cf-*` classes, compatibility aliases, widget/auth/gradient surfaces.
+- `static/css/kliniassist.css`: Global Stripe tokens, base typography, reusable `cf-*` classes, compatibility aliases, widget/auth/gradient surfaces.
 - `templates/base.html`: Global script/CSS loading and root document shell.
 - `templates/dashboard/base.html`: Authenticated app shell, sidebar, topbar, search, account menu, toast container, mobile nav, global HTMX behavior.
 - `templates/dashboard/*.html`: Dashboard pages using shared classes: home, appointments, calendar, patients, services, settings, business hours, unavailable dates, slot preview, profile, billing, assistant/widget settings.
@@ -118,7 +118,7 @@ Expected: only `DESIGN.md` is changed by this task.
 
 **Files:**
 - Modify: `tests/test_design_system.py`
-- Reference: `static/css/clinicflow.css`
+- Reference: `static/css/kliniassist.css`
 - Reference: `templates/dashboard/base.html`
 - Reference: `templates/widget/widget.html`
 
@@ -248,7 +248,7 @@ Run:
 .\env\Scripts\activate; python -m pytest tests/test_design_system.py -q
 ```
 
-Expected: FAIL because `clinicflow.css` still contains Stone-Sage tokens/fonts and old component geometry.
+Expected: FAIL because `kliniassist.css` still contains Stone-Sage tokens/fonts and old component geometry.
 
 ---
 
@@ -352,14 +352,14 @@ Expected: FAIL because defaults and hard-coded calendar colors still use old tea
 ### Task 4: Migrate CSS Tokens, Typography, And Core Components
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 - Test: `tests/test_design_system.py`
 
 **Goal:** Re-skin the shared `cf-*` layer to the Stripe design system while preserving existing class names.
 
 - [ ] **Step 1: Replace the font import**
 
-Replace the first line of `static/css/clinicflow.css` with:
+Replace the first line of `static/css/kliniassist.css` with:
 
 ```css
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
@@ -493,7 +493,7 @@ Keep existing focus, disabled, invalid, date/time, select arrow, multiple select
 
 - [ ] **Step 6: Update headings, cards, buttons, tables, badges, shell, modals, and widget classes**
 
-Apply these exact class-level targets in `static/css/clinicflow.css`:
+Apply these exact class-level targets in `static/css/kliniassist.css`:
 
 ```css
 .cf-section-title,
@@ -758,7 +758,7 @@ Keep these existing script/style lines intact:
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
-  <link rel="stylesheet" href="{% static 'css/clinicflow.css' %}">
+  <link rel="stylesheet" href="{% static 'css/kliniassist.css' %}">
 ```
 
 Do not add a `package.json`, Tailwind config, PostCSS config, React, Next.js, or a frontend build step.
@@ -977,7 +977,7 @@ hx-target="#slots-container"
 hx-post="{% url 'widget:book' clinic.slug %}?source={{ booking_source }}"
 hx-target="#booking-form-container"
 accentColor: '{{ clinic.safe_widget_accent_color|escapejs }}'
-window.parent.postMessage('clinicflow-minimize', '*')
+window.parent.postMessage('kliniassist-minimize', '*')
 document.body.addEventListener('htmx:beforeSwap'
 ```
 
@@ -1082,7 +1082,7 @@ Expected: no matches.
 ### Task 11: Remove Active Legacy Drift And Run Full Verification
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 - Modify: `tests/test_design_system.py`
 - Verify: all touched files
 
@@ -1100,7 +1100,7 @@ Expected: no matches except historical migration files under `clinics/migrations
 
 - [ ] **Step 2: Keep or remove CSS compatibility aliases based on search results**
 
-If `rg "text-cyan-|bg-cyan-|border-slate-|ui-page-title|ui-input|ui-select|soft-card" templates static --glob "!static/css/clinicflow.css"` returns no active template matches, remove Tailwind color compatibility aliases from `static/css/clinicflow.css` and update `test_css_preserves_temporary_migration_aliases` into:
+If `rg "text-cyan-|bg-cyan-|border-slate-|ui-page-title|ui-input|ui-select|soft-card" templates static --glob "!static/css/kliniassist.css"` returns no active template matches, remove Tailwind color compatibility aliases from `static/css/kliniassist.css` and update `test_css_preserves_temporary_migration_aliases` into:
 
 ```python
 def test_active_templates_do_not_depend_on_legacy_design_aliases():
@@ -1161,7 +1161,7 @@ Run:
 
 ```powershell
 git status --short
-git diff -- DESIGN.md static/css/clinicflow.css templates/base.html templates/dashboard templates/widget templates/accounts templates/emails dashboard/views.py clinics/models.py services/models.py tests/test_design_system.py dashboard/tests.py widget/tests.py services/tests.py docs/superpowers/specs/2026-06-02-stripe-design-system-migration-design.md docs/superpowers/plans/2026-06-02-stripe-design-system-migration-implementation.md
+git diff -- DESIGN.md static/css/kliniassist.css templates/base.html templates/dashboard templates/widget templates/accounts templates/emails dashboard/views.py clinics/models.py services/models.py tests/test_design_system.py dashboard/tests.py widget/tests.py services/tests.py docs/superpowers/specs/2026-06-02-stripe-design-system-migration-design.md docs/superpowers/plans/2026-06-02-stripe-design-system-migration-implementation.md
 ```
 
 Expected: diff contains only the Stripe design-system migration and the approved spec/plan docs. Existing unrelated dirty files remain untouched.

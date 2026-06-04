@@ -115,7 +115,7 @@
     </form>
   </section>
 
-  <section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, previewOpen: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;} window.addEventListener('message', event => { if (event.data && event.data.type === 'clinicflow-minimize') { previewOpen = false; } });">
+  <section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, previewOpen: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;} window.addEventListener('message', event => { if (event.data && event.data.type === 'kliniassist-minimize') { previewOpen = false; } });">
     <h2 class="cf-section-title">Website Booking Widget</h2>
     <p class="mt-2 text-sm text-[var(--cf-muted)]">Customize website-only appearance, preview, and embed settings.</p>
 

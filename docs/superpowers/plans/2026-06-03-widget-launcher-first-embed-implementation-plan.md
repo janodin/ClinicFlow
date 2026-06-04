@@ -62,7 +62,7 @@ Add these methods immediately after `test_embed_js_returns_javascript` in `widge
         self.assertGreater(launcher_append_index, iframe_append_index)
         self.assertIn("?source=embed", content)
         self.assertIn("launcher.style.display = 'none';", content)
-        self.assertIn("clinicflow-minimize", content)
+        self.assertIn("kliniassist-minimize", content)
         self.assertIn("iframe.style.display = 'none';", content)
         self.assertIn("launcher.style.display = 'flex';", content)
 ```
@@ -117,7 +117,7 @@ def embed_js(request, clinic_slug):
   }});
   document.body.appendChild(launcher);
   window.addEventListener('message', function(e) {{
-    if (e.data && e.data.type === 'clinicflow-minimize') {{
+    if (e.data && e.data.type === 'kliniassist-minimize') {{
       if (iframe) {{
         iframe.style.opacity = '0';
         iframe.style.transform = 'translateY(20px)';

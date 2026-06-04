@@ -68,6 +68,16 @@ def test_messenger_connection_admin_form_does_not_render_saved_secrets():
     assert "ADMIN-PAGE-TOKEN" not in html
 
 
+def test_default_ai_prompt_hides_faq_source_and_uses_suggestion_metadata():
+    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+
+    assert "Do not say based on the FAQ" in DEFAULT_MESSENGER_AI_PROMPT
+    assert "Answer FAQ-backed information as normal clinic information." in DEFAULT_MESSENGER_AI_PROMPT
+    assert "Use check_availability suggestion_type metadata" in DEFAULT_MESSENGER_AI_PROMPT
+    assert "nearest_time means the requested time is unavailable" in DEFAULT_MESSENGER_AI_PROMPT
+    assert "next_available_date means the requested date has no slots" in DEFAULT_MESSENGER_AI_PROMPT
+
+
 @pytest.mark.django_db
 def test_messenger_session_unique_per_psid_and_connection():
     user = User.objects.create_user(username="owner2", email="owner@test.com", password="pass")
@@ -1490,11 +1500,17 @@ def test_check_availability_returns_requested_slot_and_alternatives():
     ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))
 
     open_result = check_availability("PAGEAI4", service.id, preferred_date=target_date.isoformat())
+    assert open_result["suggestion_type"] == "requested_date"
+    assert open_result["requested_date"] == target_date.isoformat()
+    assert open_result["suggested_date"] == target_date.isoformat()
     requested_slot = open_result["alternatives"][0]["starts_at"]
 
     available_result = check_availability("PAGEAI4", service.id, preferred_starts_at=requested_slot)
     assert available_result["available"] is True
     assert available_result["selected_slot"]["starts_at"] == requested_slot
+    assert available_result["suggestion_type"] == "requested_date"
+    assert available_result["requested_date"] == target_date.isoformat()
+    assert available_result["suggested_date"] == target_date.isoformat()
 
     patient = Patient.objects.create(clinic=clinic, full_name="Existing Patient", phone="09999999999")
     Appointment.objects.create(
@@ -1510,6 +1526,76 @@ def test_check_availability_returns_requested_slot_and_alternatives():
     assert unavailable_result["available"] is False
     assert unavailable_result["alternatives"]
     assert requested_slot not in [slot["starts_at"] for slot in unavailable_result["alternatives"]]
+
+
+@pytest.mark.django_db
+def test_check_availability_marks_nearest_time_when_requested_slot_is_taken():
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_nearest_time", "PAGEAI-NEAREST-TIME")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))
+    open_result = check_availability("PAGEAI-NEAREST-TIME", service.id, preferred_date=target_date.isoformat())
+    requested_slot = open_result["alternatives"][1]["starts_at"]
+    patient = Patient.objects.create(clinic=clinic, full_name="Existing Patient", phone="09999999999")
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.datetime.fromisoformat(requested_slot),
+        ends_at=timezone.datetime.fromisoformat(requested_slot) + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    unavailable_result = check_availability("PAGEAI-NEAREST-TIME", service.id, preferred_starts_at=requested_slot)
+
+    assert unavailable_result["available"] is False
+    assert unavailable_result["suggestion_type"] == "nearest_time"
+    assert unavailable_result["requested_date"] == target_date.isoformat()
+    assert unavailable_result["suggested_date"] == target_date.isoformat()
+    assert requested_slot not in [slot["starts_at"] for slot in unavailable_result["alternatives"]]
+    assert {slot["local_starts_at"][:10] for slot in unavailable_result["alternatives"][:2]} == {target_date.isoformat()}
+
+
+@pytest.mark.django_db
+def test_check_availability_suggests_first_future_date_when_requested_date_has_no_slots():
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_next_available_date", "PAGEAI-NEXT-DATE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    requested_date = timezone.localdate() + timedelta(days=1)
+    next_available_date = requested_date + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=next_available_date.weekday(), open_time=time(9), close_time=time(10))
+
+    result = check_availability("PAGEAI-NEXT-DATE", service.id, preferred_date=requested_date.isoformat())
+
+    assert result["available"] is False
+    assert result["suggestion_type"] == "next_available_date"
+    assert result["requested_date"] == requested_date.isoformat()
+    assert result["suggested_date"] == next_available_date.isoformat()
+    assert result["alternatives"]
+    assert {slot["local_starts_at"][:10] for slot in result["alternatives"]} == {next_available_date.isoformat()}
+
+
+@pytest.mark.django_db
+def test_check_widget_availability_returns_shared_suggestion_metadata():
+    from messenger.ai_tools import check_widget_availability
+
+    clinic, _ = _create_messenger_clinic("owner_widget_next_available_date", "PAGE-WIDGET-NEXT-DATE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    requested_date = timezone.localdate() + timedelta(days=1)
+    next_available_date = requested_date + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=next_available_date.weekday(), open_time=time(9), close_time=time(10))
+
+    result = check_widget_availability(clinic.slug, service.id, preferred_date=requested_date.isoformat())
+
+    assert result["found"] is True
+    assert result["available"] is False
+    assert result["suggestion_type"] == "next_available_date"
+    assert result["requested_date"] == requested_date.isoformat()
+    assert result["suggested_date"] == next_available_date.isoformat()
+    assert {slot["local_starts_at"][:10] for slot in result["alternatives"]} == {next_available_date.isoformat()}
 
 
 @pytest.mark.django_db
@@ -1778,10 +1864,51 @@ def test_find_verified_appointment_matches_reference_and_normalized_phone():
     assert result["appointment"]["service_id"] == service.id
     assert result["appointment"]["service"] == "Consultation"
     assert result["appointment"]["status"] == Appointment.STATUS_CONFIRMED
+    assert result["appointment"]["starts_at"] == starts_at.isoformat()
+    assert result["appointment"]["local_starts_at"]
     assert result["appointment"]["patient_name"] == "Maria Santos"
     assert result["appointment"]["patient_phone_last4"] == "1234"
     assert result["appointment"]["local_date_label"]
     assert result["appointment"]["local_time_label"]
+    appointment.refresh_from_db()
+    assert appointment.status == Appointment.STATUS_CONFIRMED
+    assert appointment.starts_at == starts_at
+    assert appointment.ends_at == starts_at + timedelta(minutes=30)
+    assert appointment.service == service
+    assert appointment.patient == patient
+
+
+@pytest.mark.django_db
+def test_find_widget_verified_appointment_matches_pending_appointment_without_mutation():
+    from messenger.ai_tools import find_widget_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_widget_appt_lookup", "PAGE-WIDGET-APPT-LOOKUP")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_PENDING,
+    )
+
+    result = find_widget_verified_appointment(clinic.slug, appointment.reference_code, "09175551234")
+
+    assert result["found"] is True
+    assert result["appointment"]["reference_code"] == appointment.reference_code
+    assert result["appointment"]["status"] == Appointment.STATUS_PENDING
+    assert result["appointment"]["service_id"] == service.id
+    assert result["appointment"]["starts_at"] == starts_at.isoformat()
+    assert result["appointment"]["local_starts_at"]
+    appointment.refresh_from_db()
+    assert appointment.status == Appointment.STATUS_PENDING
+    assert appointment.starts_at == starts_at
+    assert appointment.ends_at == starts_at + timedelta(minutes=30)
+    assert appointment.service == service
+    assert appointment.patient == patient
 
 
 @pytest.mark.django_db
@@ -1856,6 +1983,323 @@ def test_find_widget_verified_appointment_respects_website_ai_disabled():
 
 
 @pytest.mark.django_db
+def test_cancel_verified_appointment_requires_confirmation():
+    from messenger.ai_tools import cancel_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_cancel_confirm", "PAGE-APPT-CANCEL-CONFIRM")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    result = cancel_verified_appointment("PAGE-APPT-CANCEL-CONFIRM", appointment.reference_code, "09175551234", confirmed=False)
+
+    appointment.refresh_from_db()
+    assert result == {"cancelled": False, "error": "Appointment change requires explicit user confirmation."}
+    assert appointment.status == Appointment.STATUS_CONFIRMED
+
+
+@pytest.mark.django_db
+def test_cancel_verified_appointment_cancels_future_verified_appointment_and_stores_reason():
+    from messenger.ai_tools import cancel_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_cancel", "PAGE-APPT-CANCEL")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_PENDING,
+        source=Appointment.SOURCE_PHONE,
+    )
+
+    result = cancel_verified_appointment(
+        "PAGE-APPT-CANCEL",
+        appointment.reference_code,
+        "09175551234",
+        confirmed=True,
+        reason="Patient requested through assistant.",
+    )
+
+    appointment.refresh_from_db()
+    assert result["cancelled"] is True
+    assert result["appointment"]["reference_code"] == appointment.reference_code
+    assert result["appointment"]["status"] == Appointment.STATUS_CANCELLED
+    assert appointment.status == Appointment.STATUS_CANCELLED
+    assert appointment.cancellation_reason == "Patient requested through assistant."
+    assert appointment.source == Appointment.SOURCE_PHONE
+
+
+@pytest.mark.django_db
+def test_cancel_verified_appointment_handles_non_string_reason_safely():
+    from messenger.ai_tools import cancel_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_cancel_reason", "PAGE-APPT-CANCEL-REASON")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    result = cancel_verified_appointment(
+        "PAGE-APPT-CANCEL-REASON",
+        appointment.reference_code,
+        "09175551234",
+        confirmed=True,
+        reason=123,
+    )
+
+    appointment.refresh_from_db()
+    assert result["cancelled"] is True
+    assert appointment.status == Appointment.STATUS_CANCELLED
+    assert appointment.cancellation_reason == "123"
+
+
+@pytest.mark.django_db
+def test_cancel_verified_appointment_wrong_page_does_not_mutate():
+    from messenger.ai_tools import cancel_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_cancel_tenant", "PAGE-APPT-CANCEL-TENANT")
+    _other_clinic, _other_connection = _create_messenger_clinic("owner_appt_cancel_tenant_other", "PAGE-APPT-CANCEL-TENANT-OTHER")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    result = cancel_verified_appointment(
+        "PAGE-APPT-CANCEL-TENANT-OTHER",
+        appointment.reference_code,
+        "09175551234",
+        confirmed=True,
+    )
+
+    appointment.refresh_from_db()
+    assert result == {"cancelled": False, "error": "Appointment not found. Please check the reference code and phone number."}
+    assert appointment.status == Appointment.STATUS_CONFIRMED
+
+
+@pytest.mark.django_db
+def test_reschedule_verified_appointment_requires_confirmation():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import reschedule_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_reschedule_confirm", "PAGE-APPT-RESCHEDULE-CONFIRM")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    starts_at = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    requested_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+
+    result = reschedule_verified_appointment(
+        "PAGE-APPT-RESCHEDULE-CONFIRM",
+        appointment.reference_code,
+        "09175551234",
+        requested_start.isoformat(),
+        confirmed=False,
+    )
+
+    appointment.refresh_from_db()
+    assert result == {"rescheduled": False, "error": "Appointment change requires explicit user confirmation."}
+    assert appointment.starts_at == starts_at
+
+
+@pytest.mark.django_db
+def test_reschedule_verified_appointment_moves_same_service_and_preserves_identity_fields():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import reschedule_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_reschedule", "PAGE-APPT-RESCHEDULE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    new_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_PENDING,
+        source=Appointment.SOURCE_STAFF,
+    )
+    original_reference = appointment.reference_code
+
+    result = reschedule_verified_appointment(
+        "PAGE-APPT-RESCHEDULE",
+        appointment.reference_code,
+        "09175551234",
+        new_start.isoformat(),
+        confirmed=True,
+    )
+
+    appointment.refresh_from_db()
+    assert result["rescheduled"] is True
+    assert result["appointment"]["reference_code"] == original_reference
+    assert appointment.starts_at == new_start
+    assert appointment.ends_at == new_start + timedelta(minutes=30)
+    assert appointment.service == service
+    assert appointment.patient == patient
+    assert appointment.source == Appointment.SOURCE_STAFF
+    assert appointment.status == Appointment.STATUS_PENDING
+    assert appointment.reference_code == original_reference
+
+
+@pytest.mark.django_db
+def test_reschedule_verified_appointment_rejects_overlap_and_past_time():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import reschedule_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_reschedule_reject", "PAGE-APPT-RESCHEDULE-REJECT")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    other_patient = Patient.objects.create(clinic=clinic, full_name="Other Patient", phone="09170000000")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    occupied_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=other_patient,
+        service=service,
+        starts_at=occupied_start,
+        ends_at=occupied_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    overlap = reschedule_verified_appointment(
+        "PAGE-APPT-RESCHEDULE-REJECT",
+        appointment.reference_code,
+        "09175551234",
+        occupied_start.isoformat(),
+        confirmed=True,
+    )
+    past = reschedule_verified_appointment(
+        "PAGE-APPT-RESCHEDULE-REJECT",
+        appointment.reference_code,
+        "09175551234",
+        (timezone.now() - timedelta(hours=1)).isoformat(),
+        confirmed=True,
+    )
+
+    appointment.refresh_from_db()
+    assert overlap == {"rescheduled": False, "error": "This slot is not available."}
+    assert past == {"rescheduled": False, "error": "Cannot reschedule to the past."}
+    assert appointment.starts_at == original_start
+
+
+@pytest.mark.django_db
+def test_reschedule_widget_verified_appointment_uses_clinic_slug_and_preserves_identity():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import reschedule_widget_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_widget_appt_reschedule", "PAGE-WIDGET-APPT-RESCHEDULE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    new_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+        source=Appointment.SOURCE_CHAT_WIDGET,
+    )
+
+    result = reschedule_widget_verified_appointment(
+        clinic.slug,
+        appointment.reference_code,
+        "09175551234",
+        new_start.isoformat(),
+        confirmed=True,
+    )
+
+    appointment.refresh_from_db()
+    assert result["rescheduled"] is True
+    assert result["appointment"]["reference_code"] == appointment.reference_code
+    assert appointment.starts_at == new_start
+    assert appointment.ends_at == new_start + timedelta(minutes=30)
+    assert appointment.service == service
+    assert appointment.patient == patient
+    assert appointment.source == Appointment.SOURCE_CHAT_WIDGET
+    assert appointment.status == Appointment.STATUS_CONFIRMED
+
+
+@pytest.mark.django_db
+def test_cancel_widget_verified_appointment_rechecks_phone_before_mutating():
+    from messenger.ai_tools import cancel_widget_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_widget_appt_cancel", "PAGE-WIDGET-APPT-CANCEL")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    result = cancel_widget_verified_appointment(clinic.slug, appointment.reference_code, "09170000000", confirmed=True)
+
+    appointment.refresh_from_db()
+    assert result == {"cancelled": False, "error": "Appointment not found. Please check the reference code and phone number."}
+    assert appointment.status == Appointment.STATUS_CONFIRMED
+
+
+@pytest.mark.django_db
 def test_widget_ai_booking_uses_chat_widget_source():
     from messenger.ai_tools import book_widget_confirmed_appointment, check_availability
 
@@ -1878,6 +2322,188 @@ def test_widget_ai_booking_uses_chat_widget_source():
     assert result["created"] is True
     appointment = Appointment.objects.get(reference_code=result["appointment"]["reference_code"])
     assert appointment.source == Appointment.SOURCE_CHAT_WIDGET
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_appointment_endpoints_require_secret(client):
+    body = {
+        "page_id": "PAGE",
+        "clinic_slug": "clinic-slug",
+        "reference_code": "CF-TEST",
+        "phone": "09175551234",
+        "starts_at": timezone.now().isoformat(),
+        "confirmed": "true",
+        "reason": "Requested in chat.",
+    }
+
+    for url_name in [
+        "messenger:ai_appointment_lookup",
+        "messenger:ai_appointment_cancel",
+        "messenger:ai_appointment_reschedule",
+        "messenger:widget_ai_appointment_lookup",
+        "messenger:widget_ai_appointment_cancel",
+        "messenger:widget_ai_appointment_reschedule",
+    ]:
+        response = client.post(
+            reverse(url_name),
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 401
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_appointment_cancel_endpoint_accepts_string_true_confirmation(client):
+    clinic, _connection = _create_messenger_clinic("owner_ai_endpoint_cancel", "PAGE-AI-ENDPOINT-CANCEL")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    response = client.post(
+        reverse("messenger:ai_appointment_cancel"),
+        data=json.dumps({
+            "page_id": "PAGE-AI-ENDPOINT-CANCEL",
+            "reference_code": appointment.reference_code,
+            "phone": "09175551234",
+            "confirmed": "true",
+            "reason": "Requested in chat.",
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    appointment.refresh_from_db()
+    assert response.status_code == 200
+    assert response.json()["cancelled"] is True
+    assert appointment.status == Appointment.STATUS_CANCELLED
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_appointment_reschedule_endpoint_accepts_string_true_confirmation(client):
+    from zoneinfo import ZoneInfo
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_endpoint_reschedule", "PAGE-AI-ENDPOINT-RESCHEDULE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    new_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    response = client.post(
+        reverse("messenger:ai_appointment_reschedule"),
+        data=json.dumps({
+            "page_id": "PAGE-AI-ENDPOINT-RESCHEDULE",
+            "reference_code": appointment.reference_code,
+            "phone": "09175551234",
+            "starts_at": new_start.isoformat(),
+            "confirmed": "true",
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    appointment.refresh_from_db()
+    assert response.status_code == 200
+    assert response.json()["rescheduled"] is True
+    assert appointment.starts_at == new_start
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_widget_ai_appointment_cancel_endpoint_accepts_string_true_confirmation(client):
+    clinic, _connection = _create_messenger_clinic("owner_widget_endpoint_cancel", "PAGE-WIDGET-ENDPOINT-CANCEL")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    response = client.post(
+        reverse("messenger:widget_ai_appointment_cancel"),
+        data=json.dumps({
+            "clinic_slug": clinic.slug,
+            "reference_code": appointment.reference_code,
+            "phone": "09175551234",
+            "confirmed": "true",
+            "reason": "Requested in widget chat.",
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    appointment.refresh_from_db()
+    assert response.status_code == 200
+    assert response.json()["cancelled"] is True
+    assert appointment.status == Appointment.STATUS_CANCELLED
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_widget_ai_appointment_reschedule_endpoint_uses_clinic_slug(client):
+    from zoneinfo import ZoneInfo
+
+    clinic, _connection = _create_messenger_clinic("owner_widget_endpoint_reschedule", "PAGE-WIDGET-ENDPOINT-RESCHEDULE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    new_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    response = client.post(
+        reverse("messenger:widget_ai_appointment_reschedule"),
+        data=json.dumps({
+            "clinic_slug": clinic.slug,
+            "reference_code": appointment.reference_code,
+            "phone": "09175551234",
+            "starts_at": new_start.isoformat(),
+            "confirmed": "true",
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    appointment.refresh_from_db()
+    assert response.status_code == 200
+    assert response.json()["rescheduled"] is True
+    assert appointment.starts_at == new_start
 
 
 @pytest.mark.django_db
@@ -2437,6 +3063,9 @@ def test_ai_availability_endpoint_returns_alternatives():
     assert response.status_code == 200
     assert response.json()["found"] is True
     assert response.json()["available"] is True
+    assert response.json()["suggestion_type"] == "requested_date"
+    assert response.json()["requested_date"] == target_date.isoformat()
+    assert response.json()["suggested_date"] == target_date.isoformat()
     assert response.json()["alternatives"]
 
 

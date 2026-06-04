@@ -31,7 +31,7 @@ class WidgetTests(TestCase):
         resp = self.client.get(reverse("widget:embed_js", args=[self.clinic.slug]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/javascript")
-        self.assertIn("clinicflow-minimize", resp.content.decode())
+        self.assertIn("kliniassist-minimize", resp.content.decode())
 
     def test_embed_js_uses_accessible_icon_only_calendar_launcher(self):
         response = self.client.get(reverse("widget:embed_js", args=[self.clinic.slug]))
@@ -61,7 +61,7 @@ class WidgetTests(TestCase):
         self.assertGreater(launcher_append_index, iframe_append_index)
         self.assertIn("?source=embed", content)
         self.assertIn("launcher.style.display = 'none';", content)
-        self.assertIn("clinicflow-minimize", content)
+        self.assertIn("kliniassist-minimize", content)
         self.assertIn("iframe.style.display = 'none';", content)
         self.assertIn("launcher.style.display = 'flex';", content)
 
@@ -99,7 +99,7 @@ class WidgetTests(TestCase):
         minimize_end = content.index("startChat()", minimize_start)
         minimize_block = content[minimize_start:minimize_end]
 
-        self.assertIn("clinicflow-minimize", minimize_block)
+        self.assertIn("kliniassist-minimize", minimize_block)
         self.assertNotIn("this.mode = 'home'", minimize_block)
 
     def test_widget_header_includes_home_and_minimize_controls(self):

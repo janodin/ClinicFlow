@@ -104,7 +104,7 @@
 - Use `DESIGN.md` as the source of truth for UI design tokens, component patterns, layout rules, and visual guardrails
 - The active visual direction is the Neon Aqua Clinical system: white/ice-cyan surfaces, deep teal ink, electric aqua CTAs, pill buttons, compact radii, subtle teal shadows, thin display typography, tabular numerics, and selective cyan glow mesh accents
 - Before creating, changing, or reviewing UI, read `DESIGN.md` and follow the Neon Aqua Clinical tokens and component guidance
-- Implement the design through the existing Django template stack and `static/css/clinicflow.css`; keep `cf-*` classes as the canonical reusable UI layer
+- Implement the design through the existing Django template stack and `static/css/kliniassist.css`; keep `cf-*` classes as the canonical reusable UI layer
 - When adding new designs, components, or patterns, reference existing `cf-*` classes and current templates before introducing new classes
 - Operational dashboard screens must stay appointment-first, dense, table-first, and optimized for clinic staff workflows; do not turn them into marketing pages
 - Public booking, widget, auth, and confirmation surfaces may use the aqua glow mesh where text contrast remains accessible

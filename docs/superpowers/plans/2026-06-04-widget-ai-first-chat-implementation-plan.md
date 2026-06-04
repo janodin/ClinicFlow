@@ -434,7 +434,7 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
     assert "/messenger/ai/widget/context/" in source
     assert ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)" in source
     assert ".to(sharedAiInput)\n      .to(resolveAssistantMode)" in source
-    assert ".onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in source
+    assert ".onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in source
     assert ".onCase(1, returnWidgetReply)" in source
     assert "clinic_slug: expr('{{ $(\"Shared AI Input\").item.json.channel === \"widget\" ? $(\"Shared AI Input\").item.json.clinic_slug : \"\" }}')" in source
 

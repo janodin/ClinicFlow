@@ -24,7 +24,7 @@ const metaWebhookVerification = trigger({
     position: [240, 160],
     parameters: {
       httpMethod: 'GET',
-      path: 'clinicflow-messenger',
+      path: 'kliniassist-messenger',
       responseMode: 'responseNode',
       options: {},
     },
@@ -81,7 +81,7 @@ const metaMessengerEvents = trigger({
     position: [240, 560],
     parameters: {
       httpMethod: 'POST',
-      path: 'clinicflow-messenger',
+      path: 'kliniassist-messenger',
       responseMode: 'responseNode',
       options: { rawBody: true },
     },
@@ -246,7 +246,7 @@ const widgetAssistantWebhook = trigger({
     position: [240, 1040],
     parameters: {
       httpMethod: 'POST',
-      path: 'clinicflow-widget-assistant',
+      path: 'kliniassist-widget-assistant',
       responseMode: 'responseNode',
       options: {},
     },
@@ -570,6 +570,97 @@ const bookConfirmedAppointmentTool = tool({
   output: [{ created: false, error: 'Appointment creation requires explicit user confirmation.' }],
 });
 
+const findVerifiedAppointmentTool = tool({
+  type: 'n8n-nodes-base.httpRequestTool',
+  version: 4.4,
+  config: {
+    name: 'find_verified_appointment',
+    position: [2176, 1040],
+    parameters: {
+      method: 'POST',
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/appointment/lookup/" : "${DJANGO_BASE_URL}/messenger/ai/widget/appointment/lookup/" }}`),
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: {
+        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
+        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
+        reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
+        phone: fromAi('phone', 'Patient phone number for verification'),
+      },
+      options: {},
+      optimizeResponse: true,
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ found: false, error: 'Appointment not found. Please check the reference code and phone number.' }],
+});
+
+const cancelVerifiedAppointmentTool = tool({
+  type: 'n8n-nodes-base.httpRequestTool',
+  version: 4.4,
+  config: {
+    name: 'cancel_verified_appointment',
+    position: [2304, 1040],
+    parameters: {
+      method: 'POST',
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/appointment/cancel/" : "${DJANGO_BASE_URL}/messenger/ai/widget/appointment/cancel/" }}`),
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: {
+        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
+        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
+        reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
+        phone: fromAi('phone', 'Patient phone number for verification'),
+        confirmed: fromAi('confirmed', 'Boolean true only after the user explicitly confirms the cancellation summary'),
+        reason: fromAi('reason', 'Cancellation reason if the patient provided one, otherwise blank'),
+      },
+      options: {},
+      optimizeResponse: true,
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ cancelled: false, error: 'Appointment change requires explicit user confirmation.' }],
+});
+
+const rescheduleVerifiedAppointmentTool = tool({
+  type: 'n8n-nodes-base.httpRequestTool',
+  version: 4.4,
+  config: {
+    name: 'reschedule_verified_appointment',
+    position: [2432, 1040],
+    parameters: {
+      method: 'POST',
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/appointment/reschedule/" : "${DJANGO_BASE_URL}/messenger/ai/widget/appointment/reschedule/" }}`),
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: {
+        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
+        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
+        reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
+        phone: fromAi('phone', 'Patient phone number for verification'),
+        starts_at: fromAi('starts_at', 'Confirmed new appointment start time as clinic-local ISO 8601 datetime with timezone offset'),
+        confirmed: fromAi('confirmed', 'Boolean true only after the user explicitly confirms the reschedule summary'),
+      },
+      options: {},
+      optimizeResponse: true,
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ rescheduled: false, error: 'Appointment change requires explicit user confirmation.' }],
+});
+
 const getMessengerQuickReplies = node({
   type: 'n8n-nodes-base.httpRequest',
   version: 4.4,
@@ -630,7 +721,7 @@ return items;`,
   output: [{ access_token: 'PAGE_TOKEN', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } } }],
 });
 
-const clinicFlowSharedAiAgent = node({
+const kliniAssistSharedAiAgent = node({
   type: '@n8n/n8n-nodes-langchain.agent',
   version: 3.1,
   config: {
@@ -648,7 +739,11 @@ const clinicFlowSharedAiAgent = node({
           '- Timezone: {{ $("Shared AI Input").item.json.context?.current_time?.timezone || $("Shared AI Input").item.json.context?.clinic?.timezone || "UTC" }}\n' +
           '- Now: {{ $("Shared AI Input").item.json.context?.current_time?.now || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISO() }}\n' +
           '- Today: {{ $("Shared AI Input").item.json.context?.current_time?.today || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISODate() }}\n\n' +
-          'Use match_services, check_availability, and book_confirmed_appointment for booking. Ask for explicit confirmation before booking. Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation. Messenger replies must be plain concise text. Widget replies must be concise and friendly.'),
+          'Use match_services, check_availability, and book_confirmed_appointment for booking. Ask for explicit confirmation before booking. Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation. ' +
+          'Use find_verified_appointment before canceling or rescheduling. Ask for appointment reference code and phone number before appointment management lookup. Summarize the verified appointment and requested action before mutation. Ask for explicit confirmation before canceling or rescheduling. Use cancel_verified_appointment and reschedule_verified_appointment only after explicit confirmation. Do not use user-supplied appointment IDs, patient IDs, clinic IDs, or service IDs for appointment management. ' +
+          'Use check_availability suggestion_type metadata: nearest_time means the requested time is unavailable; next_available_date means the requested date has no slots. ' +
+          'Use FAQ entries as clinic knowledge without citing the source. Do not say based on the FAQ, according to the FAQ, the FAQ says. ' +
+          'Messenger replies must be plain concise text. Widget replies must be concise and friendly.'),
         maxIterations: 8,
         returnIntermediateSteps: false,
       },
@@ -656,7 +751,14 @@ const clinicFlowSharedAiAgent = node({
     subnodes: {
       model: sharedChatModel,
       memory: sharedConversationMemory,
-      tools: [matchServicesTool, checkAvailabilityTool, bookConfirmedAppointmentTool],
+      tools: [
+        matchServicesTool,
+        checkAvailabilityTool,
+        bookConfirmedAppointmentTool,
+        findVerifiedAppointmentTool,
+        cancelVerifiedAppointmentTool,
+        rescheduleVerifiedAppointmentTool,
+      ],
     },
   },
   output: [{ output: 'Assistant reply' }],
@@ -803,7 +905,7 @@ export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI B
       .to(sharedAiInput)
       .to(resolveAssistantMode)
       .to(routeAssistantMode
-        .onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
+        .onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
           .onCase(0, sendFacebookReply)
           .onCase(1, returnWidgetReply)))
         .onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))

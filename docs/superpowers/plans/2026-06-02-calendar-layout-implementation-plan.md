@@ -4,9 +4,9 @@
 
 **Goal:** Rework the dashboard calendar page into the approved screenshot-style layout with Service, Status, and Add appointment above and outside the calendar card while preserving KliniAssist colors, FullCalendar behavior, filters, appointment modal behavior, and tenant-safe server flows.
 
-**Architecture:** This is a presentation-only change. The Django view and event/reschedule endpoints stay unchanged; `templates/dashboard/calendar.html` gains a new calendar header/tools structure and a small title-sync helper, while `static/css/clinicflow.css` adds scoped calendar layout and FullCalendar overrides.
+**Architecture:** This is a presentation-only change. The Django view and event/reschedule endpoints stay unchanged; `templates/dashboard/calendar.html` gains a new calendar header/tools structure and a small title-sync helper, while `static/css/kliniassist.css` adds scoped calendar layout and FullCalendar overrides.
 
-**Tech Stack:** Django templates, Tailwind utility classes, `static/css/clinicflow.css`, Alpine.js, HTMX, FullCalendar 6.1.15, pytest.
+**Tech Stack:** Django templates, Tailwind utility classes, `static/css/kliniassist.css`, Alpine.js, HTMX, FullCalendar 6.1.15, pytest.
 
 ---
 
@@ -14,7 +14,7 @@
 
 - Modify `tests/test_design_system.py`: update the calendar design-system test and add a CSS contract test to assert the new screenshot-style layout hooks while preserving existing IDs and accessibility assertions.
 - Modify `templates/dashboard/calendar.html`: restructure the page into outside top tools, then the calendar card containing header, legend, loading, calendar grid, and existing modal.
-- Modify `static/css/clinicflow.css`: add scoped `.cf-calendar-*` styles and `#calendar .fc-*` overrides using existing KliniAssist variables.
+- Modify `static/css/kliniassist.css`: add scoped `.cf-calendar-*` styles and `#calendar .fc-*` overrides using existing KliniAssist variables.
 - Use existing `dashboard/tests.py` calendar tests for behavior regression verification; no server-side code changes are planned.
 
 Commits are intentionally omitted from task steps because this repository instructs agents not to commit unless explicitly requested.
@@ -189,12 +189,12 @@ Expected: PASS.
 ### Task 3: Add Scoped Calendar CSS
 
 **Files:**
-- Modify: `static/css/clinicflow.css` after `.cf-field .cf-label { margin-bottom: 0; }`
+- Modify: `static/css/kliniassist.css` after `.cf-field .cf-label { margin-bottom: 0; }`
 - Test: `tests/test_design_system.py`, `dashboard/tests.py`
 
 - [ ] **Step 1: Add scoped calendar layout and FullCalendar styles**
 
-Insert this CSS after the `.cf-field .cf-label { margin-bottom: 0; }` rule in `static/css/clinicflow.css`:
+Insert this CSS after the `.cf-field .cf-label { margin-bottom: 0; }` rule in `static/css/kliniassist.css`:
 
 ```css
 .cf-calendar-card {
@@ -399,7 +399,7 @@ Expected: `System check identified no issues`.
 Run:
 
 ```powershell
-git diff -- templates/dashboard/calendar.html static/css/clinicflow.css tests/test_design_system.py docs/superpowers/specs/2026-06-02-calendar-layout-design.md docs/superpowers/plans/2026-06-02-calendar-layout-implementation-plan.md
+git diff -- templates/dashboard/calendar.html static/css/kliniassist.css tests/test_design_system.py docs/superpowers/specs/2026-06-02-calendar-layout-design.md docs/superpowers/plans/2026-06-02-calendar-layout-implementation-plan.md
 ```
 
 Expected: Diff only includes the approved presentation-only calendar layout changes plus the approved spec/plan docs. No server-side endpoint, model, migration, or appointment validation changes should appear.

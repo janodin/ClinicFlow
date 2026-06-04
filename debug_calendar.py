@@ -11,7 +11,7 @@ with sync_playwright() as p:
 
     # Login
     page.goto("http://127.0.0.1:8080/accounts/login/")
-    page.fill("input[name='username']", "testowner@clinicflow.com")
+    page.fill("input[name='username']", "testowner@kliniassist.app")
     page.fill("input[name='password']", "testpass123")
     page.click("button:has-text('Sign In')")
     page.wait_for_load_state("networkidle")

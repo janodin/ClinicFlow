@@ -211,7 +211,7 @@ components:
 
 KliniAssist uses the **Neon Aqua Clinical** system. It should feel cool, clean, and modern: white and ice-cyan surfaces, deep teal text, electric aqua calls to action, and subtle cyan glow accents inspired by illuminated desk/setup imagery. The result should be bright and distinctive without turning operational clinic screens into a gaming interface.
 
-The design is implemented through Django templates, Tailwind utility classes, and the canonical `cf-*` CSS layer in `static/css/clinicflow.css`. Prefer existing component classes before adding new utilities.
+The design is implemented through Django templates, Tailwind utility classes, and the canonical `cf-*` CSS layer in `static/css/kliniassist.css`. Prefer existing component classes before adding new utilities.
 
 ## Key Characteristics
 
@@ -302,7 +302,7 @@ Glow mesh backgrounds layer white, ice-cyan, electric aqua, and deep teal radial
 
 ### Do
 
-- Use `DESIGN.md` and `static/css/clinicflow.css` as the color source of truth.
+- Use `DESIGN.md` and `static/css/kliniassist.css` as the color source of truth.
 - Keep all text, controls, dropdowns, modals, badges, and disabled states WCAG AA readable.
 - Keep appointment statuses visually distinct.
 - Prefer `cf-*` classes and CSS custom properties over raw Tailwind color classes.
@@ -325,7 +325,7 @@ Glow mesh backgrounds layer white, ice-cyan, electric aqua, and deep teal radial
 
 ## Iteration Guide
 
-1. Start with CSS variables in `static/css/clinicflow.css`.
+1. Start with CSS variables in `static/css/kliniassist.css`.
 2. Prefer reusable `cf-*` classes.
 3. Update tests when intentional design tokens change.
 4. Run targeted design-system tests after theme edits.

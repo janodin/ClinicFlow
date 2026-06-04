@@ -8,8 +8,8 @@ The change should reduce the widget's initial visual footprint on existing clini
 
 ## Current State
 
-- `widget.views.embed_js` already returns JavaScript that injects a bottom-right launcher button, creates or shows the widget iframe on click, and listens for the existing `clinicflow-minimize` parent message.
-- `templates/widget/widget.html` already has a minimize button that posts `{type: 'clinicflow-minimize'}` to the parent frame.
+- `widget.views.embed_js` already returns JavaScript that injects a bottom-right launcher button, creates or shows the widget iframe on click, and listens for the existing `kliniassist-minimize` parent message.
+- `templates/widget/widget.html` already has a minimize button that posts `{type: 'kliniassist-minimize'}` to the parent frame.
 - `templates/dashboard/assistant_settings.html` presents both a JavaScript embed snippet and a raw iframe snippet.
 - The dashboard copy says the JavaScript snippet creates a floating launcher, but the raw iframe snippet shows a large fixed widget panel immediately.
 - The live preview currently shows the full widget panel, which is useful for admins reviewing the opened widget experience.
@@ -29,8 +29,8 @@ The JavaScript embed should behave as follows:
 - The widget iframe is created or shown only after the visitor clicks the launcher.
 - The launcher is hidden while the iframe is open.
 - The widget iframe uses the existing `widget:home` route with `?source=embed` so bookings continue to be recorded as embed bookings.
-- The widget's minimize button keeps sending `clinicflow-minimize` to the parent page.
-- The parent script handles `clinicflow-minimize` by hiding the iframe and showing the launcher again.
+- The widget's minimize button keeps sending `kliniassist-minimize` to the parent page.
+- The parent script handles `kliniassist-minimize` by hiding the iframe and showing the launcher again.
 - Existing widget booking, slot loading, chat, FAQ, HTMX, and Alpine behavior remain inside the iframe.
 
 The script must not accept client-submitted clinic IDs or ownership values. The clinic is still resolved server-side from the embed URL slug.
@@ -66,7 +66,7 @@ The Assistant page's `Website Booking Widget` section should make the embed beha
 - The live preview should behave like the recommended embedded website experience.
 - The preview starts collapsed with only the bottom-right aqua calendar launcher visible inside the preview card.
 - Clicking the preview launcher opens the existing widget iframe inside the preview card.
-- Clicking the widget minimize button inside the iframe should collapse the preview back to the launcher through the existing `clinicflow-minimize` postMessage flow.
+- Clicking the widget minimize button inside the iframe should collapse the preview back to the launcher through the existing `kliniassist-minimize` postMessage flow.
 - Preview copy should say: "Click the launcher to preview how patients open the widget."
 - The JavaScript embed snippet should be visually and textually presented as the recommended integration.
 - Recommended JavaScript copy should explain: it adds a small bottom-right booking button and opens the full widget after click.
@@ -108,7 +108,7 @@ Add or update targeted tests for:
 - `embed.js` returns JavaScript with an accessible launcher button.
 - `embed.js` uses `safe_widget_accent_color` and falls back safely for invalid stored colors.
 - `embed.js` wires iframe creation/showing to the launcher click path and still includes `?source=embed`.
-- `embed.js` handles the existing `clinicflow-minimize` message by hiding the iframe and showing the launcher.
+- `embed.js` handles the existing `kliniassist-minimize` message by hiding the iframe and showing the launcher.
 - Dashboard Assistant settings present the JavaScript snippet as the recommended launcher-first integration.
 - Dashboard Assistant settings label the iframe snippet as an advanced/full-panel fallback.
 

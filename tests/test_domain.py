@@ -103,6 +103,7 @@ def test_staff_form_validates_slot_availability(clinic_setup):
     form = StaffAppointmentForm(clinic, data={
         "patient_name": "New",
         "patient_phone": "1234",
+        "patient_email": "new@example.com",
         "service": service.id,
         "date": target_date.isoformat(),
         "time": local_time,
@@ -122,6 +123,7 @@ def test_staff_form_rejects_unavailable_date(clinic_setup):
     form = StaffAppointmentForm(clinic, data={
         "patient_name": "New",
         "patient_phone": "1234",
+        "patient_email": "new@example.com",
         "service": service.id,
         "date": target_date.isoformat(),
         "time": "09:00",

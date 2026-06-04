@@ -16,7 +16,7 @@
 - Modify dashboard pages: `templates/dashboard/appointments.html`, `templates/dashboard/calendar.html`, `templates/dashboard/patients.html`, `templates/dashboard/services.html`, `templates/dashboard/home.html`, `templates/dashboard/settings.html`, `templates/dashboard/unavailable_dates.html`, `templates/dashboard/slot_preview.html`, `templates/dashboard/business_hours.html`, `templates/dashboard/assistant_settings.html`, and `dashboard/templates/dashboard/messenger_settings.html` only where a `cf-btn` lacks an icon.
 - Modify dashboard partials: `templates/dashboard/partials/appointment_detail.html`, `appointment_form.html`, `appointment_list.html`, `appointment_row.html`, `patient_detail_content.html`, `patient_edit_modal_form.html`, `add_patient_modal.html`, `patient_row.html`, `patient_list.html`, `service_form.html`, `service_row.html`, `service_list.html`, `faq_row.html`, `duplicate_list.html`, `merge_confirm.html`, and `merge_success.html`.
 - Modify public/auth/widget templates: `templates/accounts/login.html`, `templates/accounts/signup.html`, `templates/widget/widget.html`, `templates/widget/booking_success.html`, `templates/widget/partials/booking_success.html`, and `templates/widget/partials/booking_error.html`.
-- Do not modify `static/css/clinicflow.css`; `.cf-btn` already has `inline-flex` and `gap: .5rem`.
+- Do not modify `static/css/kliniassist.css`; `.cf-btn` already has `inline-flex` and `gap: .5rem`.
 - Do not commit during execution unless the user explicitly requests it.
 
 ## Task 1: Add Failing Button Icon Regression Tests

@@ -1068,7 +1068,7 @@ const rescheduleVerifiedAppointmentTool = tool({
 
 - [ ] **Step 4: Attach tools to the shared AI agent**
 
-Update the `tools` array inside `clinicFlowSharedAiAgent`.
+Update the `tools` array inside `kliniAssistSharedAiAgent`.
 
 ```typescript
 tools: [

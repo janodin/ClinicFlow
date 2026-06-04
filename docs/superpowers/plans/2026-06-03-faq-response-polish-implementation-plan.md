@@ -6,7 +6,7 @@
 
 **Architecture:** This is a template/CSS/test polish pass only. Keep existing FAQ forms, view context, model fields, URLs, HTMX behavior, tenant scoping, and `Visible to patients` composer copy unchanged; convert the top-right summary into one grouped capsule with two aqua-soft mini-pills.
 
-**Tech Stack:** Django templates, Tailwind utility classes, shared `static/css/clinicflow.css`, pytest design-system tests.
+**Tech Stack:** Django templates, Tailwind utility classes, shared `static/css/kliniassist.css`, pytest design-system tests.
 
 **Repo Policy:** Do not commit unless the user explicitly requests a commit.
 
@@ -16,7 +16,7 @@
 
 - Modify `tests/test_design_system.py`: update FAQ layout assertions to require grouped metric capsule classes while preserving the existing composer visibility copy.
 - Modify `templates/dashboard/assistant_settings.html`: change summary pill markup only.
-- Modify `static/css/clinicflow.css`: update FAQ summary styles so the outer capsule groups two aqua-soft mini-pills with stronger teal text.
+- Modify `static/css/kliniassist.css`: update FAQ summary styles so the outer capsule groups two aqua-soft mini-pills with stronger teal text.
 
 ---
 
@@ -123,7 +123,7 @@ Expected: PASS after the template update.
 ### Task 3: Update FAQ Summary CSS
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 - Test: `tests/test_design_system.py`
 
 - [ ] **Step 1: Replace old summary pill CSS**
@@ -224,7 +224,7 @@ Expected: PASS after CSS update.
 
 **Files:**
 - Verify: `templates/dashboard/assistant_settings.html`
-- Verify: `static/css/clinicflow.css`
+- Verify: `static/css/kliniassist.css`
 - Verify: `tests/test_design_system.py`
 
 - [ ] **Step 1: Run FAQ design-system tests**
@@ -252,7 +252,7 @@ Expected: PASS with no system check issues.
 Run:
 
 ```powershell
-git diff -- templates/dashboard/assistant_settings.html static/css/clinicflow.css tests/test_design_system.py docs/superpowers/specs/2026-06-03-faq-responses-layout-design.md docs/superpowers/plans/2026-06-03-faq-response-polish-implementation-plan.md
+git diff -- templates/dashboard/assistant_settings.html static/css/kliniassist.css tests/test_design_system.py docs/superpowers/specs/2026-06-03-faq-responses-layout-design.md docs/superpowers/plans/2026-06-03-faq-response-polish-implementation-plan.md
 ```
 
 Expected: Diff includes only the approved FAQ summary/copy polish plus spec/plan updates within these files. Note any pre-existing unrelated changes in the same files without reverting them.

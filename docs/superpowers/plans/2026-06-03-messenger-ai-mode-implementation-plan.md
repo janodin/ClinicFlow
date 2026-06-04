@@ -824,7 +824,7 @@ const routeAssistantMode = switchCase({
 
 - [ ] **Step 6: Add Django quick-reply request and formatter nodes**
 
-Add these nodes before `clinicFlowSharedAiAgent`:
+Add these nodes before `kliniAssistSharedAiAgent`:
 
 ```typescript
 const getMessengerQuickReplies = node({
@@ -896,7 +896,7 @@ Replace the export chain section that currently routes through `checkSharedAiEna
   .to(sharedAiInput)
   .to(resolveAssistantMode)
   .to(routeAssistantMode
-    .onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
+    .onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
       .onCase(0, sendFacebookReply)
       .onCase(1, returnWidgetReply)))
     .onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))

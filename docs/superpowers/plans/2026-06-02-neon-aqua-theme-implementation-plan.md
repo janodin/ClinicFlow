@@ -4,7 +4,7 @@
 
 **Goal:** Repaint KliniAssist from the current indigo/navy design system to the approved neon aqua clinical theme across CSS, docs, widget defaults, emails, calendar colors, and tests.
 
-**Architecture:** Keep the existing Django template and Tailwind CDN architecture unchanged. Centralize the visual change in `static/css/clinicflow.css` tokens and update only hardcoded color defaults/assertions that bypass those tokens.
+**Architecture:** Keep the existing Django template and Tailwind CDN architecture unchanged. Centralize the visual change in `static/css/kliniassist.css` tokens and update only hardcoded color defaults/assertions that bypass those tokens.
 
 **Tech Stack:** Django, Django templates, Tailwind utility classes, CSS custom properties, pytest.
 
@@ -13,7 +13,7 @@
 ## File Structure
 
 - Modify `DESIGN.md`: rename and document the new neon aqua clinical design language and token values.
-- Modify `static/css/clinicflow.css`: replace indigo/purple/navy token values, gradients, shadows, compatibility aliases, and glow treatments with aqua/cyan values.
+- Modify `static/css/kliniassist.css`: replace indigo/purple/navy token values, gradients, shadows, compatibility aliases, and glow treatments with aqua/cyan values.
 - Modify `clinics/models.py`: change `DEFAULT_WIDGET_ACCENT_COLOR` and validator copy to the new aqua brand value.
 - Modify `services/models.py`: change the default service color to the new aqua brand value.
 - Modify `templates/dashboard/assistant_settings.html`: change the Alpine fallback color from indigo to aqua.
@@ -77,7 +77,7 @@ Expected: fail because production CSS/docs/templates still contain old indigo va
 ## Task 2: Repaint CSS Tokens And Global Effects
 
 **Files:**
-- Modify: `static/css/clinicflow.css`
+- Modify: `static/css/kliniassist.css`
 
 - [ ] **Step 1: Replace root tokens**
 
@@ -138,7 +138,7 @@ Use teal/cyan shadow color values for card and raised shadows:
 
 - [ ] **Step 4: Update hardcoded CSS values**
 
-Replace remaining old indigo hardcoded CSS colors in `clinicflow.css` with token equivalents or aqua values:
+Replace remaining old indigo hardcoded CSS colors in `kliniassist.css` with token equivalents or aqua values:
 
 ```text
 #533afd -> #06b6d4

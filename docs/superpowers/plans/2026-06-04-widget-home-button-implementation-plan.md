@@ -186,7 +186,7 @@ Do not change `minimize()` except to keep it immediately after `goHome()`. It sh
 ```javascript
       minimize() {
         if (window.parent !== window) {
-          window.parent.postMessage({type: 'clinicflow-minimize'}, '*');
+          window.parent.postMessage({type: 'kliniassist-minimize'}, '*');
         }
       },
 ```
@@ -264,7 +264,7 @@ Expected task-specific diff:
 
 - `widget/tests.py` has the two new Home button tests.
 - `templates/widget/widget.html` adds the Home header button and `goHome()` reset method.
-- `minimize()` still posts `clinicflow-minimize` and does not reset mode or call `goHome()`.
+- `minimize()` still posts `kliniassist-minimize` and does not reset mode or call `goHome()`.
 
 - [ ] **Step 5: Leave changes uncommitted unless the user explicitly requests a commit**
 

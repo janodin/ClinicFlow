@@ -19,7 +19,7 @@ Use the **Neon Aqua Clinical** approach:
 Update the theme comprehensively in:
 
 - `DESIGN.md` design tokens and descriptive language.
-- `static/css/clinicflow.css` CSS variables, gradients, sidebar, buttons, focus rings, compatibility color aliases, widget/chat accents, and shadows.
+- `static/css/kliniassist.css` CSS variables, gradients, sidebar, buttons, focus rings, compatibility color aliases, widget/chat accents, and shadows.
 - Widget accent default and fallback in `clinics.models.Clinic`.
 - Service default color in `services.models.Service`.
 - Assistant/widget settings default preview color.

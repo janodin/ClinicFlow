@@ -66,7 +66,7 @@ const metaWebhookVerification = trigger({
     position: [240, 160],
     parameters: {
       httpMethod: 'GET',
-      path: 'clinicflow-messenger',
+      path: 'kliniassist-messenger',
       responseMode: 'responseNode',
       options: {},
     },
@@ -130,7 +130,7 @@ const metaMessengerEvents = trigger({
     position: [240, 560],
     parameters: {
       httpMethod: 'POST',
-      path: 'clinicflow-messenger',
+      path: 'kliniassist-messenger',
       options: {
         responseCode: { values: { responseCode: 200 } },
         responseData: 'EVENT_RECEIVED',
@@ -287,7 +287,7 @@ const widgetAssistantWebhook = trigger({
     position: [240, 1040],
     parameters: {
       httpMethod: 'POST',
-      path: 'clinicflow-widget-assistant',
+      path: 'kliniassist-widget-assistant',
       responseMode: 'responseNode',
       options: {},
     },
@@ -622,7 +622,7 @@ const bookConfirmedAppointmentTool = tool({
   output: [{ created: false, error: 'Appointment creation requires explicit user confirmation.' }],
 });
 
-const clinicFlowSharedAiAgent = node({
+const kliniAssistSharedAiAgent = node({
   type: '@n8n/n8n-nodes-langchain.agent',
   version: 3.1,
   config: {
@@ -829,7 +829,7 @@ export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI B
   .to(buildMessengerSharedInput)
   .to(sharedAiInput)
   .to(checkSharedAiEnabled
-    .onTrue(clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
+    .onTrue(kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
       .onCase('messenger', sendFacebookReply)
       .onCase('widget', returnWidgetReply)))
     .onFalse(prepareSharedFallback.to(prepareChannelReply).to(routeChannelReply
@@ -1053,9 +1053,9 @@ Call `get_workflow_details` for `ZTBqwEzdll6TZsUU`.
 
 Expected trigger details remain:
 
-- GET `/webhook/clinicflow-messenger` for Meta verification.
-- POST `/webhook/clinicflow-messenger` for Messenger events.
-- POST `/webhook/clinicflow-widget-assistant` for Widget assistant.
+- GET `/webhook/kliniassist-messenger` for Meta verification.
+- POST `/webhook/kliniassist-messenger` for Messenger events.
+- POST `/webhook/kliniassist-widget-assistant` for Widget assistant.
 
 - [ ] **Step 3: Run Django regression checks**
 
