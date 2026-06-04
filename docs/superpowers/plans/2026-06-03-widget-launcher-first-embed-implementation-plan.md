@@ -6,7 +6,7 @@
 
 **Architecture:** Keep Django as the server-rendered source of truth. Polish the existing `embed_js` script path, keep iframe booking and minimize messaging unchanged, and update dashboard copy so JavaScript is the recommended launcher-first embed while raw iframe is an advanced full-panel fallback.
 
-**Tech Stack:** Django, Django templates, Tailwind utility classes, Alpine.js copy buttons, pytest, existing ClinicFlow `cf-*` design classes.
+**Tech Stack:** Django, Django templates, Tailwind utility classes, Alpine.js copy buttons, pytest, existing KliniAssist `cf-*` design classes.
 
 ---
 

@@ -947,7 +947,7 @@ def test_combined_bridge_includes_verified_appointment_management_tools():
 
 def test_combined_bridge_prompt_requires_verified_cancel_and_reschedule_confirmation():
     source = SOURCE.read_text(encoding="utf-8")
-    agent_start = source.index("name: 'ClinicFlow Shared AI Agent'")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
     agent_end = source.index("const prepareSharedFallback")
     agent_block = source[agent_start:agent_end]
 
@@ -998,7 +998,7 @@ const findVerifiedAppointmentTool = tool({
       options: {},
       optimizeResponse: true,
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ found: false, error: 'Appointment not found. Please check the reference code and phone number.' }],
 });
@@ -1029,7 +1029,7 @@ const cancelVerifiedAppointmentTool = tool({
       options: {},
       optimizeResponse: true,
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ cancelled: false, error: 'Appointment change requires explicit user confirmation.' }],
 });
@@ -1060,7 +1060,7 @@ const rescheduleVerifiedAppointmentTool = tool({
       options: {},
       optimizeResponse: true,
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ rescheduled: false, error: 'Appointment change requires explicit user confirmation.' }],
 });

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make ClinicFlow's UI fully based on the `getdesign` Stripe design system while preserving the existing Django template, HTMX, Alpine.js, FullCalendar, and `cf-*` class architecture.
+Make KliniAssist's UI fully based on the `getdesign` Stripe design system while preserving the existing Django template, HTMX, Alpine.js, FullCalendar, and `cf-*` class architecture.
 
 The migration replaces the current Stone-Sage visual language with the Stripe-inspired system: white and cool off-white surfaces, deep navy ink, sparse indigo CTAs, pill buttons, thin display typography, compact radii, subtle blue shadows, tabular numerics, and gradient-mesh accents on public-facing or brand-forward surfaces.
 
@@ -14,13 +14,13 @@ Root `DESIGN.md` becomes the active Stripe design reference by running:
 npx getdesign@latest add stripe --force
 ```
 
-The current ClinicFlow `DESIGN.md` is intentionally replaced because the requested outcome is for all design to be based on Stripe. Future UI work must read and follow the root `DESIGN.md`.
+The current KliniAssist `DESIGN.md` is intentionally replaced because the requested outcome is for all design to be based on Stripe. Future UI work must read and follow the root `DESIGN.md`.
 
 ## Architecture
 
 This is a token-first migration, not a component-framework migration.
 
-ClinicFlow does not currently have `package.json`, Tailwind config, PostCSS config, or a frontend build pipeline. It uses Django templates, CDN Tailwind, and `static/css/clinicflow.css`. The Stripe design system installed by `getdesign` is a markdown reference, not generated UI components. Therefore, the implementation adapts the existing CSS and templates instead of introducing React, Next.js, shadcn, npm component packages, or a separate frontend.
+KliniAssist does not currently have `package.json`, Tailwind config, PostCSS config, or a frontend build pipeline. It uses Django templates, CDN Tailwind, and `static/css/clinicflow.css`. The Stripe design system installed by `getdesign` is a markdown reference, not generated UI components. Therefore, the implementation adapts the existing CSS and templates instead of introducing React, Next.js, shadcn, npm component packages, or a separate frontend.
 
 The existing `cf-*` CSS layer remains the canonical implementation layer for reusable UI. This keeps dashboard partials, HTMX swaps, forms, modals, tables, toasts, and widget screens stable while changing their visual language.
 

@@ -15,7 +15,7 @@ The widget currently has two booking-capable paths:
 
 The widget chat already calls n8n for free-text `text_input` messages when `ClinicAISettings.is_ai_enabled` is true. However, deterministic Django chat states still own most booking interactions. That makes the widget chat different from Messenger AI mode, where the shared n8n AI agent handles natural-language booking using tools.
 
-ClinicFlow already has the pieces needed for AI-first widget chat:
+KliniAssist already has the pieces needed for AI-first widget chat:
 
 - `widget.ai_client.call_assistant_webhook()` sends widget messages to `ASSISTANT_N8N_WEBHOOK_URL`.
 - `n8n_combined_messenger_widget_ai_bridge.ts` has a widget webhook path and shared AI agent.

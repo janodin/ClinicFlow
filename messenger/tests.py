@@ -224,6 +224,7 @@ from datetime import date, time, timedelta
 from django.utils import timezone
 from appointments.models import Appointment
 from services.models import Service
+from messenger import bot_engine
 from messenger.bot_engine import handle_message, _parse_name_phone
 
 
@@ -466,6 +467,7 @@ def test_confirmed_booking_returns_booked_text_and_next_step_quick_replies():
             "starts_at": slot["starts_at"].isoformat(),
             "full_name": "Maria Santos",
             "phone": "09175551234",
+            "email": "maria@example.com",
         },
     )
 
@@ -504,6 +506,7 @@ def test_confirm_slot_conflict_without_alternatives_returns_next_steps_and_reset
             "starts_at": starts_at,
             "full_name": "Maria Santos",
             "phone": "09175551234",
+            "email": "maria@example.com",
         },
     )
 
@@ -559,6 +562,66 @@ def test_parse_name_phone_valid():
 
 def test_parse_name_phone_invalid():
     assert _parse_name_phone("only name") == (None, None)
+
+
+def test_parse_name_phone_email_valid():
+    assert bot_engine._parse_name_phone_email("John Doe\n09171234567\njohn@example.com") == (
+        "John Doe",
+        "09171234567",
+        "john@example.com",
+    )
+
+
+def test_parse_name_phone_email_invalid():
+    assert bot_engine._parse_name_phone_email("John Doe\n09171234567") == (None, None, None)
+    assert bot_engine._parse_name_phone_email("John Doe\n09171234567\nnot-an-email") == (None, None, None)
+
+
+@pytest.mark.django_db
+def test_collect_info_requires_name_phone_and_email():
+    user = User.objects.create_user(username="owner_be_collect_email", email="owner_be_collect_email@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBECollectEmail", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBECollectEmail")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-COLLECT-EMAIL", page_access_token="T")
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-COLLECT-EMAIL",
+        state=MessengerSession.STATE_COLLECT_INFO,
+        data={"service_id": 1, "date": "2026-01-01", "starts_at": timezone.now().isoformat()},
+    )
+
+    actions = handle_message(session, "Maria Santos\n09175551234", "")
+
+    assert actions == [{
+        "type": "text",
+        "text": "Please provide your full name, phone number, and email.\n\nExample:\nJohn Doe\n09171234567\njohn@example.com",
+    }]
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_COLLECT_INFO
+    assert "email" not in session.data
+
+
+@pytest.mark.django_db
+def test_collect_info_stores_email_before_confirm():
+    user = User.objects.create_user(username="owner_be_store_email", email="owner_be_store_email@test.com", password="pass")
+    group = ClinicGroup.objects.create(name="GroupBEStoreEmail", owner=user)
+    clinic = Clinic.objects.create(group=group, name="ClinicBEStoreEmail")
+    conn = MessengerConnection.objects.create(clinic=clinic, page_id="P-STORE-EMAIL", page_access_token="T")
+    service = Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    session = MessengerSession.objects.create(
+        connection=conn,
+        psid="S-STORE-EMAIL",
+        state=MessengerSession.STATE_COLLECT_INFO,
+        data={"service_id": service.id, "date": "2026-01-01", "starts_at": timezone.now().isoformat()},
+    )
+
+    handle_message(session, "Maria Santos\n09175551234\nmaria@example.com", "")
+
+    session.refresh_from_db()
+    assert session.state == MessengerSession.STATE_CONFIRM
+    assert session.data["full_name"] == "Maria Santos"
+    assert session.data["phone"] == "09175551234"
+    assert session.data["email"] == "maria@example.com"
 
 
 import json
@@ -1477,6 +1540,7 @@ def test_book_confirmed_appointment_requires_confirmation_and_creates_booking():
         "Maria Santos",
         "09175551234",
         confirmed=True,
+        email="maria@example.com",
     )
     assert result["created"] is True
     assert result["appointment"]["service"] == "Consultation"
@@ -1484,6 +1548,30 @@ def test_book_confirmed_appointment_requires_confirmation_and_creates_booking():
     appointment = Appointment.objects.get(reference_code=result["appointment"]["reference_code"])
     assert appointment.source == Appointment.SOURCE_MESSENGER
     assert appointment.patient.phone == "09175551234"
+
+
+@pytest.mark.django_db
+def test_book_confirmed_appointment_rejects_missing_email():
+    from messenger.ai_tools import book_confirmed_appointment, check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_booking_email_required", "PAGEAI-EMAIL-REQUIRED")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = check_availability("PAGEAI-EMAIL-REQUIRED", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+
+    result = book_confirmed_appointment(
+        "PAGEAI-EMAIL-REQUIRED",
+        service.id,
+        slot["starts_at"],
+        "Maria Santos",
+        "09175551234",
+        confirmed=True,
+    )
+
+    assert result["created"] is False
+    assert result["error"] == "Please provide your email address."
+    assert Appointment.objects.filter(clinic=clinic).count() == 0
 
 
 @pytest.mark.django_db
@@ -1536,6 +1624,7 @@ def test_ai_book_endpoint_accepts_string_true_confirmation():
             "starts_at": slot["starts_at"],
             "full_name": "Jana Patu",
             "phone": "09358438344",
+            "email": "jana@example.com",
             "confirmed": "true",  # n8n sends string, not boolean
         }),
         content_type="application/json",
@@ -1605,6 +1694,7 @@ def test_messenger_ai_tools_work_when_messenger_mode_is_ai_and_website_ai_disabl
         "Maria Santos",
         "09175551234",
         confirmed=True,
+        email="maria@example.com",
     )
 
     assert services["found"] is True
@@ -1643,6 +1733,7 @@ def test_ai_booking_reuses_patient_phone_and_prevents_double_booking():
         "Updated Name",
         "09175550000",
         confirmed=True,
+        email="updated@example.com",
     )
     second = book_confirmed_appointment(
         "PAGEAI13",
@@ -1651,6 +1742,7 @@ def test_ai_booking_reuses_patient_phone_and_prevents_double_booking():
         "Another Name",
         "09175551111",
         confirmed=True,
+        email="another@example.com",
     )
 
     assert first["created"] is True
@@ -1659,6 +1751,108 @@ def test_ai_booking_reuses_patient_phone_and_prevents_double_booking():
     assert patient.full_name == "Existing Name"
     assert second["created"] is False
     assert second["error"] == "That slot is no longer available. Please choose another time."
+
+
+@pytest.mark.django_db
+def test_find_verified_appointment_matches_reference_and_normalized_phone():
+    from messenger.ai_tools import find_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_lookup", "PAGE-APPT-LOOKUP")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+        source=Appointment.SOURCE_STAFF,
+    )
+
+    result = find_verified_appointment("PAGE-APPT-LOOKUP", appointment.reference_code.lower(), "(0917) 555-1234")
+
+    assert result["found"] is True
+    assert result["appointment"]["reference_code"] == appointment.reference_code
+    assert result["appointment"]["service_id"] == service.id
+    assert result["appointment"]["service"] == "Consultation"
+    assert result["appointment"]["status"] == Appointment.STATUS_CONFIRMED
+    assert result["appointment"]["patient_name"] == "Maria Santos"
+    assert result["appointment"]["patient_phone_last4"] == "1234"
+    assert result["appointment"]["local_date_label"]
+    assert result["appointment"]["local_time_label"]
+
+
+@pytest.mark.django_db
+def test_find_verified_appointment_rejects_wrong_phone_and_cross_clinic():
+    from messenger.ai_tools import find_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_lookup_scope", "PAGE-APPT-LOOKUP-SCOPE")
+    other_clinic, _other_connection = _create_messenger_clinic("owner_appt_lookup_other", "PAGE-APPT-LOOKUP-OTHER")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    wrong_phone = find_verified_appointment("PAGE-APPT-LOOKUP-SCOPE", appointment.reference_code, "09170000000")
+    wrong_page = find_verified_appointment("PAGE-APPT-LOOKUP-OTHER", appointment.reference_code, "09175551234")
+
+    assert wrong_phone == {"found": False, "error": "Appointment not found. Please check the reference code and phone number."}
+    assert wrong_page == {"found": False, "error": "Appointment not found. Please check the reference code and phone number."}
+    assert other_clinic.appointments.count() == 0
+
+
+@pytest.mark.django_db
+def test_find_verified_appointment_rejects_missing_identity_and_ineligible_statuses():
+    from messenger.ai_tools import find_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_lookup_status", "PAGE-APPT-LOOKUP-STATUS")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    missing = find_verified_appointment("PAGE-APPT-LOOKUP-STATUS", "", "")
+    assert missing == {"found": False, "error": "Please provide the appointment reference code and phone number."}
+
+    status_cases = [
+        (Appointment.STATUS_CANCELLED, timezone.now() + timedelta(days=1), "This appointment cannot be changed through the assistant."),
+        (Appointment.STATUS_COMPLETED, timezone.now() + timedelta(days=2), "This appointment cannot be changed through the assistant."),
+        (Appointment.STATUS_NO_SHOW, timezone.now() + timedelta(days=3), "This appointment cannot be changed through the assistant."),
+        (Appointment.STATUS_CONFIRMED, timezone.now() - timedelta(days=1), "Past appointments cannot be changed through the assistant."),
+    ]
+    for status, starts_at, expected_error in status_cases:
+        appointment = Appointment.objects.create(
+            clinic=clinic,
+            patient=patient,
+            service=service,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(minutes=30),
+            status=status,
+        )
+        result = find_verified_appointment("PAGE-APPT-LOOKUP-STATUS", appointment.reference_code, "09175551234")
+        assert result == {"found": False, "error": expected_error}
+
+
+@pytest.mark.django_db
+def test_find_widget_verified_appointment_respects_website_ai_disabled():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import find_widget_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_widget_appt_lookup_disabled", "PAGE-WIDGET-APPT-DISABLED")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=False, fallback_message="Please call us.")
+
+    result = find_widget_verified_appointment(clinic.slug, "CF-TEST", "09175551234")
+
+    assert result["found"] is False
+    assert result["disabled"] is True
+    assert result["fallback_message"] == "Please call us."
+    assert result["error"] == "AI is disabled for this clinic."
 
 
 @pytest.mark.django_db
@@ -1678,6 +1872,7 @@ def test_widget_ai_booking_uses_chat_widget_source():
         "Widget AI Patient",
         "09170001111",
         confirmed=True,
+        email="widget@example.com",
     )
 
     assert result["created"] is True
@@ -2281,6 +2476,7 @@ def test_ai_booking_endpoint_creates_only_after_confirmation():
             "starts_at": slot["starts_at"],
             "full_name": "Juan Dela Cruz",
             "phone": "09170000000",
+            "email": "juan@example.com",
             "confirmed": True,
         }),
         content_type="application/json",
@@ -2311,6 +2507,7 @@ def test_ai_booking_endpoint_persists_messenger_psid():
             "starts_at": slot["starts_at"],
             "full_name": "PSID Patient",
             "phone": "09170000001",
+            "email": "psid@example.com",
             "confirmed": True,
             "psid": "PSID-RIGHT",
         }),

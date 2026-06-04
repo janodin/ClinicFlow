@@ -2,6 +2,8 @@ import re
 from datetime import date, timedelta, datetime, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.utils import timezone
 
 from appointments.models import Appointment
@@ -83,6 +85,21 @@ def _parse_name_phone(text):
     if len(digits) < 7:
         return None, None
     return full_name, phone
+
+
+def _parse_name_phone_email(text):
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    if len(lines) < 3:
+        return None, None, None
+    full_name, phone = _parse_name_phone("\n".join(lines[:2]))
+    email = lines[2]
+    if not full_name or not phone:
+        return None, None, None
+    try:
+        validate_email(email)
+    except ValidationError:
+        return None, None, None
+    return full_name, phone, email
 
 
 def _clinic_localdate(clinic):
@@ -300,13 +317,14 @@ def handle_message(session, text, postback):
             return actions
 
     if state == MessengerSession.STATE_COLLECT_INFO:
-        full_name, phone = _parse_name_phone(text or "")
-        if full_name and phone:
+        full_name, phone, email = _parse_name_phone_email(text or "")
+        if full_name and phone and email:
             data["full_name"] = full_name
             data["phone"] = phone
+            data["email"] = email
             state = MessengerSession.STATE_CONFIRM
         else:
-            actions.append(_text("Please provide your full name and phone number.\n\nExample:\nJohn Doe\n09171234567"))
+            actions.append(_text("Please provide your full name, phone number, and email.\n\nExample:\nJohn Doe\n09171234567\njohn@example.com"))
             session.state = state
             session.data = data
             session.save()
@@ -359,6 +377,11 @@ def handle_message(session, text, postback):
             return actions
         else:
             service = clinic.services.filter(pk=data.get("service_id")).first()
+            if not service:
+                session.state = state
+                session.data = data
+                session.save()
+                return actions
             starts_at = datetime.fromisoformat(data.get("starts_at"))
             local_start = starts_at.astimezone(ZoneInfo(clinic.timezone))
             summary = f"{service.name} at {clinic.name} on {local_start.strftime('%A, %B %d at %I:%M %p')}"

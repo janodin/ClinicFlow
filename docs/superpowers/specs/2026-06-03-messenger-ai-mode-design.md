@@ -8,7 +8,7 @@ The default mode is quick replies so Messenger does not consume AI tokens unless
 
 ## Current State
 
-ClinicFlow already has two Messenger-capable paths:
+KliniAssist already has two Messenger-capable paths:
 
 - The deterministic Django Messenger bot in `messenger.bot_engine.handle_message()`, which uses quick replies for booking, FAQs, clinic info, and cancel flows.
 - The n8n AI bridge and Django AI tool endpoints, which use `ClinicAISettings`, active services, active FAQs, and safe booking tools for natural-language booking.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make ClinicFlow responsive and usable on phones and small tablets across dashboard, scheduling, auth, and widget pages while preserving the existing Django template stack and Neon Aqua Clinical design system.
+**Goal:** Make KliniAssist responsive and usable on phones and small tablets across dashboard, scheduling, auth, and widget pages while preserving the existing Django template stack and Neon Aqua Clinical design system.
 
 **Architecture:** Add a shared mobile baseline in `static/css/clinicflow.css`, then apply focused template changes by page family. Keep dense dashboard screens table-first, but add mobile-safe touch targets, wrapping, sticky actions, filter disclosures, safe viewport sizing, and widget iframe safeguards.
 

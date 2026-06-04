@@ -243,7 +243,7 @@ class MessengerAISettingsForm(forms.ModelForm):
         model = ClinicAISettings
         fields = ["is_ai_enabled", "instructions", "fallback_message"]
         help_texts = {
-            "instructions": "Used by both Messenger and the website Assistant. Services, prices, and availability still come from ClinicFlow.",
+            "instructions": "Used by both Messenger and the website Assistant. Services, prices, and availability still come from KliniAssist.",
             "fallback_message": "Shown in both Messenger and the website Assistant when AI replies are disabled or unavailable.",
         }
 ```

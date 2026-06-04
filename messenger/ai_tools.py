@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from appointments.models import Appointment
 from clinics.models import Clinic, ClinicAISettings
+from patients.models import normalize_phone
 from scheduling.utils import generate_slots
 from widget.views import _process_guest_booking
 
@@ -80,6 +81,54 @@ def _parse_datetime(value):
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed)
     return parsed.astimezone(dt_timezone.utc)
+
+
+APPOINTMENT_LOOKUP_ERROR = "Appointment not found. Please check the reference code and phone number."
+CONFIRMATION_REQUIRED_ERROR = "Appointment change requires explicit user confirmation."
+
+
+def _appointment_summary(clinic, appointment):
+    local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
+    digits = normalize_phone(appointment.patient.phone)
+    return {
+        "reference_code": appointment.reference_code,
+        "service_id": appointment.service_id,
+        "service": appointment.service.name,
+        "status": appointment.status,
+        "starts_at": appointment.starts_at.isoformat(),
+        "local_starts_at": local_start.isoformat(),
+        "patient_name": appointment.patient.full_name,
+        "patient_phone_last4": digits[-4:] if len(digits) >= 4 else digits,
+        "local_date_label": local_start.strftime("%A, %B %d"),
+        "local_time_label": local_start.strftime("%I:%M %p").lstrip("0"),
+    }
+
+
+def _verified_appointment_for_clinic(clinic, reference_code, phone):
+    reference = (reference_code or "").strip().upper()
+    normalized_phone = normalize_phone(phone)
+    if not reference or not normalized_phone:
+        return None, "Please provide the appointment reference code and phone number."
+
+    appointment = (
+        clinic.appointments.select_related("patient", "service")
+        .filter(reference_code__iexact=reference, patient__normalized_phone=normalized_phone)
+        .first()
+    )
+    if not appointment:
+        return None, APPOINTMENT_LOOKUP_ERROR
+    if appointment.starts_at <= timezone.now():
+        return None, "Past appointments cannot be changed through the assistant."
+    if appointment.status not in {Appointment.STATUS_PENDING, Appointment.STATUS_CONFIRMED}:
+        return None, "This appointment cannot be changed through the assistant."
+    return appointment, ""
+
+
+def _find_verified_appointment_for_clinic(clinic, reference_code, phone):
+    appointment, error = _verified_appointment_for_clinic(clinic, reference_code, phone)
+    if error:
+        return {"found": False, "error": error}
+    return {"found": True, "appointment": _appointment_summary(clinic, appointment)}
 
 
 def get_connection_for_page(page_id):
@@ -247,6 +296,23 @@ def check_widget_availability(clinic_slug, service_id, preferred_starts_at=None,
     if disabled:
         return {**disabled, "available": False, "alternatives": []}
     return _check_availability_for_clinic(clinic, service_id, preferred_starts_at, preferred_date)
+
+
+def find_verified_appointment(page_id, reference_code, phone):
+    connection = get_connection_for_page(page_id)
+    if not connection:
+        return {"found": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    return _find_verified_appointment_for_clinic(connection.clinic, reference_code, phone)
+
+
+def find_widget_verified_appointment(clinic_slug, reference_code, phone):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"found": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    disabled = _website_ai_disabled_response_for_clinic(clinic)
+    if disabled:
+        return {**disabled, "found": False, "error": "AI is disabled for this clinic."}
+    return _find_verified_appointment_for_clinic(clinic, reference_code, phone)
 
 
 def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone, confirmed, email="", reason="", psid=""):

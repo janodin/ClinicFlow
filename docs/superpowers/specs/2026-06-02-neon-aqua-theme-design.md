@@ -2,7 +2,7 @@
 
 ## Goal
 
-Repaint ClinicFlow from the previous indigo/navy theme to a screenshot-inspired neon aqua clinical theme. The app should feel bright, cool, and glow-accented while preserving readable clinic operations screens and appointment status meaning.
+Repaint KliniAssist from the previous indigo/navy theme to a screenshot-inspired neon aqua clinical theme. The app should feel bright, cool, and glow-accented while preserving readable clinic operations screens and appointment status meaning.
 
 ## Approved Direction
 

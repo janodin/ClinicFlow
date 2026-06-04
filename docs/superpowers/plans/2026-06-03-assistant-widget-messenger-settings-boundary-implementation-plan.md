@@ -383,7 +383,7 @@ class SharedAISettingsForm(forms.ModelForm):
             "fallback_message": "Fallback message",
         }
         help_texts = {
-            "instructions": "Used by both the website Assistant and Facebook Messenger. Services, prices, and availability still come from ClinicFlow.",
+            "instructions": "Used by both the website Assistant and Facebook Messenger. Services, prices, and availability still come from KliniAssist.",
             "fallback_message": "Shown in both channels when AI replies are disabled or unavailable.",
         }
 ```
@@ -624,7 +624,7 @@ Immediately after that header, add this shared AI settings card:
           </button>
         </div>
         {{ ai_form.instructions }}
-        <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the assistant how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from ClinicFlow.</p>
+        <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the assistant how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from KliniAssist.</p>
         {% if ai_form.instructions.errors %}
           <p class="text-sm text-red-600 mt-1">{{ ai_form.instructions.errors.0 }}</p>
         {% endif %}

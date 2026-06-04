@@ -25,7 +25,7 @@ The selected launcher style is an icon-only aqua bubble in the bottom-right corn
 The JavaScript embed should behave as follows:
 
 - The copied default embed remains a single script tag: `<script src=".../embed.js"></script>`.
-- On host page load, ClinicFlow injects only a compact launcher button.
+- On host page load, KliniAssist injects only a compact launcher button.
 - The widget iframe is created or shown only after the visitor clicks the launcher.
 - The launcher is hidden while the iframe is open.
 - The widget iframe uses the existing `widget:home` route with `?source=embed` so bookings continue to be recorded as embed bookings.

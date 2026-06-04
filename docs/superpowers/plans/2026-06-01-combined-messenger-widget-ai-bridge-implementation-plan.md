@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Update the active n8n `ClinicFlow Messenger + Widget AI Bridge` workflow so Messenger and Widget share one AI Agent, one model node, one memory node, and one set of channel-aware tools.
+**Goal:** Update the active n8n `KliniAssist Messenger + Widget AI Bridge` workflow so Messenger and Widget share one AI Agent, one model node, one memory node, and one set of channel-aware tools.
 
 **Architecture:** Keep the existing Messenger and Widget webhook entry points and final response nodes. Normalize each channel into a canonical shared item, run both through one shared AI core, then route the AI result back to either Facebook Graph API or the Widget webhook response.
 
@@ -13,17 +13,17 @@
 ## File Structure
 
 - Create: `n8n_combined_messenger_widget_ai_bridge.ts` - local SDK source for the active n8n workflow so future workflow changes are maintainable and diffable.
-- Modify remote n8n workflow: `ZTBqwEzdll6TZsUU` - active `ClinicFlow Messenger + Widget AI Bridge` workflow updated from validated SDK code.
+- Modify remote n8n workflow: `ZTBqwEzdll6TZsUU` - active `KliniAssist Messenger + Widget AI Bridge` workflow updated from validated SDK code.
 - No Django model or view changes are required for the merge. Existing Django endpoints remain the source of truth for tenant scoping and booking validation.
 - Do not commit unless the user explicitly asks. Developer instructions prohibit commits without explicit request.
 
 Known live identifiers and credentials:
 
 - Workflow ID: `ZTBqwEzdll6TZsUU`
-- Workflow name: `ClinicFlow Messenger + Widget AI Bridge`
+- Workflow name: `KliniAssist Messenger + Widget AI Bridge`
 - Django base URL currently used by the workflow: `https://clinic.example.com`
 - n8n inbound webhook base URL currently reported by n8n: `https://n8n.example.com`
-- HTTP header auth credential: `ClinicFlow N8N Webhook Secret` (`httpHeaderAuth`)
+- HTTP header auth credential: `KliniAssist N8N Webhook Secret` (`httpHeaderAuth`)
 - Model credential: `OpenAI account` (`openAiApi`)
 - Shared model to preserve from current Messenger path: `openai/gpt-oss-120b`
 
@@ -225,7 +225,7 @@ const getMessengerClinicContext = node({
       },
     },
     credentials: {
-      httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret'),
+      httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret'),
     },
   },
   output: [
@@ -376,7 +376,7 @@ const getWidgetClinicContext = node({
       },
     },
     credentials: {
-      httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret'),
+      httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret'),
     },
   },
   output: [
@@ -544,7 +544,7 @@ const matchServicesTool = tool({
       optimizeResponse: true,
     },
     credentials: {
-      httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret'),
+      httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret'),
     },
   },
   output: [{ found: true, matches: [] }],
@@ -578,7 +578,7 @@ const checkAvailabilityTool = tool({
       optimizeResponse: true,
     },
     credentials: {
-      httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret'),
+      httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret'),
     },
   },
   output: [{ found: true, available: true, alternatives: [] }],
@@ -616,7 +616,7 @@ const bookConfirmedAppointmentTool = tool({
       optimizeResponse: true,
     },
     credentials: {
-      httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret'),
+      httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret'),
     },
   },
   output: [{ created: false, error: 'Appointment creation requires explicit user confirmation.' }],
@@ -626,13 +626,13 @@ const clinicFlowSharedAiAgent = node({
   type: '@n8n/n8n-nodes-langchain.agent',
   version: 3.1,
   config: {
-    name: 'ClinicFlow Shared AI Agent',
+    name: 'KliniAssist Shared AI Agent',
     position: [1744, 720],
     parameters: {
       promptType: 'define',
       text: expr('{{ $("Shared AI Input").item.json.message }}'),
       options: {
-        systemMessage: expr('ClinicFlow Shared Messenger + Widget AI Instructions:\n' +
+        systemMessage: expr('KliniAssist Shared Messenger + Widget AI Instructions:\n' +
           '{{ $("Shared AI Input").item.json.context?.ai?.instructions || "No custom clinic instructions configured." }}\n\n' +
           'Channel: {{ $("Shared AI Input").item.json.channel }}\n' +
           'Output mode: {{ $("Shared AI Input").item.json.output_mode }}\n\n' +
@@ -819,7 +819,7 @@ const returnWidgetReply = node({
   output: [{ reply: 'Assistant reply' }],
 });
 
-export default workflow('ZTBqwEzdll6TZsUU', 'ClinicFlow Messenger + Widget AI Bridge')
+export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI Bridge')
   .add(metaWebhookVerification)
   .to(verifyMetaChallenge)
   .to(returnVerificationResponse)
@@ -902,8 +902,8 @@ Call `update_workflow` with:
 ```json
 {
   "workflowId": "ZTBqwEzdll6TZsUU",
-  "name": "ClinicFlow Messenger + Widget AI Bridge",
-  "description": "Combined ClinicFlow Meta Messenger and website widget AI bridge with one shared AI Agent, model, memory, and channel-aware booking tools.",
+  "name": "KliniAssist Messenger + Widget AI Bridge",
+  "description": "Combined KliniAssist Meta Messenger and website widget AI bridge with one shared AI Agent, model, memory, and channel-aware booking tools.",
   "code": "<validated contents of n8n_combined_messenger_widget_ai_bridge.ts>"
 }
 ```
@@ -917,7 +917,7 @@ Call `get_workflow_details` for `ZTBqwEzdll6TZsUU`.
 Expected structure:
 
 - Three triggers remain: `Meta Webhook Verification`, `Meta Messenger Events`, `Widget Assistant Webhook`.
-- One AI Agent exists: `ClinicFlow Shared AI Agent`.
+- One AI Agent exists: `KliniAssist Shared AI Agent`.
 - One model exists: `Shared Chat Model`.
 - One memory node exists: `Shared Conversation Memory`.
 - Three tools exist: `match_services`, `check_availability`, `book_confirmed_appointment`.
@@ -969,7 +969,7 @@ Call `test_workflow` with trigger node `Widget Assistant Webhook` and pin data s
       }
     }
   ],
-  "ClinicFlow Shared AI Agent": [
+  "KliniAssist Shared AI Agent": [
     { "json": { "output": "Sure, what time works for you tomorrow?" } }
   ]
 }
@@ -1017,7 +1017,7 @@ Call `test_workflow` with trigger node `Meta Messenger Events` and pin data shap
       }
     }
   ],
-  "ClinicFlow Shared AI Agent": [
+  "KliniAssist Shared AI Agent": [
     { "json": { "output": "Sure, what time works for you tomorrow?" } }
   ],
   "Send Facebook Reply": [
@@ -1032,7 +1032,7 @@ Expected: `Send Facebook Reply` receives a body with `recipient.id = "PSID123"` 
 
 Run one widget test with `Get Widget Clinic Context.ai.is_ai_enabled = false`.
 
-Expected: `Return Widget Reply` receives the configured fallback message and `ClinicFlow Shared AI Agent` does not execute.
+Expected: `Return Widget Reply` receives the configured fallback message and `KliniAssist Shared AI Agent` does not execute.
 
 ---
 
@@ -1111,4 +1111,4 @@ Type consistency:
 
 - Node names referenced by expressions match node declarations: `Shared AI Input`, `Normalize Messenger Request`, and `Normalize Widget Request`.
 - Tool names in the system prompt match connected tools: `match_services`, `check_availability`, and `book_confirmed_appointment`.
-- Credential names match accessible n8n credentials: `ClinicFlow N8N Webhook Secret` and `OpenAI account`.
+- Credential names match accessible n8n credentials: `KliniAssist N8N Webhook Secret` and `OpenAI account`.

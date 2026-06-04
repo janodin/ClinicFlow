@@ -2,7 +2,7 @@
 
 ## Goal
 
-Expose the Messenger AI prompt on the ClinicFlow Messenger settings page so clinic users can enter or edit the instructions used by Minimax or another model inside the n8n Messenger AI workflow.
+Expose the Messenger AI prompt on the KliniAssist Messenger settings page so clinic users can enter or edit the instructions used by Minimax or another model inside the n8n Messenger AI workflow.
 
 ## Scope
 
@@ -46,7 +46,7 @@ When no Messenger connection exists yet, the AI prompt card should explain that 
 
 Suggested helper copy:
 
-- For the prompt field: `Tell the Messenger AI how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from ClinicFlow.`
+- For the prompt field: `Tell the Messenger AI how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from KliniAssist.`
 - For fallback message: `Shown when AI replies are disabled or the AI cannot safely respond.`
 
 ## Data Flow

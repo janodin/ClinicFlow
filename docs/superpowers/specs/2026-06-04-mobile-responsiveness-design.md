@@ -2,7 +2,7 @@
 
 ## Context
 
-ClinicFlow is a Django, Tailwind CSS, HTMX, Alpine.js, and FullCalendar clinic appointment SaaS. The UI uses the Neon Aqua Clinical system from `DESIGN.md`, with reusable `cf-*` styles in `static/css/clinicflow.css`.
+KliniAssist is a Django, Tailwind CSS, HTMX, Alpine.js, and FullCalendar clinic appointment SaaS. The UI uses the Neon Aqua Clinical system from `DESIGN.md`, with reusable `cf-*` styles in `static/css/clinicflow.css`.
 
 Five read-only audits reviewed mobile responsiveness across:
 

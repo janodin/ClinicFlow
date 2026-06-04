@@ -2,7 +2,7 @@
 
 ## Goal
 
-Update the dashboard calendar page so its layout matches the provided reference: compact navigation controls on the left, centered month title, view controls on the right, and a large grid-first calendar. Keep the existing ClinicFlow color system and appointment behavior unchanged.
+Update the dashboard calendar page so its layout matches the provided reference: compact navigation controls on the left, centered month title, view controls on the right, and a large grid-first calendar. Keep the existing KliniAssist color system and appointment behavior unchanged.
 
 ## Approved Direction
 
@@ -29,7 +29,7 @@ The change is presentation-only. It must preserve:
 - HTMX appointment detail modal loading
 - Calendar refetch behavior after modal edits, cancellations, reschedules, and status updates
 - Service and status filter behavior
-- Existing appointment status colors and ClinicFlow design tokens
+- Existing appointment status colors and KliniAssist design tokens
 - Existing route names, DOM IDs used by tests/JavaScript, and HTMX targets
 
 ## Layout Details

@@ -1,8 +1,8 @@
-# ClinicFlow Design System Implementation Plan
+# KliniAssist Design System Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Apply the approved Stone-Sage Clinical Ledger design system across ClinicFlow while preserving appointment-first behavior, clinic scoping, guest booking, slot validation, and HTMX workflows.
+**Goal:** Apply the approved Stone-Sage Clinical Ledger design system across KliniAssist while preserving appointment-first behavior, clinic scoping, guest booking, slot validation, and HTMX workflows.
 
 **Architecture:** Implement from the shared foundation outward. First update `static/css/clinicflow.css`, then the authenticated app shell, shared partials, operational pages, public widget, auth/email screens, and finally add drift tests and cleanup. Implementation tasks should run sequentially because many phases touch shared CSS and templates.
 
@@ -36,7 +36,7 @@
 
 ## Baseline Commands
 
-Use these commands from `C:\Users\user\Desktop\ClinicFlow`.
+Use these commands from the project root.
 
 ```powershell
 .\env\Scripts\activate

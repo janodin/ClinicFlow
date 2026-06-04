@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add editable Messenger AI prompt controls to the ClinicFlow Messenger settings page using the existing `MessengerAISettings` model.
+**Goal:** Add editable Messenger AI prompt controls to the KliniAssist Messenger settings page using the existing `MessengerAISettings` model.
 
 **Architecture:** Reuse the existing Messenger settings dashboard route and split it into two POST forms using `_form`: one for Facebook connection credentials and one for Messenger AI behavior. Keep tenant safety in the view by deriving the `MessengerConnection` from the current clinic, never from submitted IDs. The n8n AI context endpoint already returns saved AI settings, so the implementation only needs dashboard form/view/template work and regression tests.
 
-**Tech Stack:** Django, Django templates, pytest, Tailwind utility classes, existing ClinicFlow `cf-*` and `ui-*` dashboard components.
+**Tech Stack:** Django, Django templates, pytest, Tailwind utility classes, existing KliniAssist `cf-*` and `ui-*` dashboard components.
 
 **Git Policy:** Do not commit during execution unless the user explicitly requests commits. Use `git status` and `git diff` for review only.
 
@@ -214,7 +214,7 @@ class MessengerAISettingsForm(forms.ModelForm):
             "fallback_message": "Fallback message",
         }
         help_texts = {
-            "instructions": "Services, prices, and availability still come from ClinicFlow.",
+            "instructions": "Services, prices, and availability still come from KliniAssist.",
             "fallback_message": "Shown when AI replies are disabled or the AI cannot safely respond.",
         }
 ```
@@ -357,7 +357,7 @@ Insert this section after the closing `</section>` for the Facebook Page Connect
         <div class="cf-field">
           <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
           {{ ai_form.instructions }}
-          <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the Messenger AI how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from ClinicFlow.</p>
+          <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the Messenger AI how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from KliniAssist.</p>
           {% if ai_form.instructions.errors %}
             <p class="text-sm text-red-600 mt-1">{{ ai_form.instructions.errors.0 }}</p>
           {% endif %}

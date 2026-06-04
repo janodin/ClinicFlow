@@ -6,7 +6,7 @@
 
 **Architecture:** Keep this change entirely in the dashboard template and dashboard tests. Use Alpine state inside the existing Website Booking Widget card to mirror the public launcher/open/minimize behavior in a contained preview box, while the public `embed.js`, booking widget iframe, and booking internals remain unchanged.
 
-**Tech Stack:** Django templates, Alpine.js, Tailwind utility classes, existing ClinicFlow `cf-*` design classes, pytest.
+**Tech Stack:** Django templates, Alpine.js, Tailwind utility classes, existing KliniAssist `cf-*` design classes, pytest.
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add icons to all visible app buttons and button-styled links so actions are easier to scan while preserving the existing ClinicFlow Neon Aqua Clinical design system.
+Add icons to all visible app buttons and button-styled links so actions are easier to scan while preserving the existing KliniAssist Neon Aqua Clinical design system.
 
 ## Scope
 

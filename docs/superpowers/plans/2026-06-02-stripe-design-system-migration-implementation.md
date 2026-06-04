@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace ClinicFlow's Stone-Sage visual language with the `getdesign` Stripe design system across the Django dashboard, public widget, auth, and email surfaces while preserving all booking and clinic-scoping behavior.
+**Goal:** Replace KliniAssist's Stone-Sage visual language with the `getdesign` Stripe design system across the Django dashboard, public widget, auth, and email surfaces while preserving all booking and clinic-scoping behavior.
 
 **Architecture:** Use a token-first migration. Replace root `DESIGN.md`, then re-skin the existing `static/css/clinicflow.css` `cf-*` implementation layer and update only the templates, model defaults, and color literals that still expose old teal/sage/slate design decisions. Keep Django templates, CDN Tailwind, HTMX, Alpine.js, Lucide, and FullCalendar; do not introduce a frontend build pipeline.
 
@@ -43,7 +43,7 @@
 
 ## Baseline Commands
 
-Run from `C:\Users\user\Desktop\ClinicFlow`.
+Run from the project root.
 
 ```powershell
 .\env\Scripts\activate; python manage.py check

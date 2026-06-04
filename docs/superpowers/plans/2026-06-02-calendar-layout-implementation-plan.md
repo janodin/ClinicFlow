@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rework the dashboard calendar page into the approved screenshot-style layout with Service, Status, and Add appointment above and outside the calendar card while preserving ClinicFlow colors, FullCalendar behavior, filters, appointment modal behavior, and tenant-safe server flows.
+**Goal:** Rework the dashboard calendar page into the approved screenshot-style layout with Service, Status, and Add appointment above and outside the calendar card while preserving KliniAssist colors, FullCalendar behavior, filters, appointment modal behavior, and tenant-safe server flows.
 
 **Architecture:** This is a presentation-only change. The Django view and event/reschedule endpoints stay unchanged; `templates/dashboard/calendar.html` gains a new calendar header/tools structure and a small title-sync helper, while `static/css/clinicflow.css` adds scoped calendar layout and FullCalendar overrides.
 
@@ -14,7 +14,7 @@
 
 - Modify `tests/test_design_system.py`: update the calendar design-system test and add a CSS contract test to assert the new screenshot-style layout hooks while preserving existing IDs and accessibility assertions.
 - Modify `templates/dashboard/calendar.html`: restructure the page into outside top tools, then the calendar card containing header, legend, loading, calendar grid, and existing modal.
-- Modify `static/css/clinicflow.css`: add scoped `.cf-calendar-*` styles and `#calendar .fc-*` overrides using existing ClinicFlow variables.
+- Modify `static/css/clinicflow.css`: add scoped `.cf-calendar-*` styles and `#calendar .fc-*` overrides using existing KliniAssist variables.
 - Use existing `dashboard/tests.py` calendar tests for behavior regression verification; no server-side code changes are planned.
 
 Commits are intentionally omitted from task steps because this repository instructs agents not to commit unless explicitly requested.

@@ -209,7 +209,7 @@ components:
 
 ## Overview
 
-ClinicFlow uses the **Neon Aqua Clinical** system. It should feel cool, clean, and modern: white and ice-cyan surfaces, deep teal text, electric aqua calls to action, and subtle cyan glow accents inspired by illuminated desk/setup imagery. The result should be bright and distinctive without turning operational clinic screens into a gaming interface.
+KliniAssist uses the **Neon Aqua Clinical** system. It should feel cool, clean, and modern: white and ice-cyan surfaces, deep teal text, electric aqua calls to action, and subtle cyan glow accents inspired by illuminated desk/setup imagery. The result should be bright and distinctive without turning operational clinic screens into a gaming interface.
 
 The design is implemented through Django templates, Tailwind utility classes, and the canonical `cf-*` CSS layer in `static/css/clinicflow.css`. Prefer existing component classes before adding new utilities.
 

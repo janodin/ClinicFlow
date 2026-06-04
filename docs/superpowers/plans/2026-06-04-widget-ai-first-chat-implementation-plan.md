@@ -441,7 +441,7 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
 
 def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmation():
     source = SOURCE.read_text(encoding="utf-8")
-    agent_start = source.index("name: 'ClinicFlow Shared AI Agent'")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
     agent_end = source.index("const prepareSharedFallback")
     agent_block = source[agent_start:agent_end]
 
@@ -462,7 +462,7 @@ Run:
 .\env\Scripts\activate; if ($?) { python -m pytest tests/test_n8n_combined_bridge_source.py -q }
 ```
 
-Expected: PASS. The current workflow source already contains the widget webhook/context path, the shared `Shared AI Input -> Resolve Assistant Mode -> ClinicFlow Shared AI Agent` downstream path, widget tool URLs, tenant identity injection, and the explicit-confirmation prompt.
+Expected: PASS. The current workflow source already contains the widget webhook/context path, the shared `Shared AI Input -> Resolve Assistant Mode -> KliniAssist Shared AI Agent` downstream path, widget tool URLs, tenant identity injection, and the explicit-confirmation prompt.
 
 - [ ] **Step 3: Commit Task 4**
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Do not commit unless the user explicitly requests it.
 
-**Goal:** Repaint ClinicFlow from the current indigo/navy design system to the approved neon aqua clinical theme across CSS, docs, widget defaults, emails, calendar colors, and tests.
+**Goal:** Repaint KliniAssist from the current indigo/navy design system to the approved neon aqua clinical theme across CSS, docs, widget defaults, emails, calendar colors, and tests.
 
 **Architecture:** Keep the existing Django template and Tailwind CDN architecture unchanged. Centralize the visual change in `static/css/clinicflow.css` tokens and update only hardcoded color defaults/assertions that bypass those tokens.
 

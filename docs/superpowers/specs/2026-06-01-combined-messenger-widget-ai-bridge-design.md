@@ -2,7 +2,7 @@
 
 ## Goal
 
-Simplify the active `ClinicFlow Messenger + Widget AI Bridge` n8n workflow so Messenger and website widget AI share one AI Agent, one model node, one memory node, and one set of booking tools. Clinic admins or operators should only need to configure the model once while Messenger and Widget keep their channel-specific input and reply behavior.
+Simplify the active `KliniAssist Messenger + Widget AI Bridge` n8n workflow so Messenger and website widget AI share one AI Agent, one model node, one memory node, and one set of booking tools. Clinic admins or operators should only need to configure the model once while Messenger and Widget keep their channel-specific input and reply behavior.
 
 ## Current State
 

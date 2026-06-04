@@ -1501,8 +1501,7 @@ def test_service_row_toggle_button_uses_stateful_action_styles():
 def test_archived_service_row_has_guarded_delete_confirmation():
     template = partial_text("service_row.html")
 
-    active_branch_start = template.index("{% if not service.is_archived %}")
-    archived_start = template.index("{% else %}", active_branch_start)
+    archived_start = template.index("dashboard:restore_service")
     archived_block = template[archived_start:]
 
     assert "dashboard:delete_service" in archived_block

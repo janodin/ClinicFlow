@@ -8,7 +8,7 @@ Patients should be able to manage future appointments without logging in, as lon
 
 ## Current State
 
-ClinicFlow already has appointment booking safeguards in Django:
+KliniAssist already has appointment booking safeguards in Django:
 
 - Public and AI booking use `_process_guest_booking()` in `widget.views`, which validates guest identity, locks the clinic row, verifies active services, regenerates available slots, matches patients by normalized phone, and prevents double booking.
 - Staff dashboard cancellation and rescheduling already exist in `dashboard.views`, using clinic-scoped appointment lookups and slot validation.

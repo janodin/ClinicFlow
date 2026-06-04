@@ -25,7 +25,7 @@ EMAIL_PORT=587
 EMAIL_HOST_USER=your-smtp-username
 EMAIL_HOST_PASSWORD=your-smtp-password
 EMAIL_USE_TLS=1
-DEFAULT_FROM_EMAIL=ClinicFlow <noreply@your-domain.com>
+DEFAULT_FROM_EMAIL=KliniAssist <noreply@your-domain.com>
 ```
 
 - `EMAIL_BACKEND` — Use `django.core.mail.backends.smtp.EmailBackend` for SMTP.

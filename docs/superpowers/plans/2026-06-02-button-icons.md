@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add supplemental Lucide icons to all labeled ClinicFlow `cf-btn` controls across dashboard, auth, booking, and widget templates.
+**Goal:** Add supplemental Lucide icons to all labeled KliniAssist `cf-btn` controls across dashboard, auth, booking, and widget templates.
 
 **Architecture:** This is a template-only enhancement. Keep existing `cf-btn` CSS, labels, URLs, form methods, HTMX attributes, Alpine hooks, DOM IDs, and icon-only controls unchanged; insert semantic `<i data-lucide="..." class="h-4 w-4"></i>` elements before button text.
 
