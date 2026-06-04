@@ -465,7 +465,7 @@ const sharedConversationMemory = memory({
     position: [1664, 1040],
     parameters: {
       sessionIdType: 'customKey',
-      sessionKey: expr('{{ $("Shared AI Input").item.json.session_key + ":shared:v1" }}'),
+      sessionKey: expr('{{ $("Shared AI Input").item.json.session_key + ":shared:v2:" + ($("Shared AI Input").item.json.context?.ai?.settings_updated_at || "unversioned") }}'),
       contextWindowLength: 8,
     },
   },

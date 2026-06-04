@@ -24,6 +24,7 @@
       {% csrf_token %}
       <input type="hidden" name="_form" value="ai_settings">
       <textarea id="default-ai-prompt-value" class="hidden" aria-hidden="true">{{ default_ai_prompt }}</textarea>
+      <textarea id="default-ai-fallback-message-value" class="hidden" aria-hidden="true">{{ default_ai_fallback_message }}</textarea>
 
       <div>
         <label class="flex items-center gap-2 cursor-pointer">
@@ -89,7 +90,16 @@
       </div>
 
       <div class="cf-field">
-        <label class="cf-label" for="{{ ai_form.fallback_message.id_for_label }}">{{ ai_form.fallback_message.label }}</label>
+        <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <label class="cf-label" for="{{ ai_form.fallback_message.id_for_label }}">{{ ai_form.fallback_message.label }}</label>
+          <button
+            type="button"
+            class="cf-btn cf-btn-secondary cf-btn-sm"
+            @click="const field = document.getElementById('{{ ai_form.fallback_message.id_for_label }}'); const source = document.getElementById('default-ai-fallback-message-value'); if (field && source) { field.value = source.value; field.focus(); }"
+          >
+            <i data-lucide="rotate-ccw" class="h-4 w-4"></i> Restore default fallback
+          </button>
+        </div>
         {{ ai_form.fallback_message }}
         <p class="mt-1 text-xs text-[var(--cf-muted)]">Shown in both channels when AI replies are disabled or unavailable.</p>
         {% if ai_form.fallback_message.errors %}

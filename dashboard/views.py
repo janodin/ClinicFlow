@@ -21,7 +21,7 @@ from appointments.models import Appointment
 from clinics.forms import ClinicFAQForm, ClinicSettingsForm, SharedAISettingsForm, WidgetSettingsForm
 from clinics.models import Clinic, ClinicAISettings, ClinicMembership
 from clinics.tenant import current_clinic, get_active_membership, user_can_manage_daily_ops, user_can_manage_settings
-from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from scheduling.models import ClinicBusinessHour, UnavailableDate
 from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots, get_working_window, validate_slot
@@ -1133,6 +1133,7 @@ def _assistant_settings_context(request, clinic, *, widget_form=None, ai_form=No
         "iframe_url": iframe_url,
         "script_url": script_url,
         "default_ai_prompt": DEFAULT_MESSENGER_AI_PROMPT,
+        "default_ai_fallback_message": DEFAULT_AI_FALLBACK_MESSAGE,
     }
 
 

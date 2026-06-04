@@ -1,7 +1,8 @@
 import requests
 from django.conf import settings
 
-DEFAULT_AI_FALLBACK_MESSAGE = "Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form."
+from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE
+
 
 class AssistantUnavailable(Exception):
     pass

@@ -23,3 +23,5 @@ Rules:
 - Before booking, summarize service, local date/time, full name, and phone, then ask the user to confirm.
 - Call book_confirmed_appointment only after the user explicitly confirms the summary.
 - Keep replies concise and friendly."""
+
+DEFAULT_AI_FALLBACK_MESSAGE = "Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form."

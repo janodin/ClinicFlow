@@ -417,6 +417,48 @@ class WidgetTests(TestCase):
         appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Jane Doe")
         self.assertEqual(appt.source, Appointment.SOURCE_EMBED)
 
+    def test_widget_booking_respects_reason_field_setting_on_submit(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slots = generate_slots(self.clinic, self.service, tomorrow)
+
+        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=False)
+        hidden_resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slots[0]["starts_at"].isoformat(),
+                "full_name": "Hidden Reason",
+                "phone": "09171111111",
+                "email": "hidden@example.com",
+                "reason": "Private symptoms",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(hidden_resp.status_code, 200)
+        hidden_appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Hidden Reason")
+        self.assertEqual(hidden_appt.reason, "")
+        self.assertEqual(hidden_appt.patient.notes, "")
+
+        Clinic.objects.filter(pk=self.clinic.pk).update(show_reason_field=True)
+        visible_resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slots[1]["starts_at"].isoformat(),
+                "full_name": "Visible Reason",
+                "phone": "09172222222",
+                "email": "visible@example.com",
+                "reason": "Knee pain",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(visible_resp.status_code, 200)
+        visible_appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Visible Reason")
+        self.assertEqual(visible_appt.reason, "Knee pain")
+        self.assertEqual(visible_appt.patient.notes, "Knee pain")
+
     def test_widget_booking_rejects_blank_identity(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
         slot = generate_slots(self.clinic, self.service, tomorrow)[0]
@@ -668,6 +710,8 @@ class WidgetTests(TestCase):
 
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="", N8N_WEBHOOK_SECRET="secret")
     def test_chat_step_returns_default_fallback_when_webhook_missing(self):
+        from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE
+
         ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True, fallback_message="")
 
         response = self.client.post(
@@ -678,5 +722,5 @@ class WidgetTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["state"], "ai")
-        self.assertIn("assistant is unavailable", data["message"])
+        self.assertIn(DEFAULT_AI_FALLBACK_MESSAGE, data["message"])
         self.assertEqual(data["options"], [])

@@ -683,7 +683,7 @@ def test_calendar_reschedule_accepts_utc_iso_string(calendar_setup, client):
 @pytest.mark.django_db
 def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, client):
     from clinics.models import ClinicAISettings
-    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+    from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 
     clinic, service, user = clinic_setup
     ClinicAISettings.objects.create(
@@ -706,7 +706,9 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
     assert b'name="instructions"' in response.content
     assert b'name="fallback_message"' in response.content
     assert b"Restore default prompt" in response.content
+    assert b"Restore default fallback" in response.content
     assert DEFAULT_MESSENGER_AI_PROMPT.splitlines()[0].encode() in response.content
+    assert DEFAULT_AI_FALLBACK_MESSAGE.encode() in response.content
     assert b"Use a warm clinic tone." in response.content
     assert b"Please call the clinic." in response.content
     assert b"Website Booking Widget" in response.content
@@ -716,7 +718,7 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
 @pytest.mark.django_db
 def test_assistant_settings_page_creates_default_shared_ai_settings(clinic_setup, client):
     from clinics.models import ClinicAISettings
-    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+    from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 
     clinic, service, user = clinic_setup
     client.force_login(user)
@@ -726,7 +728,9 @@ def test_assistant_settings_page_creates_default_shared_ai_settings(clinic_setup
     assert response.status_code == 200
     assert b"Shared Assistant Settings" in response.content
     assert DEFAULT_MESSENGER_AI_PROMPT.splitlines()[0].encode() in response.content
-    assert ClinicAISettings.objects.filter(clinic=clinic).exists()
+    assert DEFAULT_AI_FALLBACK_MESSAGE.encode() in response.content
+    settings = ClinicAISettings.objects.get(clinic=clinic)
+    assert settings.fallback_message == DEFAULT_AI_FALLBACK_MESSAGE
 
 
 @pytest.mark.django_db
@@ -1359,6 +1363,43 @@ def test_widget_settings_form_excludes_unused_behavior_instructions(clinic_setup
     form = WidgetSettingsForm(instance=clinic)
 
     assert "widget_behavior_instructions" not in form.fields
+
+
+@pytest.mark.django_db
+def test_owner_can_save_widget_reason_field_setting_from_assistant_page(clinic_setup, client):
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("dashboard:assistant_settings"),
+        {
+            "_form": "widget_settings",
+            "widget_accent_color": clinic.widget_accent_color,
+            "widget_welcome_message": "Welcome to the clinic.",
+        },
+    )
+
+    assert response.status_code == 302
+    clinic.refresh_from_db()
+    assert clinic.show_reason_field is False
+    widget_response = client.get(reverse("widget:home", args=[clinic.slug]))
+    assert b'name="reason"' not in widget_response.content
+
+    response = client.post(
+        reverse("dashboard:assistant_settings"),
+        {
+            "_form": "widget_settings",
+            "widget_accent_color": clinic.widget_accent_color,
+            "widget_welcome_message": "Welcome to the clinic.",
+            "show_reason_field": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    clinic.refresh_from_db()
+    assert clinic.show_reason_field is True
+    widget_response = client.get(reverse("widget:home", args=[clinic.slug]))
+    assert b'name="reason"' in widget_response.content
 
 
 @pytest.mark.django_db

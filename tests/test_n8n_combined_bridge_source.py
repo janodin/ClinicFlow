@@ -75,6 +75,16 @@ def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmati
     assert "/messenger/ai/widget/book/" in source
 
 
+def test_combined_bridge_memory_key_changes_when_ai_settings_change():
+    source = SOURCE.read_text(encoding="utf-8")
+    memory_start = source.index("name: 'Shared Conversation Memory'")
+    memory_end = source.index("const matchServicesTool")
+    memory_block = source[memory_start:memory_end]
+
+    assert 'context?.ai?.settings_updated_at' in memory_block
+    assert ':shared:v2:' in memory_block
+
+
 def test_channel_reply_code_preserves_regex_escapes_for_n8n():
     source = SOURCE.read_text(encoding="utf-8")
 

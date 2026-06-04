@@ -1154,7 +1154,7 @@ def test_messenger_ai_settings_defaults_and_unique_connection():
 @pytest.mark.django_db
 def test_clinic_ai_settings_defaults_and_unique_clinic():
     from clinics.models import ClinicAISettings
-    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+    from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 
     clinic, connection = _create_messenger_clinic("owner_clinic_ai_defaults", "PAGE-CLINIC-AI")
     settings = ClinicAISettings.objects.create(clinic=clinic)
@@ -1164,7 +1164,7 @@ def test_clinic_ai_settings_defaults_and_unique_clinic():
     assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
     assert settings.safe_messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
     assert settings.instructions == DEFAULT_MESSENGER_AI_PROMPT
-    assert settings.fallback_message == ""
+    assert settings.fallback_message == DEFAULT_AI_FALLBACK_MESSAGE
     assert str(settings) == f"ClinicAISettings({clinic.name})"
 
     with pytest.raises(IntegrityError):
@@ -1207,7 +1207,7 @@ def test_clinic_ai_settings_manager_copies_messenger_values():
 @pytest.mark.django_db
 def test_build_ai_context_uses_default_prompt_when_settings_missing():
     from messenger.ai_tools import build_ai_context
-    from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+    from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 
     _clinic, _connection = _create_messenger_clinic("owner_ai_default_context", "PAGEAI_DEFAULT")
 
@@ -1215,6 +1215,7 @@ def test_build_ai_context_uses_default_prompt_when_settings_missing():
 
     assert result["found"] is True
     assert result["ai"]["instructions"] == DEFAULT_MESSENGER_AI_PROMPT
+    assert result["ai"]["fallback_message"] == DEFAULT_AI_FALLBACK_MESSAGE
 
 
 @pytest.mark.django_db
@@ -1313,6 +1314,26 @@ def test_build_widget_ai_context_uses_shared_clinic_settings():
     assert context["ai"]["fallback_message"] == "Shared fallback."
     assert context["services"][0]["name"] == "Checkup"
     assert context["faqs"][0]["question"] == "Hours?"
+
+
+@pytest.mark.django_db
+def test_ai_contexts_expose_settings_timestamp_for_memory_versioning():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context, build_widget_ai_context
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_memory_version", "PAGE-AI-MEMORY-VERSION")
+    settings = ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        instructions="Always reply I am not interested.",
+    )
+
+    messenger_context = build_ai_context("PAGE-AI-MEMORY-VERSION")
+    widget_context = build_widget_ai_context(clinic.slug)
+
+    assert messenger_context["ai"]["settings_updated_at"] == settings.updated_at.isoformat()
+    assert widget_context["ai"]["settings_updated_at"] == settings.updated_at.isoformat()
 
 
 @pytest.mark.django_db

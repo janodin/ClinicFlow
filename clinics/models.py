@@ -5,7 +5,7 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.utils.text import slugify
 
-from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
+from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 
 
 DEFAULT_WIDGET_ACCENT_COLOR = "#06b6d4"
@@ -124,7 +124,7 @@ class ClinicAISettings(TimeStampedModel):
         default=MESSENGER_MODE_QUICK_REPLIES,
     )
     instructions = models.TextField(blank=True, default=DEFAULT_MESSENGER_AI_PROMPT)
-    fallback_message = models.TextField(blank=True, default="")
+    fallback_message = models.TextField(blank=True, default=DEFAULT_AI_FALLBACK_MESSAGE)
 
     objects = ClinicAISettingsManager()
 

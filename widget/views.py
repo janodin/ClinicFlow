@@ -142,6 +142,8 @@ def _process_guest_booking(clinic, data, source):
         locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
         if locked_clinic.requires_onboarding or not locked_clinic.is_active:
             return None, "Online booking is not available for this clinic yet."
+        if not locked_clinic.show_reason_field:
+            reason = ""
         service = locked_clinic.services.filter(is_active=True, is_archived=False, pk=data.get("service")).first()
         if service is None:
             return None, "Please choose a valid service."

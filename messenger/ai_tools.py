@@ -9,10 +9,8 @@ from clinics.models import Clinic, ClinicAISettings
 from scheduling.utils import generate_slots
 from widget.views import _process_guest_booking
 
-from .defaults import DEFAULT_MESSENGER_AI_PROMPT
+from .defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 from .models import MessengerConnection
-
-DEFAULT_AI_FALLBACK_MESSAGE = "Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form."
 
 
 def get_or_create_clinic_ai_settings(clinic):
@@ -33,6 +31,7 @@ def _ai_payload_for_clinic(clinic):
         "messenger_response_mode": ai_settings.safe_messenger_response_mode,
         "instructions": ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT,
         "fallback_message": ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE,
+        "settings_updated_at": ai_settings.updated_at.isoformat(),
     }
 
 
