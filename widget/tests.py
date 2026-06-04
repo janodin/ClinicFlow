@@ -259,6 +259,70 @@ class WidgetTests(TestCase):
         self.assertNotIn("Book an appointment</button>", content)
         self.assertNotIn("Ask about services</button>", content)
 
+    def test_widget_chat_scrolls_conversation_container_after_ai_reply(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        conversation_start = content.index("<!-- Conversation -->")
+        conversation_end = content.index("<!-- FAQs -->", conversation_start)
+        conversation_markup = content[conversation_start:conversation_end]
+        self.assertIn('x-ref="chatConversation"', conversation_markup)
+
+        send_chat_start = content.index("async sendChatAction(")
+        send_chat_end = content.index("selectChatOption", send_chat_start)
+        send_chat_block = content[send_chat_start:send_chat_end]
+        scroll_helper_start = content.index("scrollChatConversation() {")
+        scroll_helper_end = content.index("async sendChatAction(", scroll_helper_start)
+        scroll_helper_block = content[scroll_helper_start:scroll_helper_end]
+
+        self.assertIn("this.scrollChatConversation();", send_chat_block)
+        self.assertIn("const container = this.$refs.chatConversation;", scroll_helper_block)
+        self.assertIn("container.scrollTop = container.scrollHeight;", scroll_helper_block)
+        self.assertNotIn("querySelector('.flex-1.overflow-y-auto')", scroll_helper_block)
+
+    def test_widget_chat_renders_assistant_typing_indicator_inside_conversation(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        conversation_start = content.index("<!-- Conversation -->")
+        conversation_end = content.index("<!-- FAQs -->", conversation_start)
+        conversation_markup = content[conversation_start:conversation_end]
+
+        self.assertIn('x-show="isAssistantTyping"', conversation_markup)
+        self.assertIn('role="status"', conversation_markup)
+        self.assertIn('aria-live="polite"', conversation_markup)
+        self.assertIn("Assistant is typing", conversation_markup)
+        self.assertIn("animate-bounce", conversation_markup)
+
+    def test_widget_chat_toggles_typing_indicator_around_ai_fetch(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        self.assertIn("isAssistantTyping: false,", content)
+
+        go_home_start = content.index("goHome() {")
+        go_home_end = content.index("minimize()", go_home_start)
+        go_home_block = content[go_home_start:go_home_end]
+        self.assertIn("this.isAssistantTyping = false;", go_home_block)
+
+        send_chat_start = content.index("async sendChatAction(")
+        send_chat_end = content.index("selectChatOption", send_chat_start)
+        send_chat_block = content[send_chat_start:send_chat_end]
+
+        self.assertIn("this.isAssistantTyping = true;", send_chat_block)
+        self.assertIn("try {", send_chat_block)
+        self.assertIn("finally {", send_chat_block)
+        self.assertIn("this.isAssistantTyping = false;", send_chat_block)
+        self.assertLess(
+            send_chat_block.index("this.isAssistantTyping = true;"),
+            send_chat_block.index("const resp = await fetch"),
+        )
+        self.assertLess(
+            send_chat_block.index("finally {"),
+            send_chat_block.rindex("this.isAssistantTyping = false;"),
+        )
+        self.assertIn("this.scrollChatConversation();", send_chat_block)
+
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
     def test_chat_step_ai_init_does_not_return_quick_button_options(self, mock_post):

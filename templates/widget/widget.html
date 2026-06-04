@@ -125,7 +125,7 @@
         </div>
 
         <!-- Conversation -->
-        <div x-show="chatTab==='conversation'" class="flex-1 overflow-y-auto space-y-3 pr-1">
+        <div x-show="chatTab==='conversation'" x-ref="chatConversation" class="flex-1 overflow-y-auto space-y-3 pr-1">
           <template x-for="msg in chatHistory" :key="msg.id">
             <div class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
               <div class="max-w-[85%] break-words rounded-2xl px-4 py-2.5 text-sm" :class="msg.role === 'user' ? '' : 'border border-[var(--cf-line)] bg-white text-[var(--cf-ink)]'" :style="msg.role === 'user' ? 'background-color:' + accentColor + '; color:' + accentForeground() : ''">
@@ -133,6 +133,17 @@
               </div>
             </div>
           </template>
+
+          <div x-show="isAssistantTyping" class="flex justify-start" role="status" aria-live="polite">
+            <div class="max-w-[85%] rounded-2xl border border-[var(--cf-line)] bg-white px-4 py-3 text-sm text-[var(--cf-ink)]">
+              <span class="sr-only">Assistant is typing</span>
+              <span class="inline-flex items-center gap-1" aria-hidden="true">
+                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--cf-muted)]"></span>
+                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--cf-muted)] [animation-delay:120ms]"></span>
+                <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--cf-muted)] [animation-delay:240ms]"></span>
+              </span>
+            </div>
+          </div>
 
           <div x-show="chatOptions.length" class="flex flex-wrap gap-2">
             <template x-for="opt in chatOptions" :key="opt.value">
@@ -190,6 +201,7 @@
       chatOptions: [],
       chatState: 'greeting',
       chatInput: '',
+      isAssistantTyping: false,
       faqQuery: '',
       faqs: [
         {% for faq in faqs %}
@@ -257,6 +269,7 @@
         this.chatOptions = [];
         this.chatState = 'greeting';
         this.chatInput = '';
+        this.isAssistantTyping = false;
         this.faqQuery = '';
         this.collectInfo = { full_name: '', phone: '', email: '' };
       },
@@ -272,6 +285,12 @@
           this.sendChatAction('init');
         }
       },
+      scrollChatConversation() {
+        this.$nextTick(() => {
+          const container = this.$refs.chatConversation;
+          if (container) container.scrollTop = container.scrollHeight;
+        });
+      },
       async sendChatAction(action, value, extra) {
         const stateResetVersion = this.stateResetVersion;
         const formData = new FormData();
@@ -282,22 +301,27 @@
           if (extra.phone) formData.append('phone', extra.phone);
           if (extra.email) formData.append('email', extra.email);
         }
-        const resp = await fetch('{% url "widget:chat_step" clinic.slug %}', {
-          method: 'POST',
-          body: formData,
-          headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
-        });
-        const data = await resp.json();
-        if (stateResetVersion !== this.stateResetVersion) return;
-        this.chatState = data.state;
-        this.chatOptions = data.options || [];
-        if (data.message) {
-          this.chatHistory.push({id: this.nextId++, role: 'assistant', text: data.message});
+        this.isAssistantTyping = true;
+        this.scrollChatConversation();
+        try {
+          const resp = await fetch('{% url "widget:chat_step" clinic.slug %}', {
+            method: 'POST',
+            body: formData,
+            headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
+          });
+          const data = await resp.json();
+          if (stateResetVersion !== this.stateResetVersion) return;
+          this.chatState = data.state;
+          this.chatOptions = data.options || [];
+          if (data.message) {
+            this.chatHistory.push({id: this.nextId++, role: 'assistant', text: data.message});
+          }
+        } finally {
+          if (stateResetVersion === this.stateResetVersion) {
+            this.isAssistantTyping = false;
+            this.scrollChatConversation();
+          }
         }
-        this.$nextTick(() => {
-          const container = this.$el.querySelector('.flex-1.overflow-y-auto');
-          if (container) container.scrollTop = container.scrollHeight;
-        });
       },
       selectChatOption(opt) {
         this.chatHistory.push({id: this.nextId++, role: 'user', text: opt.label});
