@@ -302,7 +302,7 @@ const getMessengerClinicContext = node({
       jsonBody: expr('{{ { page_id: $("Normalize Messenger Request").item.json.page_id } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ found: true, page_id: 'PAGE123', page_token: 'PAGE_TOKEN', clinic: { id: 1, name: 'Demo Clinic', timezone: 'Asia/Manila' }, current_time: { timezone: 'Asia/Manila', now: '2026-06-01T09:00:00+08:00', today: '2026-06-01' }, ai: { is_ai_enabled: true, instructions: 'Be helpful.', fallback_message: MESSENGER_FALLBACK }, services: [], faqs: [] }],
 });
@@ -325,7 +325,7 @@ const getWidgetClinicContext = node({
       jsonBody: expr('{{ { clinic_slug: $json.clinic_slug } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ found: true, channel: 'widget', clinic: { id: 1, slug: 'demo-clinic', name: 'Demo Clinic', timezone: 'Asia/Manila' }, current_time: { timezone: 'Asia/Manila', now: '2026-06-01T09:00:00+08:00', today: '2026-06-01' }, ai: { is_ai_enabled: true, instructions: 'Be helpful.', fallback_message: WIDGET_FALLBACK }, services: [], faqs: [] }],
 });
@@ -501,7 +501,7 @@ const matchServicesTool = tool({
       options: {},
       optimizeResponse: true,
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ found: true, matches: [] }],
 });
