@@ -25,7 +25,7 @@ class SignUpForm(forms.Form):
     password = forms.CharField(widget=forms.PasswordInput(attrs={"class": _INPUT, "placeholder": "Create a password"}), min_length=8)
     password_confirm = forms.CharField(label="Confirm password", widget=forms.PasswordInput(attrs={"class": _INPUT, "placeholder": "Confirm your password"}))
     terms_accepted = forms.BooleanField(
-        label="I agree to ClinicFlow's terms and privacy policy.",
+        label="I agree to KliniAssist's terms and privacy policy.",
         error_messages={"required": "You must accept the terms and privacy policy."},
         widget=forms.CheckboxInput(attrs={"class": "cf-checkbox"}),
     )

@@ -185,7 +185,7 @@ const verifyMetaSignature = node({
       jsonBody: expr('{{ { page_id: $json.page_id, raw_body: $json.raw_body, signature: $json.signature } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ verified: true }],
 });
@@ -588,7 +588,7 @@ const getMessengerQuickReplies = node({
       jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, text: $json.message, postback: $json.postback || "" } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }], page_token: 'PAGE_TOKEN' }],
 });

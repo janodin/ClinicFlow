@@ -1,6 +1,8 @@
+import json
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -232,6 +234,10 @@ class ServiceTests(TestCase):
         response = self.client.post(url)
 
         self.assertEqual(response.status_code, 302)
+        self.assertIn(
+            "Archive this service before deleting it permanently.",
+            [message.message for message in get_messages(response.wsgi_request)],
+        )
         self.service.refresh_from_db()
         self.assertFalse(self.service.is_archived)
 
@@ -252,6 +258,10 @@ class ServiceTests(TestCase):
         response = self.client.post(url)
 
         self.assertEqual(response.status_code, 302)
+        self.assertIn(
+            "Services with appointment history cannot be deleted. Keep it archived for records.",
+            [message.message for message in get_messages(response.wsgi_request)],
+        )
         self.assertTrue(Service.objects.filter(pk=self.service.pk).exists())
 
     def test_delete_service_requires_post(self):
@@ -273,7 +283,10 @@ class ServiceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["HX-Retarget"], "#services-list-container")
-        self.assertIn("Service deleted.", response.headers["HX-Trigger"])
+        self.assertEqual(response.headers["HX-Reswap"], "innerHTML")
+        hx_trigger = json.loads(response.headers["HX-Trigger"])
+        self.assertIn("toast-message", hx_trigger)
+        self.assertEqual(hx_trigger["toast-message"]["message"], "Service deleted.")
         self.assertFalse(Service.objects.filter(pk=self.service.pk).exists())
 
     def test_create_service_duplicate_name_rejected(self):

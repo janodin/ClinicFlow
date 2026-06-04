@@ -49,6 +49,28 @@ def source_text(relative_path):
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def test_visible_brand_copy_uses_kliniassist():
+    brand_files = [
+        "config/settings.py",
+        "accounts/forms.py",
+        "clinics/forms.py",
+        "templates/base.html",
+        "templates/accounts/login.html",
+        "templates/accounts/signup.html",
+        "templates/accounts/onboarding.html",
+        "templates/dashboard/base.html",
+        "templates/dashboard/assistant_settings.html",
+        "templates/privacy_policy.html",
+        "templates/widget/widget.html",
+        "templates/emails/base_email.html",
+    ]
+
+    combined = "\n".join(source_text(path) for path in brand_files)
+
+    assert "KliniAssist" in combined
+    assert "ClinicFlow" not in combined
+
+
 def div_block_containing(template, marker):
     marker_index = template.index(marker)
     start = template.rfind("<div", 0, marker_index)
@@ -1486,6 +1508,8 @@ def test_archived_service_row_has_guarded_delete_confirmation():
     assert "cf-btn cf-btn-xs cf-btn-danger" in archived_block
     assert "csrf_token" in archived_block
     assert "hx-post=\"{% url 'dashboard:delete_service' service.id %}\"" in archived_block
+    assert "hx-target=\"#services-list-container\"" in archived_block
+    assert "hx-swap=\"innerHTML\"" in archived_block
     assert "href=\"{% url 'dashboard:delete_service'" not in template
 
 

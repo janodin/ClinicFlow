@@ -77,7 +77,7 @@ class SharedAISettingsForm(forms.ModelForm):
             "fallback_message": "Fallback message",
         }
         help_texts = {
-            "instructions": "Used by the website Assistant and Messenger AI mode. Services, prices, and availability still come from ClinicFlow.",
+            "instructions": "Used by the website Assistant and Messenger AI mode. Services, prices, and availability still come from KliniAssist.",
             "fallback_message": "Shown when AI replies are disabled or unavailable.",
         }
 

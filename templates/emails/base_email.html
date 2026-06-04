@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block email_title %}ClinicFlow{% endblock %}</title>
+  <title>{% block email_title %}KliniAssist{% endblock %}</title>
   <style>
     body { margin: 0; padding: 0; background: #f0fdff; color: #083344; font-family: Arial, sans-serif; }
     .wrapper { width: 100%; background: #f0fdff; padding: 24px 0; }
@@ -22,13 +22,13 @@
   <div class="wrapper">
     <div class="container">
       <div class="header">
-        <h1>{{ clinic_name|default:"ClinicFlow" }}</h1>
+        <h1>{{ clinic_name|default:"KliniAssist" }}</h1>
       </div>
       <div class="content">
         {% block content %}{% endblock %}
       </div>
       <div class="footer">
-        Sent by ClinicFlow &middot; This is an automated message.
+        Sent by KliniAssist &middot; This is an automated message.
       </div>
     </div>
   </div>

@@ -191,7 +191,7 @@ EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "1") == "1"
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Clinic Booking <noreply@example.com>")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
-APP_NAME = os.getenv("APP_NAME", "ClinicFlow")
+APP_NAME = os.getenv("APP_NAME", "KliniAssist")
 
 MESSENGER_VERIFY_TOKEN = os.getenv("MESSENGER_VERIFY_TOKEN", "dev-messenger-verify-token" if DEBUG else "")
 MESSENGER_APP_SECRET = os.getenv("MESSENGER_APP_SECRET", "")
