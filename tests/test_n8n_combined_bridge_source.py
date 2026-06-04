@@ -28,6 +28,34 @@ def test_combined_bridge_tools_inject_tenant_identity_from_shared_context():
     assert "/messenger/ai/widget/book/" in source
 
 
+def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
+    source = SOURCE.read_text(encoding="utf-8")
+
+    assert "name: 'Widget Assistant Webhook'" in source
+    assert "name: 'Get Widget Clinic Context'" in source
+    assert "/messenger/ai/widget/context/" in source
+    assert ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)" in source
+    assert ".to(sharedAiInput)\n      .to(resolveAssistantMode)" in source
+    assert ".onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in source
+    assert ".onCase(1, returnWidgetReply)" in source
+    assert "clinic_slug: expr('{{ $(\"Shared AI Input\").item.json.channel === \"widget\" ? $(\"Shared AI Input\").item.json.clinic_slug : \"\" }}')" in source
+
+
+def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmation():
+    source = SOURCE.read_text(encoding="utf-8")
+    agent_start = source.index("name: 'ClinicFlow Shared AI Agent'")
+    agent_end = source.index("const prepareSharedFallback")
+    agent_block = source[agent_start:agent_end]
+
+    assert "Use match_services, check_availability, and book_confirmed_appointment for booking." in agent_block
+    assert "Ask for explicit confirmation before booking." in agent_block
+    assert "Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation." in agent_block
+    assert "Widget replies must be concise and friendly." in agent_block
+    assert "/messenger/ai/widget/services/" in source
+    assert "/messenger/ai/widget/availability/" in source
+    assert "/messenger/ai/widget/book/" in source
+
+
 def test_channel_reply_code_preserves_regex_escapes_for_n8n():
     source = SOURCE.read_text(encoding="utf-8")
 
