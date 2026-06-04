@@ -289,6 +289,26 @@ class WidgetTests(TestCase):
         self.assertFalse(Patient.objects.filter(clinic=self.clinic).exists())
         self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
 
+    def test_widget_booking_rejects_invalid_email(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Invalid Email",
+                "phone": "09170001111",
+                "email": "not-an-email",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertFalse(Patient.objects.filter(clinic=self.clinic).exists())
+        self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
+
     def test_widget_booking_does_not_overwrite_existing_patient_by_phone(self):
         patient = Patient.objects.create(
             clinic=self.clinic,
