@@ -531,7 +531,7 @@ const checkAvailabilityTool = tool({
       options: {},
       optimizeResponse: true,
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ found: true, available: true, alternatives: [] }],
 });
@@ -565,7 +565,7 @@ const bookConfirmedAppointmentTool = tool({
       options: {},
       optimizeResponse: true,
     },
-    credentials: { httpHeaderAuth: newCredential('ClinicFlow N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ created: false, error: 'Appointment creation requires explicit user confirmation.' }],
 });
@@ -634,13 +634,13 @@ const clinicFlowSharedAiAgent = node({
   type: '@n8n/n8n-nodes-langchain.agent',
   version: 3.1,
   config: {
-    name: 'ClinicFlow Shared AI Agent',
+    name: 'KliniAssist Shared AI Agent',
     position: [1744, 720],
     parameters: {
       promptType: 'define',
       text: expr('{{ $("Shared AI Input").item.json.message }}'),
       options: {
-        systemMessage: expr('ClinicFlow shared Messenger and Widget assistant.\n\n' +
+        systemMessage: expr('KliniAssist shared Messenger and Widget assistant.\n\n' +
           'Clinic instructions:\n{{ $("Shared AI Input").item.json.context?.ai?.instructions || "No custom clinic instructions configured." }}\n\n' +
           'Channel: {{ $("Shared AI Input").item.json.channel }}\n' +
           'Clinic context JSON:\n{{ JSON.stringify($("Shared AI Input").item.json.context || {}) }}\n\n' +
@@ -789,7 +789,7 @@ const returnWidgetReply = node({
   output: [{ reply: 'Assistant reply' }],
 });
 
-export default workflow('ZTBqwEzdll6TZsUU', 'ClinicFlow Messenger + Widget AI Bridge')
+export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI Bridge')
   .add(metaWebhookVerification)
   .to(verifyMetaChallenge)
   .to(returnVerificationResponse)
