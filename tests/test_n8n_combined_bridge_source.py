@@ -18,6 +18,14 @@ def test_combined_bridge_uses_one_shared_ai_core():
 
 def test_combined_bridge_tools_inject_tenant_identity_from_shared_context():
     source = SOURCE.read_text(encoding="utf-8")
+    widget_clinic_slug_expression = "clinic_slug: expr('{{ $(\"Shared AI Input\").item.json.channel === \"widget\" ? $(\"Shared AI Input\").item.json.clinic_slug : \"\" }}')"
+    match_start = source.index("name: 'match_services'")
+    availability_start = source.index("name: 'check_availability'")
+    book_start = source.index("name: 'book_confirmed_appointment'")
+    quick_replies_start = source.index("const getMessengerQuickReplies")
+    match_services_tool_block = source[match_start:availability_start]
+    check_availability_tool_block = source[availability_start:book_start]
+    book_confirmed_appointment_tool_block = source[book_start:quick_replies_start]
 
     assert "clinic.example.com" not in source
     assert "fromAi('page_id'" not in source
@@ -26,19 +34,24 @@ def test_combined_bridge_tools_inject_tenant_identity_from_shared_context():
     assert '$("Shared AI Input").item.json.clinic_slug' in source
     assert "/messenger/ai/book/" in source
     assert "/messenger/ai/widget/book/" in source
+    assert widget_clinic_slug_expression in match_services_tool_block
+    assert widget_clinic_slug_expression in check_availability_tool_block
+    assert widget_clinic_slug_expression in book_confirmed_appointment_tool_block
 
 
 def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
     source = SOURCE.read_text(encoding="utf-8")
+    workflow_block = source[source.index("export default workflow"):]
+    widget_start = workflow_block.index(".add(widgetAssistantWebhook)")
+    widget_block = workflow_block[widget_start:]
 
     assert "name: 'Widget Assistant Webhook'" in source
     assert "name: 'Get Widget Clinic Context'" in source
     assert "/messenger/ai/widget/context/" in source
-    assert ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)" in source
-    assert ".to(sharedAiInput)\n      .to(resolveAssistantMode)" in source
-    assert ".onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in source
-    assert ".onCase(1, returnWidgetReply)" in source
-    assert "clinic_slug: expr('{{ $(\"Shared AI Input\").item.json.channel === \"widget\" ? $(\"Shared AI Input\").item.json.clinic_slug : \"\" }}')" in source
+    assert ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)" in widget_block
+    assert ".to(sharedAiInput)\n      .to(resolveAssistantMode)\n      .to(routeAssistantMode" in workflow_block
+    assert ".onCase(0, clinicFlowSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in workflow_block
+    assert ".onCase(1, returnWidgetReply)" in workflow_block
 
 
 def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmation():
