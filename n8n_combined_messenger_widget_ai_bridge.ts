@@ -11,7 +11,7 @@ import {
   expr,
 } from '@n8n/workflow-sdk';
 
-const DJANGO_BASE_URL = String(process.env.DJANGO_BASE_URL || 'https://178-105-83-211.nip.io').replace(/\/$/, '');
+const DJANGO_BASE_URL_EXPR = '($env.DJANGO_BASE_URL || "https://178-105-83-211.nip.io").replace(/\\/$/, "")';
 const N8N_WEBHOOK_CREDENTIAL_ID = 'PJHqVMwE3qU58s9E';
 const MESSENGER_FALLBACK = 'Thanks for your message. Please contact the clinic directly for help.';
 const WIDGET_FALLBACK = 'Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.';
@@ -45,7 +45,7 @@ const query = item.query || {};
 const mode = query['hub.mode'] || query.hub?.mode || '';
 const token = String(query['hub.verify_token'] || query.hub?.verify_token || '').trim();
 const challenge = query['hub.challenge'] || query.hub?.challenge || '';
-const expectedToken = String(process.env.MESSENGER_VERIFY_TOKEN || '').trim();
+const expectedToken = String('{{ $env.MESSENGER_VERIFY_TOKEN || "" }}').trim();
 if (mode === 'subscribe' && expectedToken && token === expectedToken && challenge) {
   return [{ json: { statusCode: 200, body: String(challenge) } }];
 }
@@ -175,7 +175,7 @@ const verifyMetaSignature = node({
     position: [688, 560],
     parameters: {
       method: 'POST',
-      url: `${DJANGO_BASE_URL}/messenger/meta/verify-signature/`,
+      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/meta/verify-signature/`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -292,7 +292,7 @@ const getMessengerClinicContext = node({
     position: [688, 560],
     parameters: {
       method: 'POST',
-      url: `${DJANGO_BASE_URL}/messenger/ai/context/`,
+      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/ai/context/`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -315,7 +315,7 @@ const getWidgetClinicContext = node({
     position: [688, 1040],
     parameters: {
       method: 'POST',
-      url: `${DJANGO_BASE_URL}/messenger/ai/widget/context/`,
+      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/ai/widget/context/`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -486,7 +486,7 @@ const matchServicesTool = tool({
     position: [1792, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/services/" : "${DJANGO_BASE_URL}/messenger/ai/widget/services/" }}`),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/services/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/services/") }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -514,7 +514,7 @@ const checkAvailabilityTool = tool({
     position: [1920, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/availability/" : "${DJANGO_BASE_URL}/messenger/ai/widget/availability/" }}`),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/availability/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/availability/") }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -544,7 +544,7 @@ const bookConfirmedAppointmentTool = tool({
     position: [2048, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/book/" : "${DJANGO_BASE_URL}/messenger/ai/widget/book/" }}`),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/book/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/book/") }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -578,7 +578,7 @@ const findVerifiedAppointmentTool = tool({
     position: [2176, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/appointment/lookup/" : "${DJANGO_BASE_URL}/messenger/ai/widget/appointment/lookup/" }}`),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/appointment/lookup/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/appointment/lookup/") }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -607,7 +607,7 @@ const cancelVerifiedAppointmentTool = tool({
     position: [2304, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/appointment/cancel/" : "${DJANGO_BASE_URL}/messenger/ai/widget/appointment/cancel/" }}`),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/appointment/cancel/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/appointment/cancel/") }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -638,7 +638,7 @@ const rescheduleVerifiedAppointmentTool = tool({
     position: [2432, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? "${DJANGO_BASE_URL}/messenger/ai/appointment/reschedule/" : "${DJANGO_BASE_URL}/messenger/ai/widget/appointment/reschedule/" }}`),
+      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/appointment/reschedule/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/appointment/reschedule/") }}`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -669,7 +669,7 @@ const getMessengerQuickReplies = node({
     position: [1744, 520],
     parameters: {
       method: 'POST',
-      url: `${DJANGO_BASE_URL}/messenger/n8n-webhook/`,
+      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/n8n-webhook/`),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,

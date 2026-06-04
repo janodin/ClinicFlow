@@ -33,9 +33,21 @@ def test_combined_bridge_uses_kliniassist_technical_namespace():
 def test_combined_bridge_django_base_url_can_target_local_development():
     source = SOURCE.read_text(encoding="utf-8")
 
-    assert "process.env.DJANGO_BASE_URL" in source
+    assert "process.env.DJANGO_BASE_URL" not in source
+    assert "const DJANGO_BASE_URL_EXPR" in source
+    assert "$env.DJANGO_BASE_URL" in source
     assert "https://178-105-83-211.nip.io" in source
-    assert ".replace(/\\/$/, '')" in source
+    assert ".replace(/\\\\/$/, \"\")" in source
+
+
+def test_meta_webhook_verification_uses_n8n_env_expression_not_process_env():
+    source = SOURCE.read_text(encoding="utf-8")
+    verify_start = source.index("name: 'Verify Meta Challenge'")
+    verify_end = source.index("const returnVerificationResponse")
+    verify_block = source[verify_start:verify_end]
+
+    assert "process.env.MESSENGER_VERIFY_TOKEN" not in verify_block
+    assert "{{ $env.MESSENGER_VERIFY_TOKEN || \"\" }}" in verify_block
 
 
 def test_combined_bridge_tools_inject_tenant_identity_from_shared_context():

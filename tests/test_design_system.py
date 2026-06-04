@@ -678,6 +678,17 @@ def test_outline_buttons_keep_brand_hover_state():
         assert "var(--cf-surface-warm)" not in match.group("body")
 
 
+def test_danger_buttons_are_filled_not_outline():
+    danger_button = css_rule_block(".cf-btn-danger")
+    danger_hover = css_rule_block(".cf-btn-danger:hover")
+
+    assert "border-color: var(--cf-danger);" in danger_button
+    assert "background: var(--cf-danger);" in danger_button
+    assert "color: #fff;" in danger_button
+    assert "var(--cf-danger-soft)" not in danger_button
+    assert "background: var(--cf-danger-soft);" not in danger_hover
+
+
 def test_css_contains_cards_tables_and_badges():
     css = css_text()
 
@@ -1528,6 +1539,8 @@ def test_archived_service_row_has_guarded_delete_confirmation():
 
     assert "dashboard:delete_service" in archived_block
     assert "Delete service" in archived_block
+    assert re.search(r">\s*Delete\s*</button>", archived_block)
+    assert not re.search(r"cf-btn cf-btn-xs cf-btn-danger[^>]*>.*?Delete service\s*</button>", archived_block, re.DOTALL)
     assert "This permanently deletes the service only if it has no appointment history." in archived_block
     assert "cf-btn cf-btn-xs cf-btn-danger" in archived_block
     assert "csrf_token" in archived_block
@@ -1609,20 +1622,40 @@ def test_patient_visit_history_marks_appointment_detail_source():
 def test_patient_rows_have_guarded_delete_confirmation():
     patient_list = partial_text("patient_list.html")
     patient_row = partial_text("patient_row.html")
+    table_scroll = div_block_containing(patient_list, 'class="cf-table-scroll"')
 
     for template in [patient_list, patient_row]:
-        assert "dashboard:delete_patient" in template
-        assert "Delete patient" in template
-        assert "Patients with appointment history cannot be deleted." in template
         assert "cf-btn cf-btn-xs cf-btn-danger" in template
+        assert re.search(r">\s*Delete\s*</button>", template)
+        assert not re.search(r">\s*Delete patient\s*</button>", template)
+        assert "href=\"{% url 'dashboard:delete_patient'" not in template
+
+    assert "dashboard:delete_patient" in patient_list
+    assert "Delete patient" in patient_list
+    assert "Patients with appointment history cannot be deleted." in patient_list
+    assert "deletingPatientId:null" in patient_list
+    assert "deletingPatientId = '{{ patient.id }}'" in patient_list
+    assert "x-show=\"deletingPatientId === '{{ patient.id }}'\"" in patient_list
+    assert "x-on:patient-delete-blocked.window=\"deletingPatientId=null\"" in patient_list
+    assert "cf-modal-backdrop" not in table_scroll
+    assert "cf-modal-backdrop" not in patient_row
+
+    assert "dashboard:delete_patient" not in patient_row
+    assert "Patients with appointment history cannot be deleted." not in patient_row
+
+    for template in [patient_list]:
         assert "hx-target=\"#patient-list\"" in template
         assert "hx-include=\"#patient-toolbar\"" in template
         assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in template
-        assert "x-effect=\"if (deleting) focusModal($el)\"" in template
-        assert "x-on:patient-delete-blocked.window=\"deleting=false\"" in template
+        assert "x-effect=\"if (deletingPatientId === '{{ patient.id }}') focusModal($el)\"" in template
         assert "tabindex=\"-1\"" in template
         assert "csrf_token" in template
-        assert "href=\"{% url 'dashboard:delete_patient'" not in template
+        assert "cf-modal-header flex items-center justify-between" in template
+        assert "cf-icon-box h-10 w-10 bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-red)]" in template
+        assert "aria-label=\"Close delete patient modal\"" in template
+        assert "cf-modal-footer" in template
+        assert "class=\"inline\"" in template
+        assert "data-lucide=\"x-circle\"" in template
 
 
 def test_patient_detail_has_guarded_delete_confirmation():
@@ -1633,13 +1666,24 @@ def test_patient_detail_has_guarded_delete_confirmation():
     assert "patientDeleteOpen=false" in detail
     assert "x-on:patient-delete-blocked.window=\"patientDeleteOpen=false\"" in detail
     assert "focusModal(root)" in detail
-    assert "dashboard:delete_patient" in content
-    assert "Delete patient" in content
-    assert "Patients with appointment history cannot be deleted." in content
+    assert "dashboard:delete_patient" in detail
+    assert "Delete patient" in detail
+    assert re.search(r">\s*Delete\s*</button>", content)
+    assert re.search(r">\s*Delete\s*</button>", detail)
+    assert not re.search(r">\s*Delete patient\s*</button>", content)
+    assert not re.search(r">\s*Delete patient\s*</button>", detail)
+    assert "Patients with appointment history cannot be deleted." in detail
     assert "cf-btn cf-btn-danger" in content
-    assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in content
-    assert "x-effect=\"if (patientDeleteOpen) focusModal($el)\"" in content
-    assert "csrf_token" in content
+    assert "cf-modal-backdrop" not in content
+    assert "@keydown.tab=\"trapModalFocus($event, $el)\"" in detail
+    assert "x-effect=\"if (patientDeleteOpen) focusModal($el)\"" in detail
+    assert "csrf_token" in detail
+    assert "cf-modal-header flex items-center justify-between" in detail
+    assert "cf-icon-box h-10 w-10 bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-red)]" in detail
+    assert "aria-label=\"Close delete patient modal\"" in detail
+    assert "cf-modal-footer" in detail
+    assert "class=\"inline\"" in detail
+    assert "data-lucide=\"x-circle\"" in detail
 
 
 def test_patient_detail_uses_defined_radius_tokens_and_semantic_kpi_icons():
@@ -1673,8 +1717,9 @@ def test_patient_detail_modals_match_dashboard_focus_management():
     assert combined.count('tabindex="-1"') >= 3
     assert 'x-effect="if (detailOpen)' in detail
     assert 'x-effect="if (editOpen)' in detail
-    assert 'x-effect="if (patientDeleteOpen)' in content
-    assert 'aria-labelledby="patient-delete-modal-title"' in content
+    assert 'x-effect="if (patientDeleteOpen)' in detail
+    assert 'aria-labelledby="patient-delete-modal-title"' in detail
+    assert 'cf-modal-backdrop' not in content
 
 
 def test_patient_detail_visit_history_uses_table_surface_without_nested_card():

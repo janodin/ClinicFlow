@@ -727,13 +727,14 @@ code,
 }
 
 .cf-btn-danger {
-  border-color: rgba(179, 25, 74, .24);
-  background: var(--cf-danger-soft);
-  color: var(--cf-danger);
+  border-color: var(--cf-danger);
+  background: var(--cf-danger);
+  color: #fff;
 }
 
 .cf-btn-danger:hover {
-  background: var(--cf-danger);
+  border-color: #95143d;
+  background: #95143d;
   color: #fff;
 }
 
