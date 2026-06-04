@@ -40,16 +40,7 @@ const verifyMetaChallenge = node({
     position: [464, 160],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const item = $input.first().json;
-const query = item.query || {};
-const mode = query['hub.mode'] || query.hub?.mode || '';
-const token = String(query['hub.verify_token'] || query.hub?.verify_token || '').trim();
-const challenge = query['hub.challenge'] || query.hub?.challenge || '';
-const expectedToken = String('{{ $env.MESSENGER_VERIFY_TOKEN || "" }}').trim();
-if (mode === 'subscribe' && expectedToken && token === expectedToken && challenge) {
-  return [{ json: { statusCode: 200, body: String(challenge) } }];
-}
-return [{ json: { statusCode: 403, body: 'Invalid verification request' } }];`,
+      jsCode: 'return $input.all();',
     },
   },
   output: [{ statusCode: 200, body: '123456789' }],
@@ -63,9 +54,9 @@ const returnVerificationResponse = node({
     position: [688, 160],
     parameters: {
       respondWith: 'text',
-      responseBody: expr('{{ $json.body }}'),
+      responseBody: expr('{{ $json.query["hub.mode"] === "subscribe" && $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.verify_token"] === $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.challenge"] ? $json.query["hub.challenge"] : "Invalid verification request" }}'),
       options: {
-        responseCode: expr('{{ $json.statusCode }}'),
+        responseCode: expr('{{ $json.query["hub.mode"] === "subscribe" && $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.verify_token"] === $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.challenge"] ? 200 : 403 }}'),
         responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/plain' }] },
       },
     },
