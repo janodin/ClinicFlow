@@ -249,288 +249,78 @@ def _save_widget_chat_history(request, clinic, history):
     request.session[f"widget_chat_history_{clinic.id}"] = history[-10:]
 
 
-def _chat_date_options(clinic):
-    clinic_today = _clinic_localdate(clinic)
-    return [
-        {
-            "label": (clinic_today + timedelta(days=i)).strftime("%a, %b %d"),
-            "value": (clinic_today + timedelta(days=i)).isoformat(),
-        }
-        for i in range(1, 15)
-    ]
+WIDGET_AI_STATE = "ai"
+WIDGET_AI_SUGGESTIONS = [
+    {"label": "Book an appointment", "value": "I want to book an appointment", "type": "ai_prompt"},
+    {"label": "Ask about services", "value": "What services are available?", "type": "ai_prompt"},
+]
 
 
-def _chat_controls_for_state(clinic, state, data):
-    if state == "select_service":
-        services = clinic.services.filter(is_active=True, is_archived=False)
-        return [{"label": service.name, "value": str(service.id)} for service in services], "select_option"
-    if state == "select_date":
-        return _chat_date_options(clinic), "select_option"
-    if state == "select_time":
-        service = clinic.services.filter(pk=data.get("service_id"), is_active=True, is_archived=False).first()
-        date_str = data.get("date", "")
-        try:
-            selected_date = datetime.fromisoformat(date_str).date()
-        except (ValueError, TypeError):
-            return [], "select_option"
-        slots = generate_slots(clinic, service, selected_date) if service else []
-        return [{"label": slot["label"], "value": slot["starts_at"].isoformat()} for slot in slots], "select_option"
-    if state == "collect_info":
-        return [], "submit_info"
-    if state == "confirm":
-        return [
-            {"label": "Confirm", "value": "confirm"},
-            {"label": "Cancel", "value": "cancel"},
-        ], "select_option"
-    return [{"label": "Book an appointment", "value": "start_booking"}], "select_option"
+def _widget_ai_json(message, options=None):
+    return JsonResponse({
+        "state": WIDGET_AI_STATE,
+        "message": message,
+        "options": options or [],
+        "next_action": "text_input",
+    })
 
 
-def _assistant_message_with_widget_context(clinic, message, state, data):
-    if state == "greeting":
-        return message
+def _widget_ai_fallback_message(ai_settings):
+    message = fallback_message_for(ai_settings)
+    if "book" not in message.lower():
+        message = f"{message} You can still use Book an Appointment to schedule a visit."
+    return message
 
-    context = [
-        "The patient is using the ClinicFlow website widget guided booking flow.",
-        f"Current guided booking state: {state}.",
-    ]
-    service = clinic.services.filter(pk=data.get("service_id"), is_active=True, is_archived=False).first()
-    if service:
-        context.append(f"Selected service: {service.name} (service_id={service.id}).")
-    if data.get("date"):
-        context.append(f"Selected date: {data['date']}.")
-    if data.get("starts_at"):
-        context.append(f"Selected start time: {data['starts_at']}.")
-    if data.get("full_name"):
-        context.append(f"Patient name already provided: {data['full_name']}.")
-    if data.get("phone"):
-        context.append("Patient phone has already been provided.")
-    context.append("Answer the user's message without repeating the guided booking prompt.")
-    return "\n".join(context) + f"\n\nUser message: {message}"
+
+def _widget_ai_initial_message(clinic):
+    return clinic.widget_welcome_message or "Welcome! How can we help you book an appointment today?"
+
+
+def _widget_ai_message_from_action(action, value):
+    text = (value or "").strip()
+    if text:
+        return text
+    if action == "start_booking":
+        return "I want to book an appointment"
+    if action == "view_faqs":
+        return "I have a question about the clinic"
+    return ""
+
+
+def _handle_widget_ai_chat(request, clinic, action, value):
+    ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
+
+    if not ai_settings.is_ai_enabled:
+        return _widget_ai_json(_widget_ai_fallback_message(ai_settings))
+
+    if action == "init":
+        return _widget_ai_json(_widget_ai_initial_message(clinic), WIDGET_AI_SUGGESTIONS)
+
+    message = _widget_ai_message_from_action(action, value)
+    if not message:
+        return _widget_ai_json(_widget_ai_initial_message(clinic), WIDGET_AI_SUGGESTIONS)
+
+    history = _widget_chat_history(request, clinic)
+    if not request.session.session_key:
+        request.session.create()
+
+    try:
+        reply = call_assistant_webhook(clinic, message, history, request.session.session_key)
+    except (AssistantUnavailable, requests.RequestException, ValueError):
+        reply = _widget_ai_fallback_message(ai_settings)
+
+    history.extend([
+        {"role": "user", "content": message},
+        {"role": "assistant", "content": reply},
+    ])
+    _save_widget_chat_history(request, clinic, history)
+    return _widget_ai_json(reply)
 
 
 @require_POST
 def chat_step(request, clinic_slug):
     clinic = _get_public_clinic_or_404(clinic_slug)
-    session_key = f"widget_chat_{clinic.id}"
-    data = request.session.get(session_key, {"state": "greeting"})
     action = request.POST.get("action", "")
     value = request.POST.get("value", "")
-    state = data.get("state", "greeting")
 
-    if action == "text_input" and value:
-        ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
-        if not ai_settings.is_ai_enabled:
-            message = fallback_message_for(ai_settings)
-            return JsonResponse({
-                "state": state,
-                "message": message,
-                "options": [],
-                "next_action": "text_input",
-            })
-
-        history = _widget_chat_history(request, clinic)
-        if not request.session.session_key:
-            request.session.create()
-        try:
-            assistant_message = _assistant_message_with_widget_context(clinic, value, state, data)
-            reply = call_assistant_webhook(clinic, assistant_message, history, request.session.session_key)
-        except (AssistantUnavailable, requests.RequestException, ValueError):
-            reply = fallback_message_for(ai_settings)
-
-        history.extend([
-            {"role": "user", "content": value},
-            {"role": "assistant", "content": reply},
-        ])
-        _save_widget_chat_history(request, clinic, history)
-        return JsonResponse({
-            "state": state,
-            "message": reply,
-            "options": [],
-            "next_action": "text_input",
-        })
-
-    if state == "greeting":
-        if value == "start_booking" or action == "start_booking":
-            state = "select_service"
-            data["state"] = state
-            request.session[session_key] = data
-            action = ""
-            value = ""
-        elif value == "view_faqs" or action == "view_faqs":
-            faqs = clinic.faqs.filter(is_active=True)
-            message = "Here are some frequently asked questions:"
-            options = [{"label": f.question, "value": f"faq:{f.id}", "type": "faq"} for f in faqs]
-            data["state"] = state
-            request.session[session_key] = data
-            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_faq"})
-        else:
-            if action == "text_input" and value:
-                low = value.lower()
-                if low in ("faq", "help", "faqs"):
-                    faqs = clinic.faqs.filter(is_active=True)
-                    message = "Here are some frequently asked questions:"
-                    options = [{"label": f.question, "value": f"faq:{f.id}", "type": "faq"} for f in faqs]
-                    data["state"] = state
-                    request.session[session_key] = data
-                    return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_faq"})
-            message = clinic.widget_welcome_message or "Welcome! How can we help you today?"
-            options = [
-                {"label": "Book an appointment", "value": "start_booking"},
-                {"label": "View FAQs", "value": "view_faqs"},
-            ]
-            data["state"] = state
-            request.session[session_key] = data
-            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-
-    if state == "select_service":
-        if action == "select_option" and value:
-            service = clinic.services.filter(pk=value, is_active=True, is_archived=False).first()
-            if service:
-                data["service_id"] = service.id
-                state = "select_date"
-                action = ""
-                value = ""
-            else:
-                message = "Please select a valid service."
-                options = [{"label": s.name, "value": str(s.id)} for s in clinic.services.filter(is_active=True, is_archived=False)]
-                data["state"] = state
-                request.session[session_key] = data
-                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-        else:
-            options = [{"label": s.name, "value": str(s.id)} for s in clinic.services.filter(is_active=True, is_archived=False)]
-            message = "Which service would you like to book?"
-            data["state"] = state
-            request.session[session_key] = data
-            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-
-    if state == "select_date":
-        if action == "select_option" and value:
-            try:
-                selected_date = datetime.fromisoformat(value).date()
-            except (ValueError, TypeError):
-                selected_date = None
-            if selected_date:
-                data["date"] = value
-                state = "select_time"
-                action = ""
-                value = ""
-            else:
-                message = "Please select a valid date."
-                options = _chat_date_options(clinic)
-                data["state"] = state
-                request.session[session_key] = data
-                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-        else:
-            options = _chat_date_options(clinic)
-            message = "What date works for you?"
-            data["state"] = state
-            request.session[session_key] = data
-            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-
-    if state == "select_time":
-        service_id = data.get("service_id")
-        date_str = data.get("date")
-        service = clinic.services.filter(pk=service_id).first()
-        selected_date = datetime.fromisoformat(date_str).date()
-        slots = generate_slots(clinic, service, selected_date)
-        if action == "select_option" and value:
-            starts_at = datetime.fromisoformat(value)
-            if timezone.is_naive(starts_at):
-                starts_at = timezone.make_aware(starts_at)
-            starts_at = starts_at.astimezone(dt_timezone.utc)
-            if any(slot["starts_at"] == starts_at for slot in slots):
-                data["starts_at"] = value
-                state = "collect_info"
-            else:
-                message = "That slot is no longer available. Please choose another."
-                options = [{"label": slot["label"], "value": slot["starts_at"].isoformat()} for slot in slots]
-                data["state"] = state
-                request.session[session_key] = data
-                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-        else:
-            if slots:
-                options = [{"label": slot["label"], "value": slot["starts_at"].isoformat()} for slot in slots]
-                message = "Here are the available times:"
-                next_action = "select_option"
-                data["state"] = state
-                request.session[session_key] = data
-                return JsonResponse({"state": state, "message": message, "options": options, "next_action": next_action})
-            else:
-                options = _chat_date_options(clinic)
-                message = "Sorry, no slots available on that date. Please choose another date."
-                state = "select_date"
-                data["state"] = state
-                request.session[session_key] = data
-                return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-
-    if state == "collect_info":
-        if action == "submit_info":
-            full_name = request.POST.get("full_name", "").strip()
-            phone = request.POST.get("phone", "").strip()
-            email = request.POST.get("email", "").strip()
-            message = _validate_guest_identity(full_name, phone, email)
-            if message:
-                data["state"] = state
-                request.session[session_key] = data
-                return JsonResponse({"state": state, "message": message, "options": [], "next_action": "submit_info"})
-            data["full_name"] = full_name
-            data["phone"] = phone
-            data["email"] = email
-            state = "confirm"
-        else:
-            message = "Please provide your details to complete the booking."
-            data["state"] = state
-            request.session[session_key] = data
-            return JsonResponse({"state": state, "message": message, "options": [], "next_action": "submit_info"})
-
-    if state == "confirm":
-        service = clinic.services.filter(pk=data.get("service_id")).first()
-        starts_at = datetime.fromisoformat(data.get("starts_at"))
-        local_start = starts_at.astimezone(ZoneInfo(clinic.timezone))
-        if action == "select_option" and value == "confirm":
-            appointment, error = _process_guest_booking(clinic, {
-                "service": data.get("service_id"),
-                "starts_at": data.get("starts_at"),
-                "full_name": data.get("full_name"),
-                "phone": data.get("phone"),
-                "email": data.get("email", ""),
-                "reason": "",
-            }, Appointment.SOURCE_CHAT_WIDGET)
-            if error:
-                message = error
-                identity_error = _validate_guest_identity(
-                    data.get("full_name", ""),
-                    data.get("phone", ""),
-                    data.get("email", ""),
-                )
-                state = "collect_info" if identity_error else "select_time"
-                data["state"] = state
-                request.session[session_key] = data
-                next_action = "submit_info" if identity_error else "select_option"
-                return JsonResponse({"state": state, "message": message, "options": [], "next_action": next_action})
-            state = "booked"
-            message = f"Your appointment is confirmed! Reference: {appointment.reference_code}"
-            request.session.pop(session_key, None)
-            return JsonResponse({"state": state, "message": message, "options": [{"label": "Book another", "value": "restart"}], "next_action": "select_option"})
-        if action == "select_option" and value == "cancel":
-            request.session.pop(session_key, None)
-            return JsonResponse({
-                "state": "greeting",
-                "message": "Booking cancelled. You can start again anytime.",
-                "options": [{"label": "Book an appointment", "value": "start_booking"}],
-                "next_action": "select_option",
-            })
-        else:
-            summary = f"{service.name} at {clinic.name} on {local_start.strftime('%A, %B %d at %I:%M %p')}"
-            message = f"Please confirm your appointment:\n{summary}\nPatient: {data.get('full_name')}"
-            options = [
-                {"label": "Confirm", "value": "confirm"},
-                {"label": "Cancel", "value": "cancel"},
-            ]
-            data["state"] = state
-            request.session[session_key] = data
-            return JsonResponse({"state": state, "message": message, "options": options, "next_action": "select_option"})
-
-    data["state"] = "greeting"
-    request.session[session_key] = data
-    return JsonResponse({"state": "greeting", "message": clinic.widget_welcome_message, "options": [{"label": "Book an appointment", "value": "start_booking"}], "next_action": "select_option"})
+    return _handle_widget_ai_chat(request, clinic, action, value)

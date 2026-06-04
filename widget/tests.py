@@ -166,28 +166,44 @@ class WidgetTests(TestCase):
 
         self.assertNotContains(response, 'name="reason"')
 
-    def test_chat_step_state_machine_skips_doctor(self):
-        url = reverse("widget:chat_step", args=[self.clinic.slug])
-        self.client.post(url, {"action": "init"})
-        self.client.post(url, {"action": "select_option", "value": "start_booking"})
-        resp = self.client.post(url, {"action": "select_option", "value": str(self.service.id)})
-        self.assertEqual(resp.json()["state"], "select_date")
-        self.assertEqual(resp.json()["message"], "What date works for you?")
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_ai_init_does_not_enter_guided_state(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
 
-        tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
-        resp = self.client.post(url, {"action": "select_option", "value": tomorrow})
-        data = resp.json()
-        self.assertEqual(data["state"], "select_time")
-        self.assertEqual(data["message"], "Here are the available times:")
-        self.assertTrue(data["options"])
+        response = self.client.post(reverse("widget:chat_step", args=[self.clinic.slug]), {"action": "init"})
 
-        slot_value = data["options"][0]["value"]
-        self.assertEqual(self.client.post(url, {"action": "select_option", "value": slot_value}).json()["state"], "collect_info")
-        self.assertEqual(self.client.post(url, {"action": "submit_info", "full_name": "Chat Patient", "phone": "09111111111"}).json()["state"], "confirm")
-        data = self.client.post(url, {"action": "select_option", "value": "confirm"}).json()
-        self.assertEqual(data["state"], "booked")
-        appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Chat Patient")
-        self.assertEqual(appt.source, Appointment.SOURCE_CHAT_WIDGET)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["state"], "ai")
+        self.assertEqual(data["next_action"], "text_input")
+        self.assertIn("book", data["message"].lower())
+        self.assertIn({"label": "Book an appointment", "value": "I want to book an appointment", "type": "ai_prompt"}, data["options"])
+        self.assertNotIn(data["state"], ["select_service", "select_date", "select_time", "collect_info", "confirm"])
+        mock_post.assert_not_called()
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_ai_book_suggestion_calls_n8n_as_natural_text(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "Sure, what service would you like?"}
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "select_option", "value": "I want to book an appointment"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["state"], "ai")
+        self.assertEqual(data["message"], "Sure, what service would you like?")
+        self.assertEqual(data["options"], [])
+        self.assertEqual(data["next_action"], "text_input")
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["channel"], "widget")
+        self.assertEqual(payload["clinic_slug"], self.clinic.slug)
+        self.assertEqual(payload["message"], "I want to book an appointment")
 
     def test_chat_step_rejects_short_phone_before_confirmation(self):
         url = self._drive_chat_to_collect_info()
