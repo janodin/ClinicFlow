@@ -89,7 +89,10 @@ def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmati
     agent_block = source[agent_start:agent_end]
 
     assert "Use match_services, check_availability, and book_confirmed_appointment for booking." in agent_block
+    assert "Collect service, date/time, full name, phone, and email before booking." in agent_block
     assert "Ask for explicit confirmation before booking." in agent_block
+    assert "Patient email required for booking" in source
+    assert "Patient email if provided, otherwise blank" not in source
     assert "Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation." in agent_block
     assert "Widget replies must be concise and friendly." in agent_block
     assert "/messenger/ai/widget/services/" in source

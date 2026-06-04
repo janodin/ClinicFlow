@@ -76,6 +76,8 @@ def test_default_ai_prompt_hides_faq_source_and_uses_suggestion_metadata():
     assert "Use check_availability suggestion_type metadata" in DEFAULT_MESSENGER_AI_PROMPT
     assert "nearest_time means the requested time is unavailable" in DEFAULT_MESSENGER_AI_PROMPT
     assert "next_available_date means the requested date has no slots" in DEFAULT_MESSENGER_AI_PROMPT
+    assert "For booking, collect service, date/time, full name, phone, and email" in DEFAULT_MESSENGER_AI_PROMPT
+    assert "Before booking, summarize service, local date/time, full name, phone, and email" in DEFAULT_MESSENGER_AI_PROMPT
 
 
 @pytest.mark.django_db
