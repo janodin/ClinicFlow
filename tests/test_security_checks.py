@@ -14,6 +14,8 @@ def _ids(errors):
 SECURE_SECRET_KEY = "ProductionStrongValueForDjangoChecksOnly12345678901234567890"
 SECURE_N8N_WEBHOOK_SECRET = "N8nWebhookValueForTestsOnly1234567890"
 SECURE_MESSENGER_VERIFY_TOKEN = "MessengerVerifyValueForTestsOnly1234567890"
+SECURE_META_MESSENGER_N8N_WEBHOOK_URL = "https://157-90-164-203.nip.io/webhook/kliniassist-messenger"
+SECURE_ASSISTANT_N8N_WEBHOOK_URL = "https://157-90-164-203.nip.io/webhook/kliniassist-widget-assistant"
 
 
 def _secure_settings(**overrides):
@@ -27,6 +29,8 @@ def _secure_settings(**overrides):
         "SECURE_HSTS_SECONDS": 31536000,
         "N8N_WEBHOOK_SECRET": SECURE_N8N_WEBHOOK_SECRET,
         "MESSENGER_VERIFY_TOKEN": SECURE_MESSENGER_VERIFY_TOKEN,
+        "META_MESSENGER_N8N_WEBHOOK_URL": SECURE_META_MESSENGER_N8N_WEBHOOK_URL,
+        "ASSISTANT_N8N_WEBHOOK_URL": SECURE_ASSISTANT_N8N_WEBHOOK_URL,
     }
     settings.update(overrides)
     return settings
@@ -93,6 +97,8 @@ def test_production_embed_cookie_defaults_allow_secure_third_party_iframes(monke
     SECURE_HSTS_SECONDS=0,
     N8N_WEBHOOK_SECRET="",
     MESSENGER_VERIFY_TOKEN="",
+    META_MESSENGER_N8N_WEBHOOK_URL="",
+    ASSISTANT_N8N_WEBHOOK_URL="",
 )
 def test_deploy_check_flags_insecure_settings():
     ids = _ids(production_security_settings(None))
@@ -105,7 +111,9 @@ def test_deploy_check_flags_insecure_settings():
     assert "clinic_security.E006" in ids
     assert "clinic_security.E007" in ids
     assert "clinic_security.E008" in ids
+    assert "clinic_security.E009" in ids
     assert "clinic_security.E010" in ids
+    assert "clinic_security.E011" in ids
 
 
 @override_settings(
@@ -118,6 +126,8 @@ def test_deploy_check_flags_insecure_settings():
     SECURE_HSTS_SECONDS=31536000,
     N8N_WEBHOOK_SECRET=SECURE_N8N_WEBHOOK_SECRET,
     MESSENGER_VERIFY_TOKEN=SECURE_MESSENGER_VERIFY_TOKEN,
+    META_MESSENGER_N8N_WEBHOOK_URL=SECURE_META_MESSENGER_N8N_WEBHOOK_URL,
+    ASSISTANT_N8N_WEBHOOK_URL=SECURE_ASSISTANT_N8N_WEBHOOK_URL,
 )
 def test_deploy_check_accepts_secure_settings():
     assert production_security_settings(None) == []
@@ -169,3 +179,47 @@ def test_deploy_check_rejects_placeholder_integration_secrets(setting_name, erro
         ids = _ids(production_security_settings(None))
 
     assert error_id in ids
+
+
+@pytest.mark.parametrize(
+    "assistant_url",
+    [
+        "",
+        "http://157-90-164-203.nip.io/webhook/kliniassist-widget-assistant",
+        "https://your-n8n-host.example/webhook/kliniassist-widget-assistant",
+        "https://n8n.example/webhook/kliniassist-widget-assistant",
+        "https://localhost/webhook/kliniassist-widget-assistant",
+        "https://157-90-164-203.nip.io/other/kliniassist-widget-assistant",
+        "https://157-90-164-203.nip.io/webhook/kliniassist-widget-assistant-copy",
+        "https://attacker.example/?next=/webhook/kliniassist-widget-assistant",
+        "https://157-90-164-203.nip.io/webhook/clinicflow-widget-assistant",
+        "https://n8n.example/webhook/clinicflow-widget-assistant",
+    ],
+)
+def test_deploy_check_rejects_missing_or_legacy_assistant_webhook_url(assistant_url):
+    with override_settings(**_secure_settings(ASSISTANT_N8N_WEBHOOK_URL=assistant_url)):
+        ids = _ids(production_security_settings(None))
+
+    assert "clinic_security.E009" in ids
+
+
+@pytest.mark.parametrize(
+    "meta_url",
+    [
+        "",
+        "http://157-90-164-203.nip.io/webhook/kliniassist-messenger",
+        "https://your-n8n-host.example/webhook/kliniassist-messenger",
+        "https://n8n.example/webhook/kliniassist-messenger",
+        "https://localhost/webhook/kliniassist-messenger",
+        "https://157-90-164-203.nip.io/other/kliniassist-messenger",
+        "https://157-90-164-203.nip.io/webhook/kliniassist-messenger-copy",
+        "https://attacker.example/?next=/webhook/kliniassist-messenger",
+        "https://157-90-164-203.nip.io/webhook/clinicflow-messenger",
+        "https://n8n.example/webhook/clinicflow-messenger",
+    ],
+)
+def test_deploy_check_rejects_missing_or_legacy_meta_messenger_webhook_url(meta_url):
+    with override_settings(**_secure_settings(META_MESSENGER_N8N_WEBHOOK_URL=meta_url)):
+        ids = _ids(production_security_settings(None))
+
+    assert "clinic_security.E011" in ids

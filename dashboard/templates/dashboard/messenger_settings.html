@@ -137,7 +137,7 @@
       </li>
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">3</span>
-        <span>In your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a>, go to your App -> Messenger -> Webhooks. Set the webhook URL to your n8n instance and subscribe to <strong class="text-[var(--cf-ink)]">messages</strong> and <strong class="text-[var(--cf-ink)]">messaging_postbacks</strong>.</span>
+        <span>In your <a href="https://developers.facebook.com/" target="_blank" rel="noopener noreferrer" class="text-[var(--cf-brand)] hover:underline">Meta Developer Dashboard</a>, go to your App -> Messenger -> Webhooks. Set the callback URL to the Meta Callback URL below and subscribe to <strong class="text-[var(--cf-ink)]">messages</strong> and <strong class="text-[var(--cf-ink)]">messaging_postbacks</strong>.</span>
       </li>
       <li class="flex items-start gap-3">
         <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-brand-soft)] text-[var(--cf-brand-strong)] text-xs font-bold">4</span>
@@ -153,9 +153,21 @@
         <i data-lucide="webhook" class="h-5 w-5"></i>
       </div>
       <div>
-        <h2 class="cf-section-title">n8n Webhook</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Use this URL in your n8n HTTP Request node to send messages to Django.</p>
+        <h2 class="cf-section-title">n8n Webhooks</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Use the Meta callback for Facebook delivery, and the Django webhook inside n8n HTTP Request nodes.</p>
       </div>
+    </div>
+
+    <div class="cf-field">
+      <p class="cf-label">Meta Callback URL</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="cf-mono cf-mobile-break break-all rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0">{{ meta_n8n_webhook_url }}</div>
+        <button @click="navigator.clipboard.writeText('{{ meta_n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+          <i data-lucide="copy" class="h-4 w-4"></i>
+          <span class="copy-label">Copy</span>
+        </button>
+      </div>
+      <p class="mt-2 text-xs text-[var(--cf-muted)]">Paste this URL in Meta Messenger Webhooks for messages and messaging_postbacks.</p>
     </div>
 
     <div class="cf-field">

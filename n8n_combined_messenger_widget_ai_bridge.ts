@@ -11,7 +11,7 @@ import {
   expr,
 } from '@n8n/workflow-sdk';
 
-const DJANGO_BASE_URL_EXPR = '($env.DJANGO_BASE_URL || "https://178-105-83-211.nip.io").replace(/\\/$/, "")';
+const DJANGO_BASE_URL = 'https://178-105-83-211.nip.io';
 const N8N_WEBHOOK_CREDENTIAL_ID = 'PJHqVMwE3qU58s9E';
 const MESSENGER_FALLBACK = 'Thanks for your message. Please contact the clinic directly for help.';
 const WIDGET_FALLBACK = 'Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.';
@@ -33,17 +33,26 @@ const metaWebhookVerification = trigger({
 });
 
 const verifyMetaChallenge = node({
-  type: 'n8n-nodes-base.code',
-  version: 2,
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
   config: {
     name: 'Verify Meta Challenge',
     position: [464, 160],
     parameters: {
-      mode: 'runOnceForAllItems',
-      jsCode: 'return $input.all();',
+      method: 'GET',
+      url: 'https://178-105-83-211.nip.io/messenger/webhook/',
+      sendQuery: true,
+      queryParameters: {
+        parameters: [
+          { name: 'hub.mode', value: expr('{{ $json.query["hub.mode"] || "" }}') },
+          { name: 'hub.verify_token', value: expr('{{ $json.query["hub.verify_token"] || "" }}') },
+          { name: 'hub.challenge', value: expr('{{ $json.query["hub.challenge"] || "" }}') },
+        ],
+      },
+      options: { response: { response: { fullResponse: true, neverError: true, responseFormat: 'text' } }, timeout: 15000 },
     },
   },
-  output: [{ statusCode: 200, body: '123456789' }],
+  output: [{ statusCode: 200, data: '123456789' }],
 });
 
 const returnVerificationResponse = node({
@@ -54,14 +63,14 @@ const returnVerificationResponse = node({
     position: [688, 160],
     parameters: {
       respondWith: 'text',
-      responseBody: expr('{{ $json.query["hub.mode"] === "subscribe" && $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.verify_token"] === $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.challenge"] ? $json.query["hub.challenge"] : "Invalid verification request" }}'),
+      responseBody: expr('{{ $json.data || $json.body || "Invalid verification request" }}'),
       options: {
-        responseCode: expr('{{ $json.query["hub.mode"] === "subscribe" && $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.verify_token"] === $env.MESSENGER_VERIFY_TOKEN && $json.query["hub.challenge"] ? 200 : 403 }}'),
+        responseCode: expr('{{ $json.statusCode || 403 }}'),
         responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/plain' }] },
       },
     },
   },
-  output: [{ body: '123456789' }],
+  output: [{ data: '123456789' }],
 });
 
 const metaMessengerEvents = trigger({
@@ -166,7 +175,7 @@ const verifyMetaSignature = node({
     position: [688, 560],
     parameters: {
       method: 'POST',
-      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/meta/verify-signature/`),
+      url: 'https://178-105-83-211.nip.io/messenger/meta/verify-signature/',
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -238,9 +247,11 @@ const widgetAssistantWebhook = trigger({
     parameters: {
       httpMethod: 'POST',
       path: 'kliniassist-widget-assistant',
+      authentication: 'headerAuth',
       responseMode: 'responseNode',
       options: {},
     },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ body: { channel: 'widget', clinic_id: 1, clinic_slug: 'demo-clinic', message: 'Can I book tomorrow?', history: [], session_id: 'SESSION123' } }],
 });
@@ -283,7 +294,7 @@ const getMessengerClinicContext = node({
     position: [688, 560],
     parameters: {
       method: 'POST',
-      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/ai/context/`),
+      url: 'https://178-105-83-211.nip.io/messenger/ai/context/',
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -306,7 +317,7 @@ const getWidgetClinicContext = node({
     position: [688, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/ai/widget/context/`),
+      url: 'https://178-105-83-211.nip.io/messenger/ai/widget/context/',
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -477,7 +488,7 @@ const matchServicesTool = tool({
     position: [1792, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/services/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/services/") }}`),
+      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://178-105-83-211.nip.io/messenger/ai/services/" : "https://178-105-83-211.nip.io/messenger/ai/widget/services/" }}'),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -505,7 +516,7 @@ const checkAvailabilityTool = tool({
     position: [1920, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/availability/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/availability/") }}`),
+      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://178-105-83-211.nip.io/messenger/ai/availability/" : "https://178-105-83-211.nip.io/messenger/ai/widget/availability/" }}'),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -535,7 +546,7 @@ const bookConfirmedAppointmentTool = tool({
     position: [2048, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/book/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/book/") }}`),
+      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://178-105-83-211.nip.io/messenger/ai/book/" : "https://178-105-83-211.nip.io/messenger/ai/widget/book/" }}'),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -569,7 +580,7 @@ const findVerifiedAppointmentTool = tool({
     position: [2176, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/appointment/lookup/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/appointment/lookup/") }}`),
+      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://178-105-83-211.nip.io/messenger/ai/appointment/lookup/" : "https://178-105-83-211.nip.io/messenger/ai/widget/appointment/lookup/" }}'),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -598,7 +609,7 @@ const cancelVerifiedAppointmentTool = tool({
     position: [2304, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/appointment/cancel/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/appointment/cancel/") }}`),
+      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://178-105-83-211.nip.io/messenger/ai/appointment/cancel/" : "https://178-105-83-211.nip.io/messenger/ai/widget/appointment/cancel/" }}'),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -629,7 +640,7 @@ const rescheduleVerifiedAppointmentTool = tool({
     position: [2432, 1040],
     parameters: {
       method: 'POST',
-      url: expr(`{{ $("Shared AI Input").item.json.channel === "messenger" ? (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/appointment/reschedule/") : (${DJANGO_BASE_URL_EXPR} + "/messenger/ai/widget/appointment/reschedule/") }}`),
+      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? "https://178-105-83-211.nip.io/messenger/ai/appointment/reschedule/" : "https://178-105-83-211.nip.io/messenger/ai/widget/appointment/reschedule/" }}'),
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,
@@ -660,7 +671,7 @@ const getMessengerQuickReplies = node({
     position: [1744, 520],
     parameters: {
       method: 'POST',
-      url: expr(`{{ ${DJANGO_BASE_URL_EXPR} }}/messenger/n8n-webhook/`),
+      url: 'https://178-105-83-211.nip.io/messenger/n8n-webhook/',
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       sendHeaders: true,

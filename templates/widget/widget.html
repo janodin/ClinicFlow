@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ clinic.name }} Widget{% endblock %}
 {% block body %}
-<main class="min-h-screen bg-transparent p-2 sm:p-3" x-data="widgetApp()" x-init="init()">
+<main class="fixed inset-0 min-h-screen overflow-hidden bg-transparent p-2 sm:p-3" x-data="widgetApp()" x-init="init()">
   <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
   <section class="cf-widget-shell ml-auto flex h-[650px] max-h-[calc(100dvh-1rem)] max-w-[420px] flex-col overflow-hidden">
     <header class="flex items-center justify-between px-4 py-3.5" :style="'background-color:' + accentColor + '; color:' + accentForeground()">

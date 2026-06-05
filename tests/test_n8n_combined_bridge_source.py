@@ -30,19 +30,21 @@ def test_combined_bridge_uses_kliniassist_technical_namespace():
     assert legacy_agent not in source
 
 
-def test_combined_bridge_django_base_url_can_target_local_development():
+def test_combined_bridge_django_base_url_does_not_use_blocked_n8n_env_access():
     source = SOURCE.read_text(encoding="utf-8")
 
     assert "process.env.DJANGO_BASE_URL" not in source
-    assert "const DJANGO_BASE_URL_EXPR" in source
-    assert "$env.DJANGO_BASE_URL" in source
+    assert "DJANGO_BASE_URL_EXPR" not in source
+    assert "$env.DJANGO_BASE_URL" not in source
+    assert "$env" not in source
+    assert "$vars" not in source
+    assert "process.env" not in source
     assert "https://178-105-83-211.nip.io" in source
-    assert ".replace(/\\\\/$/, \"\")" in source
 
 
-def test_meta_webhook_verification_uses_n8n_env_expression_not_process_env():
+def test_meta_webhook_verification_delegates_token_check_to_django():
     source = SOURCE.read_text(encoding="utf-8")
-    verify_start = source.index("name: 'Verify Meta Challenge'")
+    verify_start = source.index("const verifyMetaChallenge")
     verify_end = source.index("const returnVerificationResponse")
     verify_block = source[verify_start:verify_end]
     response_start = source.index("name: 'Return Verification Response'")
@@ -50,9 +52,23 @@ def test_meta_webhook_verification_uses_n8n_env_expression_not_process_env():
     response_block = source[response_start:response_end]
 
     assert "process.env.MESSENGER_VERIFY_TOKEN" not in source
+    assert "$vars.MESSENGER_VERIFY_TOKEN" not in response_block
+    assert "$env.MESSENGER_VERIFY_TOKEN" not in response_block
     assert "const expectedToken" not in verify_block
-    assert "jsCode: 'return $input.all();'" in verify_block
-    assert "$env.MESSENGER_VERIFY_TOKEN" in response_block
+    assert "type: 'n8n-nodes-base.httpRequest'" in verify_block
+    assert "/messenger/webhook/" in verify_block
+    assert "method: 'GET'" in verify_block
+    assert "sendQuery: true" in verify_block
+    assert "hub.mode" in verify_block
+    assert "hub.verify_token" in verify_block
+    assert "hub.challenge" in verify_block
+    assert "fullResponse: true" in verify_block
+    assert "neverError: true" in verify_block
+    assert "responseFormat: 'text'" in verify_block
+    assert "output: [{ statusCode: 200, data: '123456789' }]" in verify_block
+    assert "$json.data" in response_block
+    assert "$json.body" in response_block
+    assert "$json.statusCode" in response_block
 
 
 def test_combined_bridge_tools_inject_tenant_identity_from_shared_context():
@@ -97,6 +113,18 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
     assert workflow_block.count(".to(routeAssistantMode") == 1
     assert ".onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in shared_route_block
     assert ".onCase(1, returnWidgetReply)" in shared_route_block
+
+
+def test_combined_bridge_widget_webhook_requires_shared_secret_header_auth():
+    source = SOURCE.read_text(encoding="utf-8")
+    widget_start = source.index("const widgetAssistantWebhook")
+    widget_end = source.index("const normalizeWidgetRequest")
+    widget_block = source[widget_start:widget_end]
+
+    assert "name: 'Widget Assistant Webhook'" in widget_block
+    assert "path: 'kliniassist-widget-assistant'" in widget_block
+    assert "authentication: 'headerAuth'" in widget_block
+    assert "credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) }" in widget_block
 
 
 def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmation():

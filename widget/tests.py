@@ -271,6 +271,22 @@ class WidgetTests(TestCase):
         self.assertIn("container.scrollTop = container.scrollHeight;", scroll_helper_block)
         self.assertNotIn("querySelector('.flex-1.overflow-y-auto')", scroll_helper_block)
 
+    def test_widget_page_prevents_document_scroll_when_chat_conversation_overflows(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        main_start = content.index("<main")
+        main_end = content.index(">", main_start)
+        main_markup = content[main_start:main_end]
+        conversation_start = content.index("<!-- Conversation -->")
+        conversation_end = content.index("<!-- FAQs -->", conversation_start)
+        conversation_markup = content[conversation_start:conversation_end]
+
+        self.assertIn("fixed", main_markup)
+        self.assertIn("inset-0", main_markup)
+        self.assertIn("overflow-hidden", main_markup)
+        self.assertIn("overflow-y-auto", conversation_markup)
+
     def test_widget_chat_renders_assistant_typing_indicator_inside_conversation(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()

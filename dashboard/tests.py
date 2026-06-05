@@ -1128,6 +1128,20 @@ def test_messenger_settings_active_connection_shows_page_block_without_setup_hel
 
 
 @pytest.mark.django_db
+def test_messenger_settings_shows_exact_meta_n8n_callback_url(clinic_setup, client, settings):
+    clinic, service, user = clinic_setup
+    settings.META_MESSENGER_N8N_WEBHOOK_URL = "https://157-90-164-203.nip.io/webhook/kliniassist-messenger"
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:messenger_settings"))
+
+    assert response.status_code == 200
+    assert b"Meta Callback URL" in response.content
+    assert b"https://157-90-164-203.nip.io/webhook/kliniassist-messenger" in response.content
+    assert b"clinicflow-messenger" not in response.content
+
+
+@pytest.mark.django_db
 def test_owner_can_reveal_saved_messenger_secret(clinic_setup, client):
     from messenger.models import MessengerConnection
 
