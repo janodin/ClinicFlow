@@ -1,4 +1,5 @@
 import importlib
+from pathlib import Path
 
 import pytest
 from django.test import override_settings
@@ -9,6 +10,14 @@ from config.security_checks import production_security_settings
 
 def _ids(errors):
     return {error.id for error in errors}
+
+
+def test_settings_loads_project_dotenv_before_security_env_reads():
+    source = Path("config/settings.py").read_text(encoding="utf-8")
+
+    assert "from dotenv import load_dotenv" in source
+    assert 'load_dotenv(BASE_DIR / ".env")' in source
+    assert source.index('load_dotenv(BASE_DIR / ".env")') < source.index('SECRET_KEY = os.getenv("SECRET_KEY"')
 
 
 SECURE_SECRET_KEY = "ProductionStrongValueForDjangoChecksOnly12345678901234567890"
