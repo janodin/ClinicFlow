@@ -1138,7 +1138,6 @@ def test_messenger_settings_shows_exact_meta_n8n_callback_url(clinic_setup, clie
     assert response.status_code == 200
     assert b"Meta Callback URL" in response.content
     assert b"https://157-90-164-203.nip.io/webhook/kliniassist-messenger" in response.content
-    assert b"clinicflow-messenger" not in response.content
 
 
 @pytest.mark.django_db

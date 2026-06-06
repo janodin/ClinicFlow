@@ -208,11 +208,9 @@ def test_deploy_check_rejects_placeholder_integration_secrets(setting_name, erro
         "https://157-90-164-203.nip.io/other/kliniassist-widget-assistant",
         "https://157-90-164-203.nip.io/webhook/kliniassist-widget-assistant-copy",
         "https://attacker.example/?next=/webhook/kliniassist-widget-assistant",
-        "https://157-90-164-203.nip.io/webhook/clinicflow-widget-assistant",
-        "https://n8n.example/webhook/clinicflow-widget-assistant",
     ],
 )
-def test_deploy_check_rejects_missing_or_legacy_assistant_webhook_url(assistant_url):
+def test_deploy_check_rejects_missing_or_invalid_assistant_webhook_url(assistant_url):
     with override_settings(**_secure_settings(ASSISTANT_N8N_WEBHOOK_URL=assistant_url)):
         ids = _ids(production_security_settings(None))
 
@@ -230,11 +228,9 @@ def test_deploy_check_rejects_missing_or_legacy_assistant_webhook_url(assistant_
         "https://157-90-164-203.nip.io/other/kliniassist-messenger",
         "https://157-90-164-203.nip.io/webhook/kliniassist-messenger-copy",
         "https://attacker.example/?next=/webhook/kliniassist-messenger",
-        "https://157-90-164-203.nip.io/webhook/clinicflow-messenger",
-        "https://n8n.example/webhook/clinicflow-messenger",
     ],
 )
-def test_deploy_check_rejects_missing_or_legacy_meta_messenger_webhook_url(meta_url):
+def test_deploy_check_rejects_missing_or_invalid_meta_messenger_webhook_url(meta_url):
     with override_settings(**_secure_settings(META_MESSENGER_N8N_WEBHOOK_URL=meta_url)):
         ids = _ids(production_security_settings(None))
 

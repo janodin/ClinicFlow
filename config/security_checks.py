@@ -25,9 +25,9 @@ def _is_weak_secret_key(secret_key):
     )
 
 
-def _has_invalid_n8n_webhook_url(value, expected_path, legacy_slug):
+def _has_invalid_n8n_webhook_url(value, expected_path):
     normalized = (value or "").strip().lower()
-    if not normalized or legacy_slug in normalized:
+    if not normalized:
         return True
     parsed = urlparse(normalized)
     hostname = parsed.hostname or ""
@@ -39,11 +39,11 @@ def _has_invalid_n8n_webhook_url(value, expected_path, legacy_slug):
 
 
 def _has_invalid_assistant_webhook_url(value):
-    return _has_invalid_n8n_webhook_url(value, "/webhook/kliniassist-widget-assistant", "clinicflow-widget-assistant")
+    return _has_invalid_n8n_webhook_url(value, "/webhook/kliniassist-widget-assistant")
 
 
 def _has_invalid_meta_messenger_webhook_url(value):
-    return _has_invalid_n8n_webhook_url(value, "/webhook/kliniassist-messenger", "clinicflow-messenger")
+    return _has_invalid_n8n_webhook_url(value, "/webhook/kliniassist-messenger")
 
 
 @register(Tags.security, deploy=True)

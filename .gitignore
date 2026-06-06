@@ -44,6 +44,7 @@ staticfiles/
 tmp_visual_checks/
 test_output.txt
 deploy-vps.ps1
+deploy-vps.bat
 mobile-*.png
 
 # IDE
