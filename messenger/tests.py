@@ -4,7 +4,7 @@ from accounts.models import User
 from clinics.models import Clinic, ClinicGroup
 from clinics.models import ClinicFAQ
 from messenger.faq_matcher import match_faq
-from messenger.models import MessengerConnection, MessengerSession
+from messenger.models import MessengerConnection, MessengerProcessedMessage, MessengerSession
 
 
 @pytest.mark.django_db
@@ -750,6 +750,72 @@ def test_direct_webhook_rejects_malformed_signed_payload_shape():
 
 @pytest.mark.django_db
 @override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_direct_webhook_ignores_delivery_events_without_creating_session():
+    client = Client()
+    clinic, connection = _create_messenger_clinic("owner_direct_delivery_event", "PAGE-DIRECT-DELIVERY")
+    connection.app_secret = "test_secret"
+    connection.save(update_fields=["app_secret"])
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-DIRECT-DELIVERY",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE-DIRECT-DELIVERY"},
+                "delivery": {"mids": ["mid.1"], "watermark": 123},
+            }],
+        }],
+    }).encode()
+    signature = "sha256=" + hmac.new("test_secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    with patch("messenger.views._send_facebook_reply") as mock_send:
+        response = client.post(
+            reverse("messenger:webhook"),
+            data=payload,
+            content_type="application/json",
+            HTTP_X_HUB_SIGNATURE_256=signature,
+        )
+
+    assert response.status_code == 200
+    assert not MessengerSession.objects.filter(connection=connection, psid="PSID1").exists()
+    mock_send.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
+def test_direct_webhook_dedupes_replayed_message_mid():
+    client = Client()
+    clinic, connection = _create_messenger_clinic("owner_direct_dedupe", "PAGE-DIRECT-DEDUPE")
+    connection.app_secret = "test_secret"
+    connection.save(update_fields=["app_secret"])
+    Service.objects.create(clinic=clinic, name="Cleaning", duration_minutes=30, price=0)
+    payload = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": "PAGE-DIRECT-DEDUPE",
+            "time": 123,
+            "messaging": [{
+                "sender": {"id": "PSID1"},
+                "recipient": {"id": "PAGE-DIRECT-DEDUPE"},
+                "message": {"mid": "mid-replayed", "text": "Book an appointment"},
+            }],
+        }],
+    }).encode()
+    signature = "sha256=" + hmac.new("test_secret".encode(), payload, hashlib.sha256).hexdigest()
+
+    with patch("messenger.views._send_facebook_reply") as mock_send:
+        first = client.post(reverse("messenger:webhook"), data=payload, content_type="application/json", HTTP_X_HUB_SIGNATURE_256=signature)
+        second = client.post(reverse("messenger:webhook"), data=payload, content_type="application/json", HTTP_X_HUB_SIGNATURE_256=signature)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert mock_send.call_count == 1
+    assert MessengerSession.objects.filter(connection=connection, psid="PSID1").exists()
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="test_secret")
 def test_direct_webhook_reads_meta_quick_reply_payload_for_service_selection():
     client = Client()
     clinic, conn = _create_messenger_clinic("owner_direct_qr_payload", "PAGE-DIRECT-QR")
@@ -1474,6 +1540,19 @@ def test_build_ai_context_returns_only_page_clinic_data():
     assert result["current_time"]["now"]
     assert [service["name"] for service in result["services"]] == ["Dental Cleaning"]
     assert [faq["question"] for faq in result["faqs"]] == ["Where are you located?"]
+
+
+@pytest.mark.django_db
+def test_build_ai_context_ignores_active_connection_without_page_token():
+    from messenger.ai_tools import build_ai_context
+
+    _clinic, connection = _create_messenger_clinic("owner_ai_context_blank_token", "PAGEAI-BLANK-TOKEN")
+    connection.page_access_token = ""
+    connection.save(update_fields=["page_access_token"])
+
+    result = build_ai_context("PAGEAI-BLANK-TOKEN")
+
+    assert result == {"found": False}
 
 
 @pytest.mark.django_db
@@ -2767,6 +2846,27 @@ def test_n8n_webhook_ignores_inactive_clinic_connection():
 
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_ignores_active_connection_without_page_token():
+    clinic, connection = _create_messenger_clinic("owner_n8n_blank_token", "PAGE-N8N-BLANK-TOKEN")
+    connection.page_access_token = ""
+    connection.save(update_fields=["page_access_token"])
+    Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({"page_id": "PAGE-N8N-BLANK-TOKEN", "psid": "PSID1", "text": "Book an appointment"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"replies": [], "page_token": ""}
+    assert not MessengerSession.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
 def test_meta_signature_verification_endpoint_accepts_valid_per_clinic_secret():
     _clinic, _connection = _create_messenger_clinic("owner_meta_verify", "PAGE-META-VERIFY")
     _connection.app_secret = "meta-app-secret"
@@ -2791,6 +2891,74 @@ def test_meta_signature_verification_endpoint_accepts_valid_per_clinic_secret():
 
     assert response.status_code == 200
     assert response.json() == {"verified": True}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_reports_duplicate_message_id():
+    _clinic, connection = _create_messenger_clinic("owner_meta_dedupe", "PAGE-META-DEDUPE")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [{"id": "PAGE-META-DEDUPE", "messaging": [{
+            "sender": {"id": "PSID1"},
+            "recipient": {"id": "PAGE-META-DEDUPE"},
+            "message": {"mid": "mid-meta-dedupe", "text": "Hello"},
+        }]}],
+    })
+    signature = "sha256=" + hmac.new("meta-app-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    client = Client()
+    payload = {
+        "page_id": "PAGE-META-DEDUPE",
+        "raw_body": raw_body,
+        "signature": signature,
+        "psid": "PSID1",
+        "message_id": "mid-meta-dedupe",
+    }
+
+    first = client.post(reverse("messenger:meta_signature_verify"), data=json.dumps(payload), content_type="application/json", HTTP_X_N8N_WEBHOOK_SECRET="secret123")
+    second = client.post(reverse("messenger:meta_signature_verify"), data=json.dumps(payload), content_type="application/json", HTTP_X_N8N_WEBHOOK_SECRET="secret123")
+
+    assert first.status_code == 200
+    assert first.json() == {"verified": True, "duplicate": False}
+    assert second.status_code == 200
+    assert second.json() == {"verified": True, "duplicate": True}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_meta_signature_verification_rejects_message_identity_not_in_signed_body():
+    _clinic, connection = _create_messenger_clinic("owner_meta_identity_mismatch", "PAGE-META-IDENTITY")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [{"id": "PAGE-META-IDENTITY", "messaging": [{
+            "sender": {"id": "PSID-SIGNED"},
+            "recipient": {"id": "PAGE-META-IDENTITY"},
+            "message": {"mid": "mid-signed", "text": "Hello"},
+        }]}],
+    })
+    signature = "sha256=" + hmac.new("meta-app-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:meta_signature_verify"),
+        data=json.dumps({
+            "page_id": "PAGE-META-IDENTITY",
+            "raw_body": raw_body,
+            "signature": signature,
+            "psid": "PSID-TAMPERED",
+            "message_id": "mid-tampered",
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"verified": False, "duplicate": False}
+    assert not MessengerProcessedMessage.objects.filter(connection=connection).exists()
 
 
 @pytest.mark.django_db

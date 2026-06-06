@@ -52,6 +52,14 @@ class MessengerConnectionForm(forms.ModelForm):
             "page_access_token": "Page Access Token",
         }
 
+    def clean(self):
+        cleaned_data = super().clean()
+        if not (cleaned_data.get("page_id") or "").strip():
+            self.add_error("page_id", "Facebook Page ID is required to connect Messenger.")
+        if not (cleaned_data.get("page_access_token") or "").strip():
+            self.add_error("page_access_token", "Page Access Token is required to connect Messenger.")
+        return cleaned_data
+
     def clean_app_secret(self):
         app_secret = self.cleaned_data.get("app_secret", "")
         if app_secret in {"", SAVED_SECRET_MASK} and self.instance and self.instance.pk:

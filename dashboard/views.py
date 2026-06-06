@@ -1591,11 +1591,18 @@ def messenger_settings(request):
     else:
         form = MessengerConnectionForm(instance=connection)
 
+    connection_is_configured = bool(
+        connection
+        and connection.is_active
+        and connection.page_id
+        and connection.page_access_token
+    )
     n8n_webhook_url = request.build_absolute_uri(reverse("messenger:n8n_webhook"))
     meta_n8n_webhook_url = getattr(django_settings, "META_MESSENGER_N8N_WEBHOOK_URL", "")
     return render(request, "dashboard/messenger_settings.html", {
         "clinic": clinic,
         "connection": connection,
+        "connection_is_configured": connection_is_configured,
         "form": form,
         "n8n_webhook_url": n8n_webhook_url,
         "meta_n8n_webhook_url": meta_n8n_webhook_url,

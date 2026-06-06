@@ -20,7 +20,7 @@
         </div>
         <div class="min-w-0">
           <h2 class="cf-section-title">Facebook Page Connection</h2>
-          {% if connection and connection.is_active %}
+          {% if connection_is_configured %}
             <div class="cf-messenger-page-strip">
               <div class="cf-messenger-page-summary min-w-0">
                 <span>Facebook Page:</span>
@@ -34,13 +34,13 @@
               </div>
             </div>
           {% endif %}
-          {% if not connection or not connection.is_active %}
+          {% if not connection_is_configured %}
             <p class="mt-1 text-sm text-[var(--cf-muted)]">Enter your Facebook Page details for the n8n workflow.</p>
           {% endif %}
         </div>
       </div>
       <div>
-        {% if connection and connection.is_active %}
+        {% if connection_is_configured %}
           <span class="cf-badge cf-badge-active">
             <i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Connected
           </span>
@@ -98,7 +98,7 @@
     </form>
 
     <div class="cf-messenger-connection-actions mt-5 flex flex-col gap-2 border-t border-[var(--cf-line)] pt-4 sm:flex-row sm:justify-end">
-      {% if connection and connection.is_active %}
+      {% if connection_is_configured %}
       <form action="{% url 'dashboard:messenger_disconnect' %}" method="post" class="w-full sm:w-auto">
         {% csrf_token %}
         <button type="submit" class="cf-btn cf-btn-danger w-full sm:w-auto">

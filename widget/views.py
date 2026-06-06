@@ -4,6 +4,7 @@ import json
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
@@ -23,6 +24,10 @@ from widget.ai_client import AssistantUnavailable, call_assistant_webhook, fallb
 
 MIN_BOOKING_PHONE_DIGITS = 7
 SLOT_CONFLICT_MESSAGE = "That slot is no longer available. Please choose another time."
+WIDGET_AI_DEFAULT_MAX_MESSAGE_LENGTH = 1000
+WIDGET_AI_DEFAULT_RATE_LIMIT = 20
+WIDGET_AI_DEFAULT_RATE_WINDOW_SECONDS = 300
+WIDGET_AI_CONVERSATION_ID_MAX_LENGTH = 64
 
 
 def _clinic_localdate(clinic):
@@ -95,6 +100,7 @@ def widget_home(request, clinic_slug):
     context = _booking_context(clinic, request)
     context["faqs"] = clinic.faqs.filter(is_active=True)
     context["widget_source"] = _public_booking_source(request)
+    context["widget_ai_max_message_length"] = getattr(settings, "WIDGET_AI_CHAT_MAX_MESSAGE_LENGTH", WIDGET_AI_DEFAULT_MAX_MESSAGE_LENGTH)
     return render(request, "widget/widget.html", context)
 
 
@@ -137,7 +143,7 @@ def _process_guest_booking(clinic, data, source):
     except (TypeError, ValueError):
         return None, "Please choose a valid appointment time."
     if timezone.is_naive(starts_at):
-        starts_at = timezone.make_aware(starts_at)
+        starts_at = timezone.make_aware(starts_at, ZoneInfo(clinic.timezone))
     starts_at = starts_at.astimezone(dt_timezone.utc)
 
     with transaction.atomic():
@@ -243,19 +249,27 @@ def chat_api(request, clinic_slug):
     return JsonResponse({"message": clinic.widget_welcome_message, "services": services})
 
 
-def _widget_chat_history_version_key(clinic):
-    return f"widget_chat_history_version_{clinic.id}"
+def _clean_widget_conversation_id(value):
+    cleaned = "".join(
+        char for char in (value or "").strip()
+        if char.isalnum() or char in {"-", "_", ":"}
+    )
+    return cleaned[:WIDGET_AI_CONVERSATION_ID_MAX_LENGTH] or "default"
 
 
-def _widget_chat_history_key(clinic):
-    return f"widget_chat_history_{clinic.id}"
+def _widget_chat_history_version_key(clinic, conversation_id="default"):
+    return f"widget_chat_history_version_{clinic.id}_{conversation_id}"
 
 
-def _widget_chat_history(request, clinic, ai_settings=None):
-    history_key = _widget_chat_history_key(clinic)
+def _widget_chat_history_key(clinic, conversation_id="default"):
+    return f"widget_chat_history_{clinic.id}_{conversation_id}"
+
+
+def _widget_chat_history(request, clinic, ai_settings=None, conversation_id="default"):
+    history_key = _widget_chat_history_key(clinic, conversation_id)
     if ai_settings:
         current_version = ai_settings.updated_at.isoformat()
-        version_key = _widget_chat_history_version_key(clinic)
+        version_key = _widget_chat_history_version_key(clinic, conversation_id)
         if request.session.get(version_key) != current_version:
             request.session[history_key] = []
             request.session[version_key] = current_version
@@ -264,23 +278,39 @@ def _widget_chat_history(request, clinic, ai_settings=None):
     return request.session.get(history_key, [])
 
 
-def _save_widget_chat_history(request, clinic, history, ai_settings=None):
-    request.session[_widget_chat_history_key(clinic)] = history[-10:]
+def _save_widget_chat_history(request, clinic, history, ai_settings=None, conversation_id="default"):
+    request.session[_widget_chat_history_key(clinic, conversation_id)] = history[-10:]
     if ai_settings:
-        request.session[_widget_chat_history_version_key(clinic)] = ai_settings.updated_at.isoformat()
+        request.session[_widget_chat_history_version_key(clinic, conversation_id)] = ai_settings.updated_at.isoformat()
+
+
+def _widget_ai_rate_limited(request, clinic, conversation_id):
+    limit = getattr(settings, "WIDGET_AI_CHAT_RATE_LIMIT", WIDGET_AI_DEFAULT_RATE_LIMIT)
+    if not limit:
+        return False
+    window_seconds = getattr(settings, "WIDGET_AI_CHAT_RATE_WINDOW_SECONDS", WIDGET_AI_DEFAULT_RATE_WINDOW_SECONDS)
+    if not request.session.session_key:
+        request.session.create()
+    actor = request.session.session_key or request.META.get("REMOTE_ADDR", "unknown")
+    cache_key = f"widget_ai_chat_rate:{clinic.id}:{actor}"
+    count = cache.get(cache_key, 0)
+    if count >= limit:
+        return True
+    cache.set(cache_key, count + 1, timeout=window_seconds)
+    return False
 
 
 WIDGET_AI_STATE = "ai"
 WIDGET_AI_SUGGESTIONS = []
 
 
-def _widget_ai_json(message, options=None):
+def _widget_ai_json(message, options=None, status=200):
     return JsonResponse({
         "state": WIDGET_AI_STATE,
         "message": message,
         "options": options or [],
         "next_action": "text_input",
-    })
+    }, status=status)
 
 
 def _widget_ai_fallback_message(ai_settings):
@@ -315,26 +345,32 @@ def _widget_ai_message_from_action(action, value):
     return ""
 
 
-def _handle_widget_ai_chat(request, clinic, action, value):
+def _handle_widget_ai_chat(request, clinic, action, value, conversation_id="default"):
     ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
 
     if not ai_settings.is_ai_enabled:
         return _widget_ai_json(_widget_ai_fallback_message(ai_settings))
 
     if action == "init":
-        _widget_chat_history(request, clinic, ai_settings)
+        _widget_chat_history(request, clinic, ai_settings, conversation_id)
         return _widget_ai_json(_widget_ai_initial_message(clinic), WIDGET_AI_SUGGESTIONS)
 
     message = _widget_ai_message_from_action(action, value)
     if not message:
         return _widget_ai_json(_widget_ai_initial_message(clinic), WIDGET_AI_SUGGESTIONS)
+    max_message_length = getattr(settings, "WIDGET_AI_CHAT_MAX_MESSAGE_LENGTH", WIDGET_AI_DEFAULT_MAX_MESSAGE_LENGTH)
+    if len(message) > max_message_length:
+        return _widget_ai_json(f"Please keep messages under {max_message_length} characters.")
+    if _widget_ai_rate_limited(request, clinic, conversation_id):
+        return _widget_ai_json("Too many messages. Please wait a moment before trying again.", status=429)
 
-    history = _widget_chat_history(request, clinic, ai_settings)
+    history = _widget_chat_history(request, clinic, ai_settings, conversation_id)
     if not request.session.session_key:
         request.session.create()
+    assistant_session_id = f"{request.session.session_key}:{conversation_id}"
 
     try:
-        reply = call_assistant_webhook(clinic, message, history, request.session.session_key)
+        reply = call_assistant_webhook(clinic, message, history, assistant_session_id, conversation_id)
     except AssistantUnavailable as error:
         reply = _widget_ai_unavailable_message(ai_settings, error)
     except (requests.RequestException, ValueError):
@@ -344,7 +380,7 @@ def _handle_widget_ai_chat(request, clinic, action, value):
         {"role": "user", "content": message},
         {"role": "assistant", "content": reply},
     ])
-    _save_widget_chat_history(request, clinic, history, ai_settings)
+    _save_widget_chat_history(request, clinic, history, ai_settings, conversation_id)
     return _widget_ai_json(reply)
 
 
@@ -353,5 +389,6 @@ def chat_step(request, clinic_slug):
     clinic = _get_public_clinic_or_404(clinic_slug)
     action = request.POST.get("action", "")
     value = request.POST.get("value", "")
+    conversation_id = _clean_widget_conversation_id(request.POST.get("conversation_id", ""))
 
-    return _handle_widget_ai_chat(request, clinic, action, value)
+    return _handle_widget_ai_chat(request, clinic, action, value, conversation_id)

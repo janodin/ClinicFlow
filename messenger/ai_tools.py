@@ -153,7 +153,13 @@ def get_connection_for_page(page_id):
         return None
     return (
         MessengerConnection.objects.select_related("clinic")
-        .filter(page_id=page_id, is_active=True, clinic__is_active=True, clinic__requires_onboarding=False)
+        .filter(
+            page_id=page_id,
+            page_access_token__gt="",
+            is_active=True,
+            clinic__is_active=True,
+            clinic__requires_onboarding=False,
+        )
         .first()
     )
 

@@ -20,6 +20,13 @@ def test_settings_loads_project_dotenv_before_security_env_reads():
     assert source.index('load_dotenv(BASE_DIR / ".env")') < source.index('SECRET_KEY = os.getenv("SECRET_KEY"')
 
 
+def test_meta_messenger_n8n_webhook_url_has_no_live_default():
+    source = Path("config/settings.py").read_text(encoding="utf-8")
+
+    assert 'META_MESSENGER_N8N_WEBHOOK_URL = os.getenv("META_MESSENGER_N8N_WEBHOOK_URL", "")' in source
+    assert "157-90-164-203.nip.io" not in source
+
+
 SECURE_SECRET_KEY = "ProductionStrongValueForDjangoChecksOnly12345678901234567890"
 SECURE_N8N_WEBHOOK_SECRET = "N8nWebhookValueForTestsOnly1234567890"
 SECURE_MESSENGER_VERIFY_TOKEN = "MessengerVerifyValueForTestsOnly1234567890"

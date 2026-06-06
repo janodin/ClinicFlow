@@ -180,8 +180,8 @@
 
         <!-- Chat Input -->
         <div x-show="chatTab==='conversation' && chatState !== 'collect_info'" class="mt-3 flex gap-2">
-          <input x-model="chatInput" @keydown.enter="sendChat()" aria-label="Type a message" placeholder="Type a message..." class="cf-input min-w-0 flex-1">
-          <button @click="sendChat()" class="min-h-11 min-w-11 rounded-xl px-3 py-2" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="send" class="h-4 w-4"></i></button>
+          <input x-model="chatInput" @keydown.enter="sendChat()" :disabled="isAssistantTyping" maxlength="{{ widget_ai_max_message_length }}" aria-label="Type a message" placeholder="Type a message..." class="cf-input min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-60">
+          <button @click="sendChat()" :disabled="isAssistantTyping || !chatInput.trim()" class="min-h-11 min-w-11 rounded-xl px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="send" class="h-4 w-4"></i></button>
         </div>
       </div>
     </div>
@@ -205,6 +205,7 @@
       chatState: 'greeting',
       chatInput: '',
       isAssistantTyping: false,
+      conversationId: '',
       faqQuery: '',
       faqs: [
         {% for faq in faqs %}
@@ -225,6 +226,10 @@
         const darkContrast = (luminance + 0.05) / 0.061;
         const lightContrast = 1.05 / (luminance + 0.05);
         return darkContrast >= lightContrast ? '#001f2a' : '#ffffff';
+      },
+      newConversationId() {
+        if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+        return 'conv-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
       },
       messageParts(text) {
         const source = String(text || '');
@@ -260,7 +265,7 @@
         return parts;
       },
       init() {
-        // optional initialization
+        this.conversationId = this.newConversationId();
       },
       startBook() {
         this.mode = 'book';
@@ -306,6 +311,7 @@
         this.chatState = 'greeting';
         this.chatInput = '';
         this.isAssistantTyping = false;
+        this.conversationId = this.newConversationId();
         this.faqQuery = '';
         this.collectInfo = { full_name: '', phone: '', email: '' };
       },
@@ -332,6 +338,7 @@
         const formData = new FormData();
         formData.append('action', action);
         if (value !== undefined && value !== null) formData.append('value', value);
+        formData.append('conversation_id', this.conversationId || this.newConversationId());
         if (extra) {
           if (extra.full_name) formData.append('full_name', extra.full_name);
           if (extra.phone) formData.append('phone', extra.phone);
@@ -345,10 +352,10 @@
             body: formData,
             headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
           });
-          if (!resp.ok) {
-            throw new Error('Assistant request failed.');
-          }
           const data = await resp.json();
+          if (!resp.ok) {
+            throw new Error(data.message || 'Assistant request failed.');
+          }
           if (stateResetVersion !== this.stateResetVersion) return;
           this.chatState = data.state;
           this.chatOptions = data.options || [];
@@ -359,7 +366,7 @@
           if (stateResetVersion !== this.stateResetVersion) return;
           this.chatState = 'ai';
           this.chatOptions = [];
-          this.chatHistory.push({id: this.nextId++, role: 'assistant', text: 'Sorry, I could not reach the assistant. Please try again or use Book an Appointment.'});
+          this.chatHistory.push({id: this.nextId++, role: 'assistant', text: error.message || 'Sorry, I could not reach the assistant. Please try again or use Book an Appointment.'});
         } finally {
           if (stateResetVersion === this.stateResetVersion) {
             this.isAssistantTyping = false;
@@ -372,6 +379,7 @@
         this.chatOptions = [];
         if (opt.value === 'restart') {
           this.chatHistory = [];
+          this.conversationId = this.newConversationId();
           this.sendChatAction('init');
           return;
         }

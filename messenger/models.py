@@ -82,3 +82,17 @@ class MessengerSession(TimeStampedModel):
 
     def __str__(self):
         return f"MessengerSession({self.psid} -> {self.state})"
+
+
+class MessengerProcessedMessage(TimeStampedModel):
+    connection = models.ForeignKey(MessengerConnection, on_delete=models.CASCADE, related_name="processed_messages")
+    psid = models.CharField(max_length=64, db_index=True)
+    message_id = models.CharField(max_length=128)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["connection", "psid", "message_id"], name="unique_messenger_processed_message"),
+        ]
+
+    def __str__(self):
+        return f"MessengerProcessedMessage({self.psid} -> {self.message_id})"

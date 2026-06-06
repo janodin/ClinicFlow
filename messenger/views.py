@@ -32,7 +32,7 @@ from .ai_tools import (
 )
 from .bot_engine import handle_message
 from .messenger_api import verify_signature
-from .models import MessengerConnection, MessengerSession
+from .models import MessengerConnection, MessengerProcessedMessage, MessengerSession
 
 
 logger = logging.getLogger(__name__)
@@ -109,12 +109,36 @@ def _payload_matches_page(data, page_id):
     return True
 
 
+def _payload_contains_message_identity(data, page_id, psid, message_id):
+    if not isinstance(data, dict) or not page_id or not psid or not message_id:
+        return False
+    entries = data.get("entry", [])
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        if not isinstance(entry, dict) or str(entry.get("id") or "") != page_id:
+            continue
+        messaging_items = entry.get("messaging", [])
+        if not isinstance(messaging_items, list):
+            continue
+        for messaging in messaging_items:
+            if not isinstance(messaging, dict):
+                continue
+            sender = messaging.get("sender", {})
+            if not isinstance(sender, dict) or str(sender.get("id") or "") != psid:
+                continue
+            if _meta_message_id(messaging) == message_id:
+                return True
+    return False
+
+
 def _active_connection_for_page(page_id):
     if not page_id:
         return None
     try:
         return MessengerConnection.objects.select_related("clinic").get(
             page_id=page_id,
+            page_access_token__gt="",
             is_active=True,
             clinic__is_active=True,
             clinic__requires_onboarding=False,
@@ -154,11 +178,34 @@ def _verified_messenger_connections_for_request(request):
         is_active=True,
         clinic__is_active=True,
         clinic__requires_onboarding=False,
+        page_id__gt="",
+        page_access_token__gt="",
     )
     for connection in connections:
         if verify_signature(request.body, signature, _meta_app_secret_for_connection(connection)):
             verified[connection.page_id] = connection
     return verified
+
+
+def _meta_message_id(messaging):
+    message = messaging.get("message", {})
+    if not isinstance(message, dict):
+        message = {}
+    postback = messaging.get("postback", {})
+    if not isinstance(postback, dict):
+        postback = {}
+    return str(message.get("mid") or postback.get("mid") or "").strip()
+
+
+def _mark_messenger_message_processed(connection, psid, message_id):
+    if not message_id:
+        return False
+    _, created = MessengerProcessedMessage.objects.get_or_create(
+        connection=connection,
+        psid=psid,
+        message_id=message_id,
+    )
+    return not created
 
 
 def _ai_tool_response(request, handler):
@@ -260,6 +307,8 @@ def meta_signature_verify(request):
     page_id = data.get("page_id", "")
     raw_body = data.get("raw_body", "")
     signature = data.get("signature", "")
+    psid = data.get("psid", "")
+    message_id = data.get("message_id", "")
     if not all(isinstance(value, str) for value in [page_id, raw_body, signature]):
         return JsonResponse({"verified": False}, status=200)
 
@@ -271,6 +320,7 @@ def meta_signature_verify(request):
         and verify_signature(raw_body.encode("utf-8"), signature, app_secret)
     )
     verified = False
+    raw_data = None
     if signature_valid:
         try:
             raw_data = json.loads(raw_body)
@@ -278,7 +328,18 @@ def meta_signature_verify(request):
             raw_data = None
         verified = _payload_matches_page(raw_data, page_id)
 
-    return JsonResponse({"verified": verified}, status=200)
+    response = {"verified": verified}
+    if isinstance(message_id, str) and message_id.strip():
+        duplicate = False
+        clean_psid = psid.strip() if isinstance(psid, str) else ""
+        clean_message_id = message_id.strip()
+        if verified and not _payload_contains_message_identity(raw_data, page_id, clean_psid, clean_message_id):
+            verified = False
+            response["verified"] = False
+        elif verified and connection:
+            duplicate = _mark_messenger_message_processed(connection, clean_psid, clean_message_id)
+        response["duplicate"] = duplicate
+    return JsonResponse(response, status=200)
 
 
 @csrf_exempt
@@ -518,11 +579,16 @@ def webhook(request):
 
                 if not sender_id or not recipient_id:
                     continue
+                if not text.strip() and not payload_str:
+                    continue
 
                 connection = verified_connections.get(recipient_id)
                 if not connection:
                     continue
                 if _uses_messenger_ai_mode(connection):
+                    continue
+                message_id = _meta_message_id(messaging)
+                if _mark_messenger_message_processed(connection, str(sender_id), message_id):
                     continue
 
                 session, _ = MessengerSession.objects.get_or_create(

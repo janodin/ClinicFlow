@@ -30,16 +30,22 @@ def test_combined_bridge_uses_kliniassist_technical_namespace():
     assert legacy_agent not in source
 
 
-def test_combined_bridge_django_base_url_does_not_use_blocked_n8n_env_access():
+def test_combined_bridge_builds_django_urls_from_one_base_url_constant():
     source = SOURCE.read_text(encoding="utf-8")
 
     assert "process.env.DJANGO_BASE_URL" not in source
-    assert "DJANGO_BASE_URL_EXPR" not in source
     assert "$env.DJANGO_BASE_URL" not in source
     assert "$env" not in source
-    assert "$vars" not in source
     assert "process.env" not in source
-    assert "https://178-105-83-211.nip.io" in source
+    assert "const DJANGO_BASE_URL_FALLBACK =" in source
+    assert "const DJANGO_BASE_URL_EXPR =" in source
+    assert "$vars.DJANGO_BASE_URL" in source
+    assert "DJANGO_MESSENGER_WEBHOOK_URL_EXPR" in source
+    assert "DJANGO_MESSENGER_AI_BOOK_URL_EXPR" in source
+    assert "url: DJANGO_MESSENGER_WEBHOOK_URL_EXPR" in source
+    assert "DJANGO_MESSENGER_AI_BOOK_URL_EXPR" in source
+    assert source.count("https://178-105-83-211.nip.io") == 1
+    assert "https://157-90-164-203.nip.io" not in source
 
 
 def test_meta_webhook_verification_delegates_token_check_to_django():
@@ -56,7 +62,7 @@ def test_meta_webhook_verification_delegates_token_check_to_django():
     assert "$env.MESSENGER_VERIFY_TOKEN" not in response_block
     assert "const expectedToken" not in verify_block
     assert "type: 'n8n-nodes-base.httpRequest'" in verify_block
-    assert "/messenger/webhook/" in verify_block
+    assert "DJANGO_MESSENGER_WEBHOOK_URL_EXPR" in verify_block
     assert "method: 'GET'" in verify_block
     assert "sendQuery: true" in verify_block
     assert "hub.mode" in verify_block
@@ -92,6 +98,53 @@ def test_combined_bridge_tools_inject_tenant_identity_from_shared_context():
     assert widget_clinic_slug_expression in match_services_tool_block
     assert widget_clinic_slug_expression in check_availability_tool_block
     assert widget_clinic_slug_expression in book_confirmed_appointment_tool_block
+
+
+def test_combined_bridge_messenger_booking_tool_sends_psid_from_shared_context():
+    source = SOURCE.read_text(encoding="utf-8")
+    book_start = source.index("name: 'book_confirmed_appointment'")
+    quick_replies_start = source.index("const getMessengerQuickReplies")
+    book_confirmed_appointment_tool_block = source[book_start:quick_replies_start]
+
+    assert "psid: expr('{{ $(\"Shared AI Input\").item.json.channel === \"messenger\" ? $(\"Shared AI Input\").item.json.psid : \"\" }}')" in book_confirmed_appointment_tool_block
+
+
+def test_combined_bridge_keeps_page_token_out_of_ai_prompt_context():
+    source = SOURCE.read_text(encoding="utf-8")
+    messenger_start = source.index("name: 'Build Messenger Shared Input'")
+    widget_start = source.index("name: 'Build Widget Shared Input'")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
+    fallback_start = source.index("const prepareSharedFallback")
+    prepare_start = source.index("name: 'Prepare Channel Reply'")
+    route_start = source.index("const routeChannelReply")
+    messenger_block = source[messenger_start:widget_start]
+    agent_block = source[agent_start:fallback_start]
+    prepare_block = source[prepare_start:route_start]
+
+    assert "const { page_token: pageToken, ...safeContext } = rawContext;" in messenger_block
+    assert "access_token: pageToken || ''" in messenger_block
+    assert "context: safeContext" in messenger_block
+    assert "JSON.stringify($(\"Shared AI Input\").item.json.context || {})" in agent_block
+    assert "access_token: shared.access_token || ''" in prepare_block
+    assert "context.page_token" not in source
+
+
+def test_combined_bridge_ai_http_tools_have_explicit_timeouts():
+    source = SOURCE.read_text(encoding="utf-8")
+    tool_names = [
+        "match_services",
+        "check_availability",
+        "book_confirmed_appointment",
+        "find_verified_appointment",
+        "cancel_verified_appointment",
+        "reschedule_verified_appointment",
+    ]
+
+    for index, tool_name in enumerate(tool_names):
+        start = source.index(f"name: '{tool_name}'")
+        end = source.index(f"name: '{tool_names[index + 1]}'") if index + 1 < len(tool_names) else source.index("const getMessengerQuickReplies")
+        tool_block = source[start:end]
+        assert "options: { timeout: 15000 }" in tool_block
 
 
 def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
@@ -155,14 +208,14 @@ def test_combined_bridge_includes_verified_appointment_management_tools():
     cancel_block = source[cancel_start:reschedule_start]
     reschedule_block = source[reschedule_start:quick_replies_start]
 
-    assert "/messenger/ai/appointment/lookup/" in lookup_block
-    assert "/messenger/ai/widget/appointment/lookup/" in lookup_block
+    assert "DJANGO_MESSENGER_AI_APPOINTMENT_LOOKUP_URL_EXPR" in lookup_block
+    assert "DJANGO_WIDGET_AI_APPOINTMENT_LOOKUP_URL_EXPR" in lookup_block
     assert "KliniAssist N8N Webhook Secret" in lookup_block
-    assert "/messenger/ai/appointment/cancel/" in cancel_block
-    assert "/messenger/ai/widget/appointment/cancel/" in cancel_block
+    assert "DJANGO_MESSENGER_AI_APPOINTMENT_CANCEL_URL_EXPR" in cancel_block
+    assert "DJANGO_WIDGET_AI_APPOINTMENT_CANCEL_URL_EXPR" in cancel_block
     assert "KliniAssist N8N Webhook Secret" in cancel_block
-    assert "/messenger/ai/appointment/reschedule/" in reschedule_block
-    assert "/messenger/ai/widget/appointment/reschedule/" in reschedule_block
+    assert "DJANGO_MESSENGER_AI_APPOINTMENT_RESCHEDULE_URL_EXPR" in reschedule_block
+    assert "DJANGO_WIDGET_AI_APPOINTMENT_RESCHEDULE_URL_EXPR" in reschedule_block
     assert "KliniAssist N8N Webhook Secret" in reschedule_block
     for block in [lookup_block, cancel_block, reschedule_block]:
         assert "fromAi('page_id'" not in block
@@ -216,7 +269,7 @@ def test_combined_bridge_versions_upstream_session_key_by_ai_settings():
     messenger_block = source[messenger_start:widget_start]
     widget_block = source[widget_start:shared_input_start]
 
-    assert "const aiVersion = context.ai?.settings_updated_at || 'unversioned';" in messenger_block
+    assert "const aiVersion = safeContext.ai?.settings_updated_at || 'unversioned';" in messenger_block
     assert "session_key: source.session_key + ':ai-settings:' + aiVersion" in messenger_block
     assert "const aiVersion = context.ai?.settings_updated_at || 'unversioned';" in widget_block
     assert "session_key: source.session_key + ':ai-settings:' + aiVersion" in widget_block
@@ -230,7 +283,7 @@ def test_channel_reply_code_preserves_regex_escapes_for_n8n():
     assert "<\\\\/?think>" in source
 
 
-def test_meta_messenger_events_uses_explicit_webhook_ack_before_shared_ai_path():
+def test_meta_messenger_events_acknowledges_only_after_signature_verification():
     source = SOURCE.read_text(encoding="utf-8")
 
     meta_events_start = source.index("name: 'Meta Messenger Events'")
@@ -240,7 +293,9 @@ def test_meta_messenger_events_uses_explicit_webhook_ack_before_shared_ai_path()
     assert "responseMode: 'responseNode'" in meta_events_block
     assert "name: 'Acknowledge Meta Messenger Event'" in source
     assert "responseBody: 'EVENT_RECEIVED'" in source
-    assert ".add(metaMessengerEvents)\n  .to(acknowledgeMetaMessengerEvent)\n  .to(normalizeMessengerRequest)" in source
+    assert source.index("name: 'Verify Meta Signature'") < source.index("name: 'Acknowledge Meta Messenger Event'")
+    assert ".add(metaMessengerEvents)\n  .to(acknowledgeMetaMessengerEvent)" not in source
+    assert ".to(routeMetaSignature\n    .onCase(0, acknowledgeMetaMessengerEvent.to(getMessengerClinicContext" in source
 
 
 def test_meta_messenger_events_verify_signature_before_context_lookup():
@@ -255,10 +310,70 @@ def test_meta_messenger_events_verify_signature_before_context_lookup():
     assert "raw_body" in source
     assert "X-Hub-Signature-256" in source
     assert "signature_verified" in source
+    assert "duplicate_message" in source
     assert "signature_invalid" in source
     assert "Get Messenger Clinic Context" in source
     assert source.index("name: 'Verify Meta Signature'") < source.index("name: 'Get Messenger Clinic Context'")
     assert ".to(normalizeMessengerRequest)\n  .to(verifyMetaSignature)\n  .to(routeMetaSignature" in source
+
+
+def test_meta_messenger_signature_verification_sends_message_identity_to_django():
+    source = SOURCE.read_text(encoding="utf-8")
+    normalize_start = source.index("name: 'Normalize Messenger Request'")
+    normalize_end = source.index("const verifyMetaSignature")
+    normalize_block = source[normalize_start:normalize_end]
+    verify_start = source.index("name: 'Verify Meta Signature'")
+    verify_end = source.index("const routeMetaSignature")
+    verify_block = source[verify_start:verify_end]
+
+    assert "message_id" in normalize_block
+    assert "messaging.message?.mid" in normalize_block
+    assert "messaging.postback?.mid" in normalize_block
+    assert "message_id: $json.message_id" in verify_block
+    assert "psid: $json.psid" in verify_block
+
+
+def test_meta_messenger_invalid_signature_returns_403_without_acknowledging_event():
+    source = SOURCE.read_text(encoding="utf-8")
+    invalid_start = source.index("const returnInvalidMetaSignature")
+    invalid_end = source.index("const widgetAssistantWebhook")
+    invalid_block = source[invalid_start:invalid_end]
+
+    assert "type: 'n8n-nodes-base.respondToWebhook'" in invalid_block
+    assert "responseCode: 403" in invalid_block
+    assert "Invalid signature" in invalid_block
+    assert ".onCase(3, returnInvalidMetaSignature)" in source
+
+
+def test_meta_messenger_duplicate_message_is_acknowledged_without_context_lookup():
+    source = SOURCE.read_text(encoding="utf-8")
+    route_start = source.index("name: 'Route Meta Signature'")
+    route_end = source.index("const acknowledgeMetaMessengerEvent")
+    route_block = source[route_start:route_end]
+
+    assert "duplicate_message" in route_block
+    assert "$json.duplicate ? \"true\" : \"false\"" in route_block
+    assert ".onCase(1, acknowledgeDuplicateMetaMessengerEvent)" in source
+    assert "acknowledgeDuplicateMetaMessengerEvent.to(getMessengerClinicContext" not in source
+
+
+def test_meta_messenger_ignored_events_are_acknowledged_without_context_lookup():
+    source = SOURCE.read_text(encoding="utf-8")
+    normalize_start = source.index("name: 'Normalize Messenger Request'")
+    normalize_end = source.index("const verifyMetaSignature")
+    normalize_block = source[normalize_start:normalize_end]
+    route_start = source.index("name: 'Route Meta Signature'")
+    route_end = source.index("const acknowledgeMetaMessengerEvent")
+    route_block = source[route_start:route_end]
+
+    assert "const ignoredCandidates = [];" in normalize_block
+    assert "ignored_event: true" in normalize_block
+    assert "if (!items.length)" in normalize_block
+    assert "return [];" not in normalize_block
+    assert "ignored_event" in route_block
+    assert "$(\"Normalize Messenger Request\").item.json.ignored_event" in route_block
+    assert ".onCase(2, acknowledgeIgnoredMetaMessengerEvent)" in source
+    assert "acknowledgeIgnoredMetaMessengerEvent.to(getMessengerClinicContext" not in source
 
 
 def test_meta_messenger_normalizer_parses_raw_string_body_for_routing():
@@ -362,16 +477,5 @@ def test_combined_bridge_messenger_ai_mode_is_independent_from_widget_ai_switch(
     assert "Messenger must use messenger_response_mode. Widget keeps is_ai_enabled." in source
 
 
-def test_legacy_messenger_workflow_handles_quick_reply_payload_and_messaging_type():
-    source = LEGACY_SOURCE.read_text(encoding="utf-8")
-
-    assert "msg.message?.quick_reply?.payload" in source
-    assert "messaging_type: 'RESPONSE'" in source
-    assert "$input.first()" not in source
-    assert "$('Format Django Payload').first()" not in source
-    assert "return $input.all().map" in source
-    assert "payloadItems[itemIndex]?.json?.psid" not in source
-    assert "const psid = djangoResponse.psid || '';" in source
-    assert "if (!pageToken || !psid) { continue; }" in source
-    assert "if (quickReplies.length)" in source
-    assert "message.quick_replies = quickReplies" in source
+def test_legacy_messenger_workflow_source_is_not_checked_in():
+    assert not LEGACY_SOURCE.exists()

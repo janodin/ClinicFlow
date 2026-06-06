@@ -209,7 +209,7 @@ MESSENGER_SESSION_TIMEOUT_MINUTES = int(os.getenv("MESSENGER_SESSION_TIMEOUT_MIN
 N8N_WEBHOOK_SECRET = os.getenv("N8N_WEBHOOK_SECRET", "")
 ASSISTANT_N8N_WEBHOOK_URL = os.getenv("ASSISTANT_N8N_WEBHOOK_URL", "")
 ASSISTANT_N8N_TIMEOUT_SECONDS = int(os.getenv("ASSISTANT_N8N_TIMEOUT_SECONDS", "12"))
-META_MESSENGER_N8N_WEBHOOK_URL = os.getenv("META_MESSENGER_N8N_WEBHOOK_URL", "https://157-90-164-203.nip.io/webhook/kliniassist-messenger")
+META_MESSENGER_N8N_WEBHOOK_URL = os.getenv("META_MESSENGER_N8N_WEBHOOK_URL", "")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

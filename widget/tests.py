@@ -2,6 +2,7 @@ from datetime import datetime, time, timedelta, timezone as dt_timezone
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -803,3 +804,113 @@ class WidgetTests(TestCase):
         self.assertEqual(data["state"], "ai")
         self.assertIn("ASSISTANT_N8N_WEBHOOK_URL", data["message"])
         self.assertIn("N8N_WEBHOOK_SECRET", data["message"])
+
+    @override_settings(DEBUG=False, ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_fails_closed_when_n8n_secret_is_missing(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True, fallback_message="Use the booking form.")
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "text_input", "value": "Hello"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Use the booking form.", response.json()["message"])
+        mock_post.assert_not_called()
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_uses_fallback_for_malformed_n8n_response(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True, fallback_message="Safe fallback.")
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = []
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "text_input", "value": "Hello"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Safe fallback.", response.json()["message"])
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_uses_fallback_for_non_string_n8n_reply(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True, fallback_message="Safe fallback.")
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": {"text": "hello"}}
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "text_input", "value": "Hello"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Safe fallback.", response.json()["message"])
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_scopes_history_and_n8n_session_by_conversation_id(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "Reply from AI."}
+        url = reverse("widget:chat_step", args=[self.clinic.slug])
+
+        self.client.post(url, {"action": "text_input", "value": "First", "conversation_id": "conversation-a"})
+        response = self.client.post(url, {"action": "text_input", "value": "Second", "conversation_id": "conversation-b"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["message"], "Second")
+        self.assertEqual(payload["history"], [])
+        self.assertEqual(payload["conversation_id"], "conversation-b")
+        self.assertTrue(payload["session_id"].endswith(":conversation-b"))
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret", WIDGET_AI_CHAT_MAX_MESSAGE_LENGTH=12)
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_rejects_oversized_messages_without_calling_n8n(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "text_input", "value": "This is much too long"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("under 12 characters", response.json()["message"])
+        mock_post.assert_not_called()
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret", WIDGET_AI_CHAT_RATE_LIMIT=1, WIDGET_AI_CHAT_RATE_WINDOW_SECONDS=60)
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_rate_limits_public_chat_without_calling_n8n_again(self, mock_post):
+        cache.clear()
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "Reply from AI."}
+        url = reverse("widget:chat_step", args=[self.clinic.slug])
+
+        first = self.client.post(url, {"action": "text_input", "value": "Hello"})
+        second = self.client.post(url, {"action": "text_input", "value": "Hello again"})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertIn("Too many messages", second.json()["message"])
+        self.assertEqual(mock_post.call_count, 1)
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret", WIDGET_AI_CHAT_RATE_LIMIT=1, WIDGET_AI_CHAT_RATE_WINDOW_SECONDS=60)
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_rate_limit_cannot_be_bypassed_by_rotating_conversation_id(self, mock_post):
+        cache.clear()
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "Reply from AI."}
+        url = reverse("widget:chat_step", args=[self.clinic.slug])
+
+        first = self.client.post(url, {"action": "text_input", "value": "Hello", "conversation_id": "conversation-a"})
+        second = self.client.post(url, {"action": "text_input", "value": "Hello again", "conversation_id": "conversation-b"})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertIn("Too many messages", second.json()["message"])
+        self.assertEqual(mock_post.call_count, 1)

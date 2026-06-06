@@ -1199,6 +1199,53 @@ def test_messenger_settings_mask_submission_keeps_saved_secrets(mock_get, clinic
 
 
 @pytest.mark.django_db
+def test_messenger_settings_rejects_incomplete_active_connection(clinic_setup, client):
+    from messenger.models import MessengerConnection
+
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:messenger_settings"),
+        {
+            "_form": "connection_settings",
+            "app_id": "1234567890",
+            "app_secret": "APP-SECRET",
+            "page_id": "",
+            "page_access_token": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"Facebook Page ID is required" in response.content
+    assert b"Page Access Token is required" in response.content
+    assert not MessengerConnection.objects.filter(clinic=clinic, is_active=True).exists()
+
+
+@pytest.mark.django_db
+def test_messenger_settings_treats_incomplete_active_connection_as_not_configured(clinic_setup, client):
+    from messenger.models import MessengerConnection
+
+    clinic, service, user = clinic_setup
+    MessengerConnection.objects.create(
+        clinic=clinic,
+        app_id="1234567890",
+        page_id="PAGE-DASH-INCOMPLETE",
+        page_access_token="",
+        is_active=True,
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:messenger_settings"))
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "Not Configured" in content
+    assert "Connected" not in content
+    assert "Enter your Facebook Page details for the n8n workflow." in content
+
+
+@pytest.mark.django_db
 def test_staff_cannot_reveal_saved_messenger_secret(clinic_setup, client):
     from messenger.models import MessengerConnection
 
