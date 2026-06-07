@@ -71,6 +71,33 @@
         {% endif %}
       </div>
 
+      <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 class="cf-section-title text-lg">Communication Tone</h3>
+            <p class="mt-1 text-sm text-[var(--cf-muted)]">Choose how the shared Assistant sounds in the website Assistant and Messenger AI mode.</p>
+          </div>
+          <span class="cf-badge cf-badge-info self-start">Shared</span>
+        </div>
+        <div class="mt-4 grid gap-4 md:grid-cols-[minmax(0,.45fr)_minmax(0,.55fr)]">
+          <div class="cf-field">
+            <label class="cf-label" for="{{ ai_form.communication_tone.id_for_label }}">{{ ai_form.communication_tone.label }}</label>
+            {{ ai_form.communication_tone }}
+            {% if ai_form.communication_tone.errors %}
+              <p class="text-sm text-red-600 mt-1">{{ ai_form.communication_tone.errors.0 }}</p>
+            {% endif %}
+          </div>
+          <div class="cf-field">
+            <label class="cf-label" for="{{ ai_form.custom_tone_instructions.id_for_label }}">{{ ai_form.custom_tone_instructions.label }}</label>
+            {{ ai_form.custom_tone_instructions }}
+            {% if ai_form.custom_tone_instructions.errors %}
+              <p class="text-sm text-red-600 mt-1">{{ ai_form.custom_tone_instructions.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+        <p class="mt-3 text-xs text-[var(--cf-muted)]">Tone affects wording only. Services, prices, availability, booking rules, and safety checks still come from KliniAssist.</p>
+      </div>
+
       <div class="cf-field">
         <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
           <label class="cf-label" for="{{ ai_form.instructions.id_for_label }}">{{ ai_form.instructions.label }}</label>
@@ -83,7 +110,7 @@
           </button>
         </div>
         {{ ai_form.instructions }}
-        <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell the assistant how to speak, what clinic policies to follow, and what it should avoid. Services, prices, and availability still come from KliniAssist.</p>
+        <p class="mt-1 text-xs text-[var(--cf-muted)]">Use this for broader assistant behavior and clinic policies. Tone is controlled above. Services, prices, and availability still come from KliniAssist.</p>
         {% if ai_form.instructions.errors %}
           <p class="text-sm text-red-600 mt-1">{{ ai_form.instructions.errors.0 }}</p>
         {% endif %}

@@ -115,6 +115,19 @@ class ClinicAISettings(TimeStampedModel):
         (MESSENGER_MODE_AI, "AI mode"),
     ]
 
+    TONE_PROFESSIONAL = "professional"
+    TONE_WARM = "warm"
+    TONE_EMPATHETIC = "empathetic"
+    TONE_CONCISE = "concise"
+    TONE_FRIENDLY = "friendly"
+    COMMUNICATION_TONE_CHOICES = [
+        (TONE_PROFESSIONAL, "Professional"),
+        (TONE_WARM, "Warm"),
+        (TONE_EMPATHETIC, "Empathetic"),
+        (TONE_CONCISE, "Concise"),
+        (TONE_FRIENDLY, "Friendly"),
+    ]
+
     clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="ai_settings")
     is_ai_enabled = models.BooleanField(default=True)
     messenger_response_mode = models.CharField(
@@ -122,6 +135,12 @@ class ClinicAISettings(TimeStampedModel):
         choices=MESSENGER_RESPONSE_MODE_CHOICES,
         default=MESSENGER_MODE_QUICK_REPLIES,
     )
+    communication_tone = models.CharField(
+        max_length=24,
+        choices=COMMUNICATION_TONE_CHOICES,
+        default=TONE_PROFESSIONAL,
+    )
+    custom_tone_instructions = models.TextField(blank=True, default="", max_length=500)
     instructions = models.TextField(blank=True, default=DEFAULT_MESSENGER_AI_PROMPT)
     fallback_message = models.TextField(blank=True, default=DEFAULT_AI_FALLBACK_MESSAGE)
 
@@ -137,6 +156,18 @@ class ClinicAISettings(TimeStampedModel):
         if self.messenger_response_mode in valid_modes:
             return self.messenger_response_mode
         return self.MESSENGER_MODE_QUICK_REPLIES
+
+    @property
+    def safe_communication_tone(self):
+        valid_tones = {choice[0] for choice in self.COMMUNICATION_TONE_CHOICES}
+        if self.communication_tone in valid_tones:
+            return self.communication_tone
+        return self.TONE_PROFESSIONAL
+
+    @property
+    def communication_tone_label(self):
+        labels = dict(self.COMMUNICATION_TONE_CHOICES)
+        return labels[self.safe_communication_tone]
 
     def __str__(self):
         return f"ClinicAISettings({self.clinic.name})"

@@ -39,7 +39,7 @@ def _clean_turn_sequence(value):
     return sequence if sequence > 0 else 0
 
 
-def _validate_messenger_turn_metadata(connection, psid="", turn_token="", input_sequence=None):
+def _validate_messenger_turn_metadata(connection, psid="", turn_token="", input_sequence=None, lock=False):
     clean_psid = str(psid or "").strip()
     clean_turn_token = str(turn_token or "").strip()
     clean_input_sequence = _clean_turn_sequence(input_sequence)
@@ -47,7 +47,10 @@ def _validate_messenger_turn_metadata(connection, psid="", turn_token="", input_
         return ""
     if not connection or not clean_psid or not clean_turn_token or not clean_input_sequence:
         return STALE_MESSENGER_TURN_ERROR
-    conversation = MessengerConversation.objects.filter(connection=connection, psid=clean_psid).first()
+    conversations = MessengerConversation.objects.filter(connection=connection, psid=clean_psid)
+    if lock:
+        conversations = conversations.select_for_update()
+    conversation = conversations.first()
     if not conversation:
         return STALE_MESSENGER_TURN_ERROR
     if (
@@ -64,6 +67,9 @@ def _ai_payload_for_clinic(clinic):
     return {
         "is_ai_enabled": ai_settings.is_ai_enabled,
         "messenger_response_mode": ai_settings.safe_messenger_response_mode,
+        "communication_tone": ai_settings.safe_communication_tone,
+        "communication_tone_label": ai_settings.communication_tone_label,
+        "custom_tone_instructions": ai_settings.custom_tone_instructions,
         "instructions": ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT,
         "fallback_message": ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE,
         "settings_updated_at": ai_settings.updated_at.isoformat(),
@@ -447,10 +453,11 @@ def cancel_verified_appointment(page_id, reference_code, phone, confirmed, reaso
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"cancelled": False, "error": APPOINTMENT_LOOKUP_ERROR}
-    stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence)
-    if stale_error:
-        return {"cancelled": False, "error": stale_error}
-    return _cancel_verified_appointment_for_clinic(connection.clinic, reference_code, phone, confirmed, reason)
+    with transaction.atomic():
+        stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence, lock=True)
+        if stale_error:
+            return {"cancelled": False, "error": stale_error}
+        return _cancel_verified_appointment_for_clinic(connection.clinic, reference_code, phone, confirmed, reason)
 
 
 def cancel_widget_verified_appointment(clinic_slug, reference_code, phone, confirmed, reason=""):
@@ -484,10 +491,11 @@ def reschedule_verified_appointment(page_id, reference_code, phone, starts_at, c
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"rescheduled": False, "error": APPOINTMENT_LOOKUP_ERROR}
-    stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence)
-    if stale_error:
-        return {"rescheduled": False, "error": stale_error}
-    return _reschedule_verified_appointment_for_clinic(connection.clinic, reference_code, phone, starts_at, confirmed)
+    with transaction.atomic():
+        stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence, lock=True)
+        if stale_error:
+            return {"rescheduled": False, "error": stale_error}
+        return _reschedule_verified_appointment_for_clinic(connection.clinic, reference_code, phone, starts_at, confirmed)
 
 
 def reschedule_widget_verified_appointment(clinic_slug, reference_code, phone, starts_at, confirmed):
@@ -534,21 +542,22 @@ def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone,
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"created": False, "error": "Messenger connection not found."}
-    stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence)
-    if stale_error:
-        return {"created": False, "error": stale_error}
-    return _book_confirmed_appointment_for_clinic(
-        connection.clinic,
-        Appointment.SOURCE_MESSENGER,
-        service_id,
-        starts_at,
-        full_name,
-        phone,
-        confirmed,
-        email,
-        reason,
-        psid,
-    )
+    with transaction.atomic():
+        stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence, lock=True)
+        if stale_error:
+            return {"created": False, "error": stale_error}
+        return _book_confirmed_appointment_for_clinic(
+            connection.clinic,
+            Appointment.SOURCE_MESSENGER,
+            service_id,
+            starts_at,
+            full_name,
+            phone,
+            confirmed,
+            email,
+            reason,
+            psid,
+        )
 
 
 def _book_confirmed_appointment_for_clinic(clinic, source, service_id, starts_at, full_name, phone, confirmed, email="", reason="", psid=""):

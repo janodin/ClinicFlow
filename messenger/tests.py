@@ -1325,6 +1325,26 @@ def test_clinic_ai_settings_invalid_messenger_response_mode_fails_closed():
 
 
 @pytest.mark.django_db
+def test_clinic_ai_settings_tone_defaults_and_invalid_tone_fails_closed():
+    from clinics.models import ClinicAISettings
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_tone_defaults", "PAGE-AI-TONE-DEFAULTS")
+
+    settings = ClinicAISettings.objects.create(clinic=clinic)
+
+    assert settings.communication_tone == ClinicAISettings.TONE_PROFESSIONAL
+    assert settings.safe_communication_tone == ClinicAISettings.TONE_PROFESSIONAL
+    assert settings.communication_tone_label == "Professional"
+    assert settings.custom_tone_instructions == ""
+
+    ClinicAISettings.objects.filter(pk=settings.pk).update(communication_tone="unsafe-tone")
+    settings.refresh_from_db()
+
+    assert settings.safe_communication_tone == ClinicAISettings.TONE_PROFESSIONAL
+    assert settings.communication_tone_label == "Professional"
+
+
+@pytest.mark.django_db
 def test_clinic_ai_settings_manager_copies_messenger_values():
     from clinics.models import ClinicAISettings
     from messenger.models import MessengerAISettings
@@ -1516,6 +1536,50 @@ def test_ai_contexts_include_business_hours_and_unavailable_dates():
         assert context["unavailable_dates"] == [
             {"date": unavailable_date.isoformat(), "reason": "Holiday"}
         ]
+
+
+@pytest.mark.django_db
+def test_ai_contexts_include_shared_communication_tone_fields():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context, build_widget_ai_context
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_tone_context", "PAGE-AI-TONE-CONTEXT")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        communication_tone=ClinicAISettings.TONE_EMPATHETIC,
+        custom_tone_instructions="Use reassuring language for anxious patients.",
+    )
+
+    messenger_context = build_ai_context("PAGE-AI-TONE-CONTEXT")
+    widget_context = build_widget_ai_context(clinic.slug)
+
+    for context in [messenger_context, widget_context]:
+        assert context["ai"]["communication_tone"] == ClinicAISettings.TONE_EMPATHETIC
+        assert context["ai"]["communication_tone_label"] == "Empathetic"
+        assert context["ai"]["custom_tone_instructions"] == "Use reassuring language for anxious patients."
+
+
+@pytest.mark.django_db
+def test_ai_context_settings_timestamp_changes_when_tone_changes():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_tools import build_ai_context
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_tone_timestamp", "PAGE-AI-TONE-TIMESTAMP")
+    settings = ClinicAISettings.objects.create(
+        clinic=clinic,
+        communication_tone=ClinicAISettings.TONE_PROFESSIONAL,
+    )
+    original_timestamp = build_ai_context("PAGE-AI-TONE-TIMESTAMP")["ai"]["settings_updated_at"]
+
+    settings.communication_tone = ClinicAISettings.TONE_FRIENDLY
+    settings.custom_tone_instructions = "Use approachable wording."
+    settings.save()
+    settings.refresh_from_db()
+
+    updated_timestamp = build_ai_context("PAGE-AI-TONE-TIMESTAMP")["ai"]["settings_updated_at"]
+
+    assert updated_timestamp == settings.updated_at.isoformat()
+    assert updated_timestamp != original_timestamp
 
 
 @pytest.mark.django_db
@@ -2862,6 +2926,51 @@ def test_n8n_webhook_does_not_run_quick_reply_engine_in_ai_mode():
 
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_rejects_stale_quick_reply_turn_before_session_mutation():
+    clinic, _connection = _create_messenger_clinic("owner_n8n_quick_stale_turn", "PAGE-N8N-QUICK-STALE-TURN")
+    Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    client = Client()
+    stale_turn = _post_ai_turn_register(
+        client,
+        "PAGE-N8N-QUICK-STALE-TURN",
+        "PSID1",
+        "mid-quick-stale-one",
+        "Book an appointment",
+    ).json()
+    _post_ai_turn_register(
+        client,
+        "PAGE-N8N-QUICK-STALE-TURN",
+        "PSID1",
+        "mid-quick-stale-two",
+        "Actually cleaning",
+    )
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({
+            "page_id": "PAGE-N8N-QUICK-STALE-TURN",
+            "psid": "PSID1",
+            "text": "Book an appointment",
+            "turn_token": stale_turn["turn_token"],
+            "input_sequence": stale_turn["input_sequence"],
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "replies": [],
+        "page_token": "",
+        "page_id": "PAGE-N8N-QUICK-STALE-TURN",
+        "psid": "PSID1",
+        "stale": True,
+    }
+    assert not MessengerSession.objects.filter(connection__page_id="PAGE-N8N-QUICK-STALE-TURN", psid="PSID1").exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
 def test_n8n_webhook_uses_messenger_ai_mode_when_website_ai_is_disabled():
     from clinics.models import ClinicAISettings
     from messenger.ai_tools import DEFAULT_AI_FALLBACK_MESSAGE
@@ -2961,7 +3070,7 @@ def test_meta_signature_verification_endpoint_accepts_valid_per_clinic_secret():
 
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
-def test_meta_signature_verification_reports_duplicate_message_id():
+def test_meta_signature_verification_does_not_consume_turn_registration_dedupe():
     _clinic, connection = _create_messenger_clinic("owner_meta_dedupe", "PAGE-META-DEDUPE")
     connection.app_secret = "meta-app-secret"
     connection.save(update_fields=["app_secret"])
@@ -2983,13 +3092,26 @@ def test_meta_signature_verification_reports_duplicate_message_id():
         "message_id": "mid-meta-dedupe",
     }
 
-    first = client.post(reverse("messenger:meta_signature_verify"), data=json.dumps(payload), content_type="application/json", HTTP_X_N8N_WEBHOOK_SECRET="secret123")
-    second = client.post(reverse("messenger:meta_signature_verify"), data=json.dumps(payload), content_type="application/json", HTTP_X_N8N_WEBHOOK_SECRET="secret123")
+    first_verify = client.post(reverse("messenger:meta_signature_verify"), data=json.dumps(payload), content_type="application/json", HTTP_X_N8N_WEBHOOK_SECRET="secret123")
+    second_verify = client.post(reverse("messenger:meta_signature_verify"), data=json.dumps(payload), content_type="application/json", HTTP_X_N8N_WEBHOOK_SECRET="secret123")
+    first_register = _post_ai_turn_register(client, "PAGE-META-DEDUPE", "PSID1", "mid-meta-dedupe", "Hello")
+    second_register = _post_ai_turn_register(client, "PAGE-META-DEDUPE", "PSID1", "mid-meta-dedupe", "Hello")
 
-    assert first.status_code == 200
-    assert first.json() == {"verified": True, "duplicate": False}
-    assert second.status_code == 200
-    assert second.json() == {"verified": True, "duplicate": True}
+    assert first_verify.status_code == 200
+    assert first_verify.json() == {"verified": True, "duplicate": False}
+    assert second_verify.status_code == 200
+    assert second_verify.json() == {"verified": True, "duplicate": False}
+    assert not MessengerProcessedMessage.objects.filter(connection=connection).exists()
+    assert first_register.status_code == 200
+    assert first_register.json()["registered"] is True
+    assert first_register.json()["process_now"] is True
+    assert second_register.status_code == 200
+    assert second_register.json() == {
+        "registered": False,
+        "duplicate": True,
+        "process_now": False,
+        "superseded_previous": False,
+    }
 
 
 def _post_ai_turn_register(client, page_id, psid, message_id, message, postback=""):

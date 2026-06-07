@@ -293,19 +293,18 @@ def _turn_payload(conversation, turn):
     }
 
 
-def _messenger_turn_is_current(page_id, psid, turn_token, input_sequence):
-    clean_page_id = str(page_id or "").strip()
-    clean_psid = str(psid or "").strip()
+def _validate_locked_messenger_turn(connection, psid, turn_token, input_sequence):
     clean_turn_token = str(turn_token or "").strip()
     clean_input_sequence = _clean_turn_sequence(input_sequence)
     if not clean_turn_token and not clean_input_sequence:
         return True
-    if not clean_page_id or not clean_psid or not clean_turn_token or not clean_input_sequence:
+    clean_psid = str(psid or "").strip()
+    if not connection or not clean_psid or not clean_turn_token or not clean_input_sequence:
         return False
-    connection = _active_connection_for_page(clean_page_id)
-    if not connection:
-        return False
-    conversation = MessengerConversation.objects.filter(connection=connection, psid=clean_psid).first()
+    conversation = MessengerConversation.objects.select_for_update().filter(
+        connection=connection,
+        psid=clean_psid,
+    ).first()
     if not conversation:
         return False
     return (
@@ -313,10 +312,6 @@ def _messenger_turn_is_current(page_id, psid, turn_token, input_sequence):
         and conversation.active_input_sequence == clean_input_sequence
         and conversation.last_sequence <= clean_input_sequence
     )
-
-
-def _stale_turn_error():
-    return "This Messenger request was superseded by a newer user message. Please use the latest conversation turn."
 
 
 def _ai_tool_response(request, handler):
@@ -449,15 +444,12 @@ def meta_signature_verify(request):
 
     response = {"verified": verified}
     if isinstance(message_id, str) and message_id.strip():
-        duplicate = False
         clean_psid = psid.strip() if isinstance(psid, str) else ""
         clean_message_id = message_id.strip()
         if verified and not _payload_contains_message_identity(raw_data, page_id, clean_psid, clean_message_id):
             verified = False
             response["verified"] = False
-        elif verified and connection:
-            duplicate = _mark_messenger_message_processed(connection, clean_psid, clean_message_id)
-        response["duplicate"] = duplicate
+        response["duplicate"] = False
     return JsonResponse(response, status=200)
 
 
@@ -803,7 +795,9 @@ def n8n_webhook(request):
     psid = data.get("psid", "")
     text = data.get("text", "")
     postback = data.get("postback", "")
-    if not all(isinstance(value, str) for value in [page_id, psid, text, postback]):
+    turn_token = data.get("turn_token", "")
+    input_sequence = data.get("input_sequence")
+    if not all(isinstance(value, str) for value in [page_id, psid, text, postback, turn_token]):
         return JsonResponse({"error": "Invalid request data"}, status=400)
 
     if not page_id or not psid:
@@ -818,17 +812,27 @@ def n8n_webhook(request):
             "page_token": connection.page_access_token,
         }, status=200)
 
-    session, _ = MessengerSession.objects.get_or_create(
-        connection=connection, psid=psid,
-        defaults={"state": MessengerSession.STATE_GREETING, "data": {}}
-    )
+    with transaction.atomic():
+        if not _validate_locked_messenger_turn(connection, psid, turn_token, input_sequence):
+            return JsonResponse({
+                "replies": [],
+                "page_token": "",
+                "page_id": page_id,
+                "psid": psid,
+                "stale": True,
+            }, status=200)
 
-    # Timeout check
-    timeout = timezone.now() - timedelta(minutes=getattr(settings, "MESSENGER_SESSION_TIMEOUT_MINUTES", 30))
-    if session.last_activity_at < timeout:
-        session.reset()
+        session, _ = MessengerSession.objects.get_or_create(
+            connection=connection, psid=psid,
+            defaults={"state": MessengerSession.STATE_GREETING, "data": {}}
+        )
 
-    actions = handle_message(session, text, postback)
+        # Timeout check
+        timeout = timezone.now() - timedelta(minutes=getattr(settings, "MESSENGER_SESSION_TIMEOUT_MINUTES", 30))
+        if session.last_activity_at < timeout:
+            session.reset()
+
+        actions = handle_message(session, text, postback)
     return JsonResponse({
         "replies": actions or [],
         "page_token": connection.page_access_token,

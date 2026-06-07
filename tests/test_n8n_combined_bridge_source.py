@@ -252,6 +252,20 @@ def test_combined_bridge_prompt_uses_availability_suggestion_metadata_and_hides_
     assert "Do not say based on the FAQ, according to the FAQ, the FAQ says" in agent_block
 
 
+def test_combined_bridge_prompt_includes_communication_tone_with_style_only_guardrails():
+    source = SOURCE.read_text(encoding="utf-8")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
+    agent_end = source.index("const prepareSharedFallback")
+    agent_block = source[agent_start:agent_end]
+
+    assert "Communication tone:" in agent_block
+    assert "communication_tone_label" in agent_block
+    assert "custom_tone_instructions" in agent_block
+    assert "Tone affects wording only" in agent_block
+    assert "must not override clinic data, tool results, availability, booking confirmation, privacy, medical safety, or channel rules" in agent_block
+    assert agent_block.index("Communication tone:") < agent_block.index("Use match_services, check_availability, and book_confirmed_appointment")
+
+
 def test_combined_bridge_memory_key_changes_when_ai_settings_change():
     source = SOURCE.read_text(encoding="utf-8")
     memory_start = source.index("name: 'Shared Conversation Memory'")
@@ -495,7 +509,20 @@ def test_combined_bridge_routes_messenger_quick_replies_without_ai_agent():
     assert "should_use_quick_replies" in source
     assert "messaging.postback?.payload" in source
     assert "messaging.message?.quick_reply?.payload" in source
-    assert ".onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))" in source
+    assert ".onCase(1, getMessengerQuickReplies.to(completeMessengerTurn).to(prepareMessengerQuickReplies).to(sendFacebookReply))" in source
+    assert "const replyItems = $items('Get Messenger Quick Replies');" in source
+    shared_input_start = source.index("name: 'Build Messenger Shared Input'")
+    shared_input_end = source.index("name: 'Build Widget Shared Input'")
+    shared_input_block = source[shared_input_start:shared_input_end]
+    quick_reply_start = source.index("name: 'Get Messenger Quick Replies'")
+    quick_reply_end = source.index("name: 'Prepare Messenger Quick Replies'")
+    quick_reply_block = source[quick_reply_start:quick_reply_end]
+    assert "raw_message: source.message" in shared_input_block
+    assert "raw_postback: source.postback" in shared_input_block
+    assert "text: $json.raw_message || $json.message" in quick_reply_block
+    assert "postback: $json.raw_postback || $json.postback || \"\"" in quick_reply_block
+    assert "turn_token: $json.turn_token || \"\"" in quick_reply_block
+    assert "input_sequence: $json.input_sequence || 0" in quick_reply_block
 
 
 def test_combined_bridge_facebook_send_errors_are_not_silenced():

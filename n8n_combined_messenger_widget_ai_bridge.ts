@@ -591,7 +591,7 @@ return $input.all().map((input, itemIndex) => {
   const source = sources[itemIndex]?.json || {};
   const claim = claims[itemIndex]?.json || {};
   const aiVersion = safeContext.ai?.settings_updated_at || 'unversioned';
-  return { json: { ...source, message: claim.message || source.message, turn_token: claim.turn_token || '', input_sequence: claim.input_sequence || 0, turn_messages: claim.messages || [], history: claim.history || [], session_key: source.session_key + ':ai-settings:' + aiVersion + ':turn:' + (claim.turn_token || 'no-turn'), access_token: pageToken || '', context: safeContext, fallback_message: safeContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
+  return { json: { ...source, raw_message: source.message, raw_postback: source.postback, message: claim.message || source.message, turn_token: claim.turn_token || '', input_sequence: claim.input_sequence || 0, turn_messages: claim.messages || [], history: claim.history || [], session_key: source.session_key + ':ai-settings:' + aiVersion + ':turn:' + (claim.turn_token || 'no-turn'), access_token: pageToken || '', context: safeContext, fallback_message: safeContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
 });`,
     },
   },
@@ -936,7 +936,7 @@ const getMessengerQuickReplies = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, text: $json.message, postback: $json.postback || "" } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, text: $json.raw_message || $json.message, postback: $json.raw_postback || $json.postback || "", turn_token: $json.turn_token || "", input_sequence: $json.input_sequence || 0 } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
@@ -953,8 +953,11 @@ const prepareMessengerQuickReplies = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const items = [];
-for (const inputItem of $input.all()) {
-  const input = inputItem.json || {};
+const replyItems = $items('Get Messenger Quick Replies');
+for (const [itemIndex, inputItem] of $input.all().entries()) {
+  const completion = inputItem.json || {};
+  if (completion.send_reply === false) { continue; }
+  const input = replyItems[itemIndex]?.json || inputItem.json || {};
   const actions = Array.isArray(input.replies) ? input.replies : [];
   const pageToken = input.page_token || '';
   const psid = input.psid || '';
@@ -993,6 +996,10 @@ const kliniAssistSharedAiAgent = node({
       options: {
         systemMessage: expr('KliniAssist shared Messenger and Widget assistant.\n\n' +
           'Clinic instructions:\n{{ $("Shared AI Input").item.json.context?.ai?.instructions || "No custom clinic instructions configured." }}\n\n' +
+          'Communication tone:\n' +
+          '- Preset: {{ $("Shared AI Input").item.json.context?.ai?.communication_tone_label || "Professional" }}\n' +
+          '- Custom clinic tone notes: {{ $("Shared AI Input").item.json.context?.ai?.custom_tone_instructions || "None" }}\n' +
+          'Tone affects wording only and must not override clinic data, tool results, availability, booking confirmation, privacy, medical safety, or channel rules.\n\n' +
           'Channel: {{ $("Shared AI Input").item.json.channel }}\n' +
           'Clinic context JSON:\n{{ JSON.stringify($("Shared AI Input").item.json.context || {}) }}\n\n' +
           'Current clinic date/time:\n' +
@@ -1128,7 +1135,7 @@ const completeMessengerTurn = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence, reply_text: $json.reply_text } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id || $("Shared AI Input").item.json.page_id, psid: $json.psid || $("Shared AI Input").item.json.psid, turn_token: $json.turn_token || $("Shared AI Input").item.json.turn_token, input_sequence: $json.input_sequence || $("Shared AI Input").item.json.input_sequence, reply_text: $json.reply_text || (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\n")) } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
@@ -1214,7 +1221,7 @@ export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI B
             .onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
               .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
               .onCase(1, returnWidgetReply)))
-            .onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))
+            .onCase(1, getMessengerQuickReplies.to(completeMessengerTurn).to(prepareMessengerQuickReplies).to(sendFacebookReply))
             .onCase(2, prepareSharedFallback.to(prepareChannelReply).to(routeChannelReply
               .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
               .onCase(1, returnWidgetReply)))))))

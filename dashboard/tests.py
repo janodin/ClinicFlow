@@ -875,6 +875,8 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
     ClinicAISettings.objects.create(
         clinic=clinic,
         is_ai_enabled=False,
+        communication_tone=ClinicAISettings.TONE_WARM,
+        custom_tone_instructions="Use calm wording and avoid slang.",
         instructions="Use a warm clinic tone.",
         fallback_message="Please call the clinic.",
     )
@@ -888,6 +890,15 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
     assert b"Shared Assistant Settings" in response.content
     assert b"Used by both the website Assistant and Facebook Messenger" in response.content
     assert b"Prompt / Instructions" in response.content
+    assert b"Communication Tone" in response.content
+    assert b'name="communication_tone"' in response.content
+    assert b'value="professional"' in response.content
+    assert b'value="warm"' in response.content
+    assert b'value="empathetic"' in response.content
+    assert b'value="concise"' in response.content
+    assert b'value="friendly"' in response.content
+    assert b'name="custom_tone_instructions"' in response.content
+    assert b"Tone affects wording only" in response.content
     assert b'name="is_ai_enabled"' in response.content
     assert b'name="instructions"' in response.content
     assert b'name="fallback_message"' in response.content
@@ -896,6 +907,7 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
     assert DEFAULT_MESSENGER_AI_PROMPT.splitlines()[0].encode() in response.content
     assert DEFAULT_AI_FALLBACK_MESSAGE.encode() in response.content
     assert b"Use a warm clinic tone." in response.content
+    assert b"Use calm wording and avoid slang." in response.content
     assert b"Please call the clinic." in response.content
     assert b"Website Booking Widget" in response.content
     assert b"widget_behavior_instructions" not in response.content
@@ -939,6 +951,8 @@ def test_shared_ai_settings_form_exposes_messenger_response_mode(clinic_setup):
         data={
             "is_ai_enabled": "on",
             "messenger_response_mode": "invalid-mode",
+            "communication_tone": ClinicAISettings.TONE_PROFESSIONAL,
+            "custom_tone_instructions": "",
             "instructions": "Use a friendly clinic tone.",
             "fallback_message": "Please call us.",
         },
@@ -946,6 +960,55 @@ def test_shared_ai_settings_form_exposes_messenger_response_mode(clinic_setup):
     )
     assert not invalid.is_valid()
     assert "messenger_response_mode" in invalid.errors
+
+
+@pytest.mark.django_db
+def test_shared_ai_settings_form_exposes_communication_tone_fields_and_validates_choice(clinic_setup):
+    from clinics.forms import SharedAISettingsForm
+    from clinics.models import ClinicAISettings
+
+    clinic, service, owner = clinic_setup
+    settings = ClinicAISettings.objects.create(clinic=clinic)
+
+    form = SharedAISettingsForm(instance=settings)
+
+    assert "communication_tone" in form.fields
+    assert "custom_tone_instructions" in form.fields
+    assert dict(form.fields["communication_tone"].choices) == {
+        ClinicAISettings.TONE_PROFESSIONAL: "Professional",
+        ClinicAISettings.TONE_WARM: "Warm",
+        ClinicAISettings.TONE_EMPATHETIC: "Empathetic",
+        ClinicAISettings.TONE_CONCISE: "Concise",
+        ClinicAISettings.TONE_FRIENDLY: "Friendly",
+    }
+
+    invalid = SharedAISettingsForm(
+        data={
+            "is_ai_enabled": "on",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "communication_tone": "unsafe-tone",
+            "custom_tone_instructions": "Use calm wording.",
+            "instructions": "Use a friendly clinic tone.",
+            "fallback_message": "Please call us.",
+        },
+        instance=settings,
+    )
+    assert not invalid.is_valid()
+    assert "communication_tone" in invalid.errors
+
+    too_long = SharedAISettingsForm(
+        data={
+            "is_ai_enabled": "on",
+            "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "communication_tone": ClinicAISettings.TONE_FRIENDLY,
+            "custom_tone_instructions": "x" * 501,
+            "instructions": "Use a friendly clinic tone.",
+            "fallback_message": "Please call us.",
+        },
+        instance=settings,
+    )
+    assert not too_long.is_valid()
+    assert "custom_tone_instructions" in too_long.errors
 
 
 @pytest.mark.django_db
@@ -1365,6 +1428,8 @@ def test_owner_can_save_assistant_ai_settings(clinic_setup, client):
         {
             "_form": "ai_settings",
             "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
+            "communication_tone": ClinicAISettings.TONE_WARM,
+            "custom_tone_instructions": "Keep replies reassuring and plain.",
             "instructions": "Answer briefly and ask for confirmation before booking.",
             "fallback_message": "A staff member will help you soon.",
         },
@@ -1375,6 +1440,8 @@ def test_owner_can_save_assistant_ai_settings(clinic_setup, client):
     settings = ClinicAISettings.objects.get(clinic=clinic)
     assert settings.is_ai_enabled is False
     assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
+    assert settings.communication_tone == ClinicAISettings.TONE_WARM
+    assert settings.custom_tone_instructions == "Keep replies reassuring and plain."
     assert settings.instructions == "Answer briefly and ask for confirmation before booking."
     assert settings.fallback_message == "A staff member will help you soon."
 
@@ -1392,6 +1459,8 @@ def test_owner_can_enable_assistant_ai_settings(clinic_setup, client):
             "_form": "ai_settings",
             "is_ai_enabled": "on",
             "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "communication_tone": ClinicAISettings.TONE_PROFESSIONAL,
+            "custom_tone_instructions": "",
             "instructions": "Use a friendly clinic tone.",
             "fallback_message": "Please call us.",
         },
@@ -1417,6 +1486,8 @@ def test_owner_can_save_messenger_ai_mode_independent_from_website_assistant(cli
         {
             "_form": "ai_settings",
             "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "communication_tone": ClinicAISettings.TONE_PROFESSIONAL,
+            "custom_tone_instructions": "",
             "instructions": "Use a friendly clinic tone.",
             "fallback_message": "Please call us.",
         },
@@ -1442,6 +1513,8 @@ def test_staff_cannot_save_assistant_ai_settings(clinic_setup, client):
         clinic=clinic,
         is_ai_enabled=False,
         messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
+        communication_tone=ClinicAISettings.TONE_CONCISE,
+        custom_tone_instructions="Existing tone notes.",
         instructions="Existing owner instructions.",
         fallback_message="Existing fallback.",
     )
@@ -1453,6 +1526,8 @@ def test_staff_cannot_save_assistant_ai_settings(clinic_setup, client):
             "_form": "ai_settings",
             "is_ai_enabled": "on",
             "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "communication_tone": ClinicAISettings.TONE_PROFESSIONAL,
+            "custom_tone_instructions": "",
             "instructions": "Staff should not save this.",
             "fallback_message": "Blocked.",
         },
@@ -1462,6 +1537,8 @@ def test_staff_cannot_save_assistant_ai_settings(clinic_setup, client):
     settings.refresh_from_db()
     assert settings.is_ai_enabled is False
     assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
+    assert settings.communication_tone == ClinicAISettings.TONE_CONCISE
+    assert settings.custom_tone_instructions == "Existing tone notes."
     assert settings.instructions == "Existing owner instructions."
     assert settings.fallback_message == "Existing fallback."
 
@@ -1479,6 +1556,8 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
         clinic=clinic_a,
         is_ai_enabled=False,
         messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
+        communication_tone=ClinicAISettings.TONE_CONCISE,
+        custom_tone_instructions="Clinic A original tone.",
         instructions="Clinic A original instructions.",
         fallback_message="Clinic A original fallback.",
     )
@@ -1491,6 +1570,8 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
         clinic=clinic_b,
         is_ai_enabled=False,
         messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
+        communication_tone=ClinicAISettings.TONE_PROFESSIONAL,
+        custom_tone_instructions="Clinic B original tone.",
         instructions="Clinic B original instructions.",
         fallback_message="Clinic B original fallback.",
     )
@@ -1502,6 +1583,8 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
             "_form": "ai_settings",
             "is_ai_enabled": "on",
             "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "communication_tone": ClinicAISettings.TONE_EMPATHETIC,
+            "custom_tone_instructions": "Clinic B updated tone.",
             "instructions": "Clinic B updated instructions.",
             "fallback_message": "Clinic B updated fallback.",
         },
@@ -1512,10 +1595,14 @@ def test_owner_can_save_assistant_ai_settings_is_scoped_to_current_clinic(client
     settings_b.refresh_from_db()
     assert settings_a.is_ai_enabled is False
     assert settings_a.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES
+    assert settings_a.communication_tone == ClinicAISettings.TONE_CONCISE
+    assert settings_a.custom_tone_instructions == "Clinic A original tone."
     assert settings_a.instructions == "Clinic A original instructions."
     assert settings_a.fallback_message == "Clinic A original fallback."
     assert settings_b.is_ai_enabled is True
     assert settings_b.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_AI
+    assert settings_b.communication_tone == ClinicAISettings.TONE_EMPATHETIC
+    assert settings_b.custom_tone_instructions == "Clinic B updated tone."
     assert settings_b.instructions == "Clinic B updated instructions."
     assert settings_b.fallback_message == "Clinic B updated fallback."
 
@@ -1533,6 +1620,8 @@ def test_owner_can_save_assistant_ai_settings_without_messenger_connection(clini
             "_form": "ai_settings",
             "is_ai_enabled": "on",
             "messenger_response_mode": ClinicAISettings.MESSENGER_MODE_AI,
+            "communication_tone": ClinicAISettings.TONE_PROFESSIONAL,
+            "custom_tone_instructions": "",
             "instructions": "Shared website and Messenger instructions.",
             "fallback_message": "Shared fallback.",
         },

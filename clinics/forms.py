@@ -55,13 +55,22 @@ class WidgetSettingsForm(forms.ModelForm):
 class SharedAISettingsForm(forms.ModelForm):
     class Meta:
         model = ClinicAISettings
-        fields = ["is_ai_enabled", "messenger_response_mode", "instructions", "fallback_message"]
+        fields = [
+            "is_ai_enabled",
+            "messenger_response_mode",
+            "communication_tone",
+            "custom_tone_instructions",
+            "instructions",
+            "fallback_message",
+        ]
         widgets = {
             "is_ai_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
             "messenger_response_mode": forms.RadioSelect(attrs={"class": _CHECKBOX}),
+            "communication_tone": forms.Select(attrs={"class": _SELECT}),
+            "custom_tone_instructions": forms.Textarea(attrs={"class": _TEXTAREA, "rows": 2, "maxlength": 500}),
             "instructions": forms.Textarea(attrs={
                 "class": _TEXTAREA,
-                "placeholder": "Tell the shared assistant how to speak, what clinic policies to follow, and what it should avoid.",
+                "placeholder": "Tell the shared assistant what clinic policies to follow, what it should avoid, and how to handle common patient questions.",
                 "rows": 8,
             }),
             "fallback_message": forms.Textarea(attrs={
@@ -73,11 +82,15 @@ class SharedAISettingsForm(forms.ModelForm):
         labels = {
             "is_ai_enabled": "Enable AI replies",
             "messenger_response_mode": "Messenger response mode",
+            "communication_tone": "Communication tone",
+            "custom_tone_instructions": "Custom tone notes",
             "instructions": "Prompt / Instructions",
             "fallback_message": "Fallback message",
         }
         help_texts = {
-            "instructions": "Used by the website Assistant and Messenger AI mode. Services, prices, and availability still come from KliniAssist.",
+            "communication_tone": "Sets the assistant's patient-facing style for website Assistant and Messenger AI mode.",
+            "custom_tone_instructions": "Optional style-only notes. Tone cannot override services, prices, availability, booking rules, or safety checks.",
+            "instructions": "Used by the website Assistant and Messenger AI mode for broader clinic policies. Tone is controlled above. Services, prices, and availability still come from KliniAssist.",
             "fallback_message": "Shown when AI replies are disabled or unavailable.",
         }
 
