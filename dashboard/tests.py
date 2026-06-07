@@ -891,6 +891,7 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
     assert b"Used by both the website Assistant and Facebook Messenger" in response.content
     assert b"Prompt / Instructions" in response.content
     assert b"Communication Tone" in response.content
+    assert b"md:grid-cols-[minmax(0,.45fr)_minmax(0,.55fr)] items-start" in response.content
     assert b'name="communication_tone"' in response.content
     assert b'value="professional"' in response.content
     assert b'value="warm"' in response.content
@@ -898,6 +899,7 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
     assert b'value="concise"' in response.content
     assert b'value="friendly"' in response.content
     assert b'name="custom_tone_instructions"' in response.content
+    assert b'class="cf-textarea cf-textarea-compact"' in response.content
     assert b"Tone affects wording only" in response.content
     assert b'name="is_ai_enabled"' in response.content
     assert b'name="instructions"' in response.content
@@ -974,6 +976,7 @@ def test_shared_ai_settings_form_exposes_communication_tone_fields_and_validates
 
     assert "communication_tone" in form.fields
     assert "custom_tone_instructions" in form.fields
+    assert form.fields["custom_tone_instructions"].widget.attrs["class"] == "cf-textarea cf-textarea-compact"
     assert dict(form.fields["communication_tone"].choices) == {
         ClinicAISettings.TONE_PROFESSIONAL: "Professional",
         ClinicAISettings.TONE_WARM: "Warm",

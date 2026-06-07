@@ -822,6 +822,8 @@ code,
 
 .cf-textarea { min-height: 6.5rem; resize: vertical; }
 
+.cf-textarea-compact { min-height: 4.5rem; }
+
 .cf-help,
 .cf-error {
   margin: .25rem 0 0;

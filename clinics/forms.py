@@ -67,7 +67,7 @@ class SharedAISettingsForm(forms.ModelForm):
             "is_ai_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
             "messenger_response_mode": forms.RadioSelect(attrs={"class": _CHECKBOX}),
             "communication_tone": forms.Select(attrs={"class": _SELECT}),
-            "custom_tone_instructions": forms.Textarea(attrs={"class": _TEXTAREA, "rows": 2, "maxlength": 500}),
+            "custom_tone_instructions": forms.Textarea(attrs={"class": f"{_TEXTAREA} cf-textarea-compact", "rows": 2, "maxlength": 500}),
             "instructions": forms.Textarea(attrs={
                 "class": _TEXTAREA,
                 "placeholder": "Tell the shared assistant what clinic policies to follow, what it should avoid, and how to handle common patient questions.",

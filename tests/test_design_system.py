@@ -691,6 +691,13 @@ def test_css_uses_neon_aqua_component_geometry():
     assert "border-color: var(--cf-input-line);" in input_block or "border: 1px solid var(--cf-input-line);" in input_block
 
 
+def test_compact_textarea_uses_short_settings_height():
+    css = css_text()
+    compact = css_rule_block(".cf-textarea-compact")
+
+    assert "min-height: 4.5rem;" in compact
+
+
 def test_outline_buttons_keep_brand_hover_state():
     css = css_text()
     hover_block = css_rule_block(".cf-btn-secondary:hover,\n.ui-button-secondary:hover")
@@ -1865,7 +1872,7 @@ def test_assistant_page_messenger_mode_waits_for_save_button():
     assert "value=\"quick_replies\"" in template
     assert "value=\"ai\"" in template
     messenger_mode = template[
-        template.index("Messenger Response Mode") : template.index("Tell the assistant how to speak")
+        template.index("Messenger Response Mode") : template.index("Communication Tone")
     ]
     assert "requestSubmit" not in messenger_mode
     assert "onchange=" not in messenger_mode
