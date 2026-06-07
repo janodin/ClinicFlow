@@ -1572,6 +1572,26 @@ def test_match_services_returns_active_matches_for_page_clinic_only():
 
 
 @pytest.mark.django_db
+def test_check_availability_returns_all_requested_date_slots():
+    from messenger.ai_tools import check_availability
+    from scheduling.utils import generate_slots
+
+    clinic, _ = _create_messenger_clinic("owner_ai_all_times", "PAGEAI-ALL-TIMES")
+    service = Service.objects.create(clinic=clinic, name="Tooth Extraction", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+
+    generated_slots = generate_slots(clinic, service, target_date)
+    result = check_availability("PAGEAI-ALL-TIMES", service.id, preferred_date=target_date.isoformat())
+
+    assert len(generated_slots) == 6
+    assert result["suggestion_type"] == "requested_date"
+    assert [slot["starts_at"] for slot in result["alternatives"]] == [
+        slot["starts_at"].isoformat() for slot in generated_slots
+    ]
+
+
+@pytest.mark.django_db
 def test_check_availability_returns_requested_slot_and_alternatives():
     from messenger.ai_tools import check_availability
 

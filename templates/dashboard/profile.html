@@ -29,5 +29,34 @@
     </div>
     </div>
   </section>
+
+  <section class="cf-card">
+    <div class="max-w-2xl">
+      <h2 class="text-lg font-semibold text-[var(--cf-ink)]">Change password</h2>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Use your current password to set a new account password.</p>
+    </div>
+
+    <form method="post" class="mt-5 grid gap-5 md:grid-cols-2" novalidate>
+      {% csrf_token %}
+      <div class="cf-field md:col-span-2">
+        <label for="{{ password_form.old_password.id_for_label }}" class="cf-label">{{ password_form.old_password.label }}</label>
+        {{ password_form.old_password }}
+        {% if password_form.old_password.errors %}<p class="cf-error">{{ password_form.old_password.errors.0 }}</p>{% endif %}
+      </div>
+      <div class="cf-field">
+        <label for="{{ password_form.new_password1.id_for_label }}" class="cf-label">{{ password_form.new_password1.label }}</label>
+        {{ password_form.new_password1 }}
+        {% if password_form.new_password1.errors %}<p class="cf-error">{{ password_form.new_password1.errors.0 }}</p>{% endif %}
+      </div>
+      <div class="cf-field">
+        <label for="{{ password_form.new_password2.id_for_label }}" class="cf-label">{{ password_form.new_password2.label }}</label>
+        {{ password_form.new_password2 }}
+        {% if password_form.new_password2.errors %}<p class="cf-error">{{ password_form.new_password2.errors.0 }}</p>{% endif %}
+      </div>
+      <div class="md:col-span-2 flex justify-end">
+        <button type="submit" class="cf-btn cf-btn-primary">Update password</button>
+      </div>
+    </form>
+  </section>
 </div>
 {% endblock %}

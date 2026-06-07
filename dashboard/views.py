@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from django.contrib import messages
+from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection, transaction
@@ -29,6 +30,7 @@ from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots
 from patients.forms import PatientForm
 from patients.models import Patient
 from services.forms import ServiceForm
+from accounts.forms import AppPasswordChangeForm
 
 
 def _clinic_or_redirect(request, allow_missing=False):
@@ -1418,7 +1420,16 @@ def search(request):
 @login_required
 def profile(request):
     clinic = _clinic_or_redirect(request)
-    return render(request, "dashboard/profile.html", {"clinic": clinic})
+    if request.method == "POST":
+        password_form = AppPasswordChangeForm(request.user, request.POST)
+        if password_form.is_valid():
+            password_form.save()
+            update_session_auth_hash(request, request.user)
+            messages.success(request, "Password updated successfully.")
+            return redirect("dashboard:profile")
+    else:
+        password_form = AppPasswordChangeForm(request.user)
+    return render(request, "dashboard/profile.html", {"clinic": clinic, "password_form": password_form})
 
 
 @login_required

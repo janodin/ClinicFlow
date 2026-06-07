@@ -3,10 +3,18 @@ from datetime import time
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import LoginView, LogoutView
+from django.contrib.auth.views import (
+    LoginView,
+    LogoutView,
+    PasswordResetCompleteView,
+    PasswordResetConfirmView,
+    PasswordResetDoneView,
+    PasswordResetView,
+)
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.shortcuts import redirect, render
+from django.urls import reverse_lazy
 from django.utils import timezone
 
 from clinics.models import Clinic, ClinicGroup, ClinicMembership
@@ -14,7 +22,7 @@ from clinics.tenant import get_active_membership
 from services.models import Service
 from scheduling.models import ClinicBusinessHour, Weekday
 
-from .forms import FirstRunOnboardingForm, LoginForm, SignUpForm
+from .forms import AppPasswordResetForm, AppSetPasswordForm, FirstRunOnboardingForm, LoginForm, SignUpForm
 
 
 User = get_user_model()
@@ -30,6 +38,28 @@ class EmailLoginView(LoginView):
 
 class AppLogoutView(LogoutView):
     pass
+
+
+class AppPasswordResetView(PasswordResetView):
+    template_name = "accounts/password_reset.html"
+    form_class = AppPasswordResetForm
+    email_template_name = "accounts/password_reset_email.html"
+    subject_template_name = "accounts/password_reset_subject.txt"
+    success_url = reverse_lazy("accounts:password_reset_done")
+
+
+class AppPasswordResetDoneView(PasswordResetDoneView):
+    template_name = "accounts/password_reset_done.html"
+
+
+class AppPasswordResetConfirmView(PasswordResetConfirmView):
+    template_name = "accounts/password_reset_confirm.html"
+    form_class = AppSetPasswordForm
+    success_url = reverse_lazy("accounts:password_reset_complete")
+
+
+class AppPasswordResetCompleteView(PasswordResetCompleteView):
+    template_name = "accounts/password_reset_complete.html"
 
 
 def signup(request):

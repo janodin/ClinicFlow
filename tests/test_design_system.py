@@ -159,6 +159,10 @@ CF_BTN_TEMPLATE_PATHS = [
     "templates/dashboard/partials/merge_success.html",
     "templates/accounts/login.html",
     "templates/accounts/signup.html",
+    "templates/accounts/password_reset.html",
+    "templates/accounts/password_reset_done.html",
+    "templates/accounts/password_reset_confirm.html",
+    "templates/accounts/password_reset_complete.html",
     "templates/widget/widget.html",
     "templates/widget/booking_success.html",
     "templates/widget/partials/booking_success.html",
@@ -468,6 +472,27 @@ def test_auth_public_and_widget_mobile_contracts():
     assert "break-all" in widget_success
     assert "break-words" in widget_error
     assert "@media (max-width: 640px)" in widget_views
+
+
+def test_password_reset_templates_follow_auth_shell_contract():
+    login = source_text("templates/accounts/login.html")
+    signup = source_text("templates/accounts/signup.html")
+    reset_templates = [
+        "templates/accounts/password_reset.html",
+        "templates/accounts/password_reset_done.html",
+        "templates/accounts/password_reset_confirm.html",
+        "templates/accounts/password_reset_complete.html",
+    ]
+
+    assert "{% url 'accounts:password_reset' %}" in login
+    assert "{% url 'accounts:password_reset' %}" not in signup
+
+    for relative_path in reset_templates:
+        template = source_text(relative_path)
+        assert "{% extends \"base.html\" %}" in template
+        assert "cf-auth-panel" in template
+        assert "cf-card" in template
+        assert "cf-btn cf-btn-primary" in template
 
 
 def test_widget_mobile_embed_contracts_are_specific():
@@ -978,6 +1003,17 @@ def test_dashboard_pages_use_canonical_page_header_anatomy():
         assert "text-sm text-[var(--cf-muted)]" not in header_region
 
 
+def test_profile_page_contains_password_change_card():
+    template = source_text("templates/dashboard/profile.html")
+
+    assert "Change password" in template
+    assert "password_form.old_password" in template
+    assert "password_form.new_password1" in template
+    assert "password_form.new_password2" in template
+    assert "cf-btn cf-btn-primary" in template
+    assert "cf-error" in template
+
+
 def test_messenger_connection_left_with_setup_and_webhook_stacked_on_right():
     template = source_text("dashboard/templates/dashboard/messenger_settings.html")
     css = css_text()
@@ -1003,7 +1039,7 @@ def test_messenger_connection_left_with_setup_and_webhook_stacked_on_right():
     assert "sm:justify-between" in connection_header
     assert "Facebook Page Connection" in connection_header
     assert "Enter your Facebook Page details for the n8n workflow." in connection_header
-    assert "{% if not connection or not connection.is_active %}" in connection_header
+    assert "{% if not connection_is_configured %}" in connection_header
     assert "cf-messenger-page-strip" in connection_header
     assert "cf-messenger-page-summary" in connection_header
     assert "cf-messenger-page-details" in connection_header

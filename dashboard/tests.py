@@ -99,6 +99,71 @@ def test_settings_page_does_not_show_blocked_times(clinic_setup, client):
 
 
 @pytest.mark.django_db
+def test_profile_password_change_updates_password_and_keeps_session(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:profile"),
+        {
+            "old_password": "password123",
+            "new_password1": "NewStrongPass!2026",
+            "new_password2": "NewStrongPass!2026",
+        },
+        follow=True,
+    )
+
+    user.refresh_from_db()
+    assert response.status_code == 200
+    assert user.check_password("NewStrongPass!2026")
+    assert b"Password updated successfully." in response.content
+    assert client.get(reverse("dashboard:home")).status_code == 200
+
+
+@pytest.mark.django_db
+def test_profile_password_change_requires_current_password(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:profile"),
+        {
+            "old_password": "wrong-password",
+            "new_password1": "NewStrongPass!2026",
+            "new_password2": "NewStrongPass!2026",
+        },
+    )
+
+    user.refresh_from_db()
+    assert response.status_code == 200
+    assert user.check_password("password123")
+    assert not user.check_password("NewStrongPass!2026")
+    assert "Your old password was entered incorrectly" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_profile_password_change_rejects_mismatched_new_passwords(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:profile"),
+        {
+            "old_password": "password123",
+            "new_password1": "NewStrongPass!2026",
+            "new_password2": "DifferentStrongPass!2026",
+        },
+    )
+
+    content = response.content.decode()
+    user.refresh_from_db()
+    assert response.status_code == 200
+    assert user.check_password("password123")
+    assert "password fields" in content
+    assert "match" in content
+
+
+@pytest.mark.django_db
 def test_patients_list_orders_latest_created_first(clinic_setup, client):
     clinic, service, user = clinic_setup
     client.force_login(user)

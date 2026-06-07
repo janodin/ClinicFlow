@@ -1,11 +1,14 @@
+import re
 from decimal import Decimal
 from datetime import time
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.urls import reverse
 
 from clinics.models import Clinic, ClinicGroup, ClinicMembership
+from patients.models import Patient
 from scheduling.models import ClinicBusinessHour
 from services.models import Service
 
@@ -30,6 +33,21 @@ def _onboarding_post_data():
             data[f"break_start_{weekday}"] = "12:00"
             data[f"break_end_{weekday}"] = "13:00"
     return data
+
+
+def _password_reset_path_from_email(message):
+    match = re.search(r"http://testserver(?P<path>/accounts/reset/[^\s]+)", message.body)
+    assert match, message.body
+    return match.group("path")
+
+
+def _dashboard_user(email="owner@example.com", password="OldStrongPass!2026"):
+    User = get_user_model()
+    user = User.objects.create_user(username=email, email=email, password=password)
+    group = ClinicGroup.objects.create(name="Demo Clinic", owner=user)
+    clinic = Clinic.objects.create(group=group, name="Demo Clinic", slug="demo-clinic")
+    ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
+    return user, clinic
 
 
 @pytest.mark.django_db
@@ -93,6 +111,138 @@ def test_signup_saves_timezone_consent_and_requires_onboarding(client):
     clinic = Clinic.objects.get(slug="demo-clinic")
     assert clinic.timezone == "Pacific/Kiritimati"
     assert clinic.requires_onboarding is True
+
+
+@pytest.mark.django_db
+def test_login_page_links_to_password_reset(client):
+    response = client.get(reverse("accounts:login"))
+
+    assert response.status_code == 200
+    assert reverse("accounts:password_reset").encode() in response.content
+    assert b"Forgot password?" in response.content
+
+
+@pytest.mark.django_db
+def test_signup_page_does_not_link_to_password_reset(client):
+    response = client.get(reverse("accounts:signup"))
+
+    assert response.status_code == 200
+    assert reverse("accounts:password_reset").encode() not in response.content
+    assert b"Forgot password?" not in response.content
+
+
+@pytest.mark.django_db
+def test_password_reset_request_sends_email_for_existing_dashboard_user(client, settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    mail.outbox = []
+    _dashboard_user()
+
+    response = client.post(reverse("accounts:password_reset"), {"email": "owner@example.com"})
+
+    assert response.status_code == 302
+    assert response.url == reverse("accounts:password_reset_done")
+    assert len(mail.outbox) == 1
+    assert "Reset your KliniAssist password" in mail.outbox[0].subject
+    assert "/accounts/reset/" in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+def test_password_reset_request_for_unknown_email_is_generic(client, settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    mail.outbox = []
+
+    response = client.post(reverse("accounts:password_reset"), {"email": "unknown@example.com"})
+
+    assert response.status_code == 302
+    assert response.url == reverse("accounts:password_reset_done")
+    assert len(mail.outbox) == 0
+
+
+@pytest.mark.django_db
+def test_password_reset_request_for_patient_email_is_generic(client, settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    mail.outbox = []
+    _user, clinic = _dashboard_user()
+    Patient.objects.create(
+        clinic=clinic,
+        full_name="Guest Patient",
+        phone="09170001111",
+        email="patient@example.com",
+    )
+
+    response = client.post(reverse("accounts:password_reset"), {"email": "patient@example.com"})
+
+    assert response.status_code == 302
+    assert response.url == reverse("accounts:password_reset_done")
+    assert len(mail.outbox) == 0
+
+
+@pytest.mark.django_db
+def test_password_reset_confirm_changes_password(client, settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    mail.outbox = []
+    user, _clinic = _dashboard_user()
+    client.post(reverse("accounts:password_reset"), {"email": "owner@example.com"})
+    reset_path = _password_reset_path_from_email(mail.outbox[0])
+
+    response = client.get(reset_path)
+    assert response.status_code == 302
+    confirm_path = response["Location"]
+    response = client.post(
+        confirm_path,
+        {
+            "new_password1": "NewStrongPass!2026",
+            "new_password2": "NewStrongPass!2026",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.url == reverse("accounts:password_reset_complete")
+    user.refresh_from_db()
+    assert user.check_password("NewStrongPass!2026")
+    assert client.login(username="owner@example.com", password="NewStrongPass!2026")
+
+
+@pytest.mark.django_db
+def test_password_reset_token_cannot_be_reused(client, settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    mail.outbox = []
+    _dashboard_user()
+    client.post(reverse("accounts:password_reset"), {"email": "owner@example.com"})
+    reset_path = _password_reset_path_from_email(mail.outbox[0])
+    confirm_path = client.get(reset_path)["Location"]
+    client.post(
+        confirm_path,
+        {
+            "new_password1": "NewStrongPass!2026",
+            "new_password2": "NewStrongPass!2026",
+        },
+    )
+
+    response = client.get(reset_path)
+
+    assert response.status_code == 200
+    assert b"This password reset link is invalid or has already been used." in response.content
+
+
+@pytest.mark.django_db
+def test_password_change_form_uses_design_system_classes():
+    from accounts.forms import AppPasswordChangeForm
+
+    user = get_user_model().objects.create_user(
+        username="owner@example.com",
+        email="owner@example.com",
+        password="OldStrongPass!2026",
+    )
+
+    form = AppPasswordChangeForm(user)
+
+    assert form.fields["old_password"].widget.attrs["class"] == "cf-input"
+    assert form.fields["old_password"].widget.attrs["autocomplete"] == "current-password"
+    assert form.fields["new_password1"].widget.attrs["class"] == "cf-input"
+    assert form.fields["new_password1"].widget.attrs["autocomplete"] == "new-password"
+    assert form.fields["new_password2"].widget.attrs["class"] == "cf-input"
+    assert form.fields["new_password2"].widget.attrs["autocomplete"] == "new-password"
 
 
 @pytest.mark.django_db

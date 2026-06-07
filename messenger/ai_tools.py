@@ -338,11 +338,13 @@ def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None,
 
     available = selected is not None or (requested_start is None and suggested_date == target_date)
 
+    payload_alternatives = alternatives[:3] if requested_start else alternatives
+
     return {
         "found": True,
         "available": available,
         "selected_slot": _slot_payload(clinic, selected) if selected else None,
-        "alternatives": [_slot_payload(clinic, slot) for slot in alternatives[:3]],
+        "alternatives": [_slot_payload(clinic, slot) for slot in payload_alternatives],
         "suggestion_type": suggestion_type,
         "requested_date": target_date.isoformat(),
         "suggested_date": suggested_date.isoformat() if suggested_date else None,

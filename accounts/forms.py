@@ -2,9 +2,9 @@ from zoneinfo import available_timezones
 
 from django import forms
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import AuthenticationForm
-from django.utils.dateparse import parse_time
+from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, PasswordResetForm, SetPasswordForm
 from django.contrib.auth.password_validation import validate_password
+from django.utils.dateparse import parse_time
 from django.utils.text import slugify
 
 from clinics.models import Clinic
@@ -66,6 +66,69 @@ class SignUpForm(forms.Form):
 class LoginForm(AuthenticationForm):
     username = forms.EmailField(label="Email address", widget=forms.EmailInput(attrs={"class": _INPUT, "placeholder": "you@clinic.com"}))
     password = forms.CharField(widget=forms.PasswordInput(attrs={"class": _INPUT, "placeholder": "Your password"}))
+
+
+class AppPasswordResetForm(PasswordResetForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["email"].label = "Email address"
+        self.fields["email"].widget.attrs.update(
+            {
+                "class": _INPUT,
+                "placeholder": "you@clinic.com",
+                "autocomplete": "email",
+            }
+        )
+
+
+class AppSetPasswordForm(SetPasswordForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["new_password1"].label = "New password"
+        self.fields["new_password1"].widget.attrs.update(
+            {
+                "class": _INPUT,
+                "placeholder": "Create a new password",
+                "autocomplete": "new-password",
+            }
+        )
+        self.fields["new_password2"].label = "Confirm new password"
+        self.fields["new_password2"].widget.attrs.update(
+            {
+                "class": _INPUT,
+                "placeholder": "Confirm your new password",
+                "autocomplete": "new-password",
+            }
+        )
+
+
+class AppPasswordChangeForm(PasswordChangeForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["old_password"].label = "Current password"
+        self.fields["old_password"].widget.attrs.update(
+            {
+                "class": _INPUT,
+                "placeholder": "Enter your current password",
+                "autocomplete": "current-password",
+            }
+        )
+        self.fields["new_password1"].label = "New password"
+        self.fields["new_password1"].widget.attrs.update(
+            {
+                "class": _INPUT,
+                "placeholder": "Create a new password",
+                "autocomplete": "new-password",
+            }
+        )
+        self.fields["new_password2"].label = "Confirm new password"
+        self.fields["new_password2"].widget.attrs.update(
+            {
+                "class": _INPUT,
+                "placeholder": "Confirm your new password",
+                "autocomplete": "new-password",
+            }
+        )
 
 
 class FirstRunOnboardingForm(forms.Form):
