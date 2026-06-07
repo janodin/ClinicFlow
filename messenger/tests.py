@@ -1249,7 +1249,7 @@ from django.utils import timezone
 from django.core.management import call_command
 from unittest.mock import patch
 from patients.models import Patient
-from scheduling.models import ClinicBusinessHour
+from scheduling.models import ClinicBusinessHour, UnavailableDate
 
 
 def _create_messenger_clinic(username="owner_ai", page_id="PAGEAI"):
@@ -1470,6 +1470,52 @@ def test_build_widget_ai_context_uses_shared_clinic_settings():
     assert context["ai"]["fallback_message"] == "Shared fallback."
     assert context["services"][0]["name"] == "Checkup"
     assert context["faqs"][0]["question"] == "Hours?"
+
+
+@pytest.mark.django_db
+def test_ai_contexts_include_business_hours_and_unavailable_dates():
+    from messenger.ai_tools import build_ai_context, build_widget_ai_context
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_schedule_context", "PAGE-AI-SCHEDULE-CONTEXT")
+    ClinicBusinessHour.objects.create(
+        clinic=clinic,
+        weekday=5,
+        is_open=True,
+        open_time=time(9),
+        close_time=time(15),
+        break_start=time(12),
+        break_end=time(13),
+    )
+    ClinicBusinessHour.objects.create(
+        clinic=clinic,
+        weekday=6,
+        is_open=True,
+        open_time=time(10),
+        close_time=time(14),
+    )
+    unavailable_date = timezone.localdate() + timedelta(days=10)
+    UnavailableDate.objects.create(clinic=clinic, date=unavailable_date, reason="Holiday")
+
+    messenger_context = build_ai_context("PAGE-AI-SCHEDULE-CONTEXT")
+    widget_context = build_widget_ai_context(clinic.slug)
+
+    for context in [messenger_context, widget_context]:
+        assert context["business_hours"][5] == {
+            "weekday": 5,
+            "day": "Saturday",
+            "is_open": True,
+            "open_time": "09:00",
+            "close_time": "15:00",
+            "break_start": "12:00",
+            "break_end": "13:00",
+        }
+        assert context["business_hours"][6]["day"] == "Sunday"
+        assert context["business_hours"][6]["is_open"] is True
+        assert context["business_hours"][0]["day"] == "Monday"
+        assert context["business_hours"][0]["is_open"] is False
+        assert context["unavailable_dates"] == [
+            {"date": unavailable_date.isoformat(), "reason": "Holiday"}
+        ]
 
 
 @pytest.mark.django_db
@@ -2944,6 +2990,270 @@ def test_meta_signature_verification_reports_duplicate_message_id():
     assert first.json() == {"verified": True, "duplicate": False}
     assert second.status_code == 200
     assert second.json() == {"verified": True, "duplicate": True}
+
+
+def _post_ai_turn_register(client, page_id, psid, message_id, message, postback=""):
+    return client.post(
+        reverse("messenger:ai_turn_register"),
+        data=json.dumps({
+            "page_id": page_id,
+            "psid": psid,
+            "message_id": message_id,
+            "message": message,
+            "postback": postback,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+
+def _post_ai_turn_claim(client, page_id, psid, turn_token):
+    return client.post(
+        reverse("messenger:ai_turn_claim"),
+        data=json.dumps({"page_id": page_id, "psid": psid, "turn_token": turn_token}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+
+def _post_ai_turn_complete(client, page_id, psid, turn_token, input_sequence, reply_text="Reply"):
+    return client.post(
+        reverse("messenger:ai_turn_complete"),
+        data=json.dumps({
+            "page_id": page_id,
+            "psid": psid,
+            "turn_token": turn_token,
+            "input_sequence": input_sequence,
+            "reply_text": reply_text,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_register_claims_first_messenger_message_for_processing():
+    from messenger.models import MessengerConversation, MessengerInboundMessage
+
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_first", "PAGE-AI-TURN-FIRST")
+    client = Client()
+
+    response = _post_ai_turn_register(client, "PAGE-AI-TURN-FIRST", "PSID1", "mid-turn-1", "June 15")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["registered"] is True
+    assert data["duplicate"] is False
+    assert data["process_now"] is True
+    assert data["superseded_previous"] is False
+    assert data["input_sequence"] == 1
+    assert data["messages"] == [{"sequence": 1, "text": "June 15", "postback": ""}]
+    assert "June 15" in data["message"]
+
+    conversation = MessengerConversation.objects.get(connection__page_id="PAGE-AI-TURN-FIRST", psid="PSID1")
+    assert conversation.last_sequence == 1
+    assert conversation.completed_sequence == 0
+    assert conversation.active_turn_token == data["turn_token"]
+    assert MessengerInboundMessage.objects.get(conversation=conversation).sequence == 1
+
+    claim = _post_ai_turn_claim(client, "PAGE-AI-TURN-FIRST", "PSID1", data["turn_token"])
+
+    assert claim.status_code == 200
+    assert claim.json()["claimed"] is True
+    assert claim.json()["input_sequence"] == 1
+    assert claim.json()["messages"] == [{"sequence": 1, "text": "June 15", "postback": ""}]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_new_message_supersedes_in_flight_turn_and_coalesces_pending_messages():
+    from messenger.models import MessengerConversation
+
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_supersede", "PAGE-AI-TURN-SUPERSEDE")
+    client = Client()
+    first = _post_ai_turn_register(client, "PAGE-AI-TURN-SUPERSEDE", "PSID1", "mid-turn-date", "June 15").json()
+
+    second_response = _post_ai_turn_register(client, "PAGE-AI-TURN-SUPERSEDE", "PSID1", "mid-turn-service", "Cleaning")
+
+    assert second_response.status_code == 200
+    second = second_response.json()
+    assert second["registered"] is True
+    assert second["duplicate"] is False
+    assert second["process_now"] is True
+    assert second["superseded_previous"] is True
+    assert second["input_sequence"] == 2
+    assert [item["text"] for item in second["messages"]] == ["June 15", "Cleaning"]
+    assert "June 15" in second["message"]
+    assert "Cleaning" in second["message"]
+
+    stale_claim = _post_ai_turn_claim(client, "PAGE-AI-TURN-SUPERSEDE", "PSID1", first["turn_token"])
+    stale_complete = _post_ai_turn_complete(
+        client,
+        "PAGE-AI-TURN-SUPERSEDE",
+        "PSID1",
+        first["turn_token"],
+        first["input_sequence"],
+        "What service would you like?",
+    )
+    current_claim = _post_ai_turn_claim(client, "PAGE-AI-TURN-SUPERSEDE", "PSID1", second["turn_token"])
+    current_complete = _post_ai_turn_complete(
+        client,
+        "PAGE-AI-TURN-SUPERSEDE",
+        "PSID1",
+        second["turn_token"],
+        second["input_sequence"],
+        "What time works for Cleaning on June 15?",
+    )
+
+    assert stale_claim.status_code == 200
+    assert stale_claim.json() == {"claimed": False, "stale": True, "has_pending": True}
+    assert stale_complete.status_code == 200
+    assert stale_complete.json() == {"send_reply": False, "stale": True, "has_pending": True}
+    assert current_claim.status_code == 200
+    assert current_claim.json()["claimed"] is True
+    assert [item["text"] for item in current_claim.json()["messages"]] == ["June 15", "Cleaning"]
+    assert current_complete.status_code == 200
+    assert current_complete.json() == {"send_reply": True, "stale": False, "has_pending": False}
+
+    conversation = MessengerConversation.objects.get(connection__page_id="PAGE-AI-TURN-SUPERSEDE", psid="PSID1")
+    assert conversation.completed_sequence == 2
+    assert conversation.active_turn_token == ""
+    assert conversation.history[-2:] == [
+        {"role": "user", "content": "June 15\nCleaning"},
+        {"role": "assistant", "content": "What time works for Cleaning on June 15?"},
+    ]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_register_dedupes_replayed_message_without_restarting_processing():
+    from messenger.models import MessengerConversation, MessengerInboundMessage
+
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_duplicate", "PAGE-AI-TURN-DUP")
+    client = Client()
+    first = _post_ai_turn_register(client, "PAGE-AI-TURN-DUP", "PSID1", "mid-turn-dup", "June 15").json()
+
+    duplicate_response = _post_ai_turn_register(client, "PAGE-AI-TURN-DUP", "PSID1", "mid-turn-dup", "June 15")
+
+    assert duplicate_response.status_code == 200
+    assert duplicate_response.json() == {
+        "registered": False,
+        "duplicate": True,
+        "process_now": False,
+        "superseded_previous": False,
+    }
+    conversation = MessengerConversation.objects.get(connection__page_id="PAGE-AI-TURN-DUP", psid="PSID1")
+    assert conversation.last_sequence == 1
+    assert conversation.active_turn_token == first["turn_token"]
+    assert MessengerInboundMessage.objects.filter(conversation=conversation).count() == 1
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_register_isolated_by_page_and_psid():
+    from messenger.models import MessengerConversation
+
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_isolated", "PAGE-AI-TURN-ISOLATED")
+    client = Client()
+
+    psid_one = _post_ai_turn_register(client, "PAGE-AI-TURN-ISOLATED", "PSID1", "mid-psid-1", "June 15").json()
+    psid_two = _post_ai_turn_register(client, "PAGE-AI-TURN-ISOLATED", "PSID2", "mid-psid-2", "Cleaning").json()
+
+    assert psid_one["process_now"] is True
+    assert psid_two["process_now"] is True
+    assert psid_one["input_sequence"] == 1
+    assert psid_two["input_sequence"] == 1
+    assert psid_one["turn_token"] != psid_two["turn_token"]
+    assert MessengerConversation.objects.filter(connection__page_id="PAGE-AI-TURN-ISOLATED").count() == 2
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_stale_messenger_turn_metadata_blocks_appointment_mutations():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import (
+        book_confirmed_appointment,
+        cancel_verified_appointment,
+        check_availability,
+        reschedule_verified_appointment,
+    )
+
+    clinic, _connection = _create_messenger_clinic("owner_ai_turn_stale_tools", "PAGE-AI-TURN-STALE-TOOLS")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    client = Client()
+    stale_turn = _post_ai_turn_register(
+        client,
+        "PAGE-AI-TURN-STALE-TOOLS",
+        "PSID1",
+        "mid-stale-tool-date",
+        "June 15",
+    ).json()
+    _post_ai_turn_register(
+        client,
+        "PAGE-AI-TURN-STALE-TOOLS",
+        "PSID1",
+        "mid-stale-tool-service",
+        "Cleaning",
+    )
+    stale_error = "This Messenger request was superseded by a newer user message. Please use the latest conversation turn."
+
+    slot = check_availability("PAGE-AI-TURN-STALE-TOOLS", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+    booking = book_confirmed_appointment(
+        "PAGE-AI-TURN-STALE-TOOLS",
+        service.id,
+        slot["starts_at"],
+        "Maria Santos",
+        "09175551234",
+        confirmed=True,
+        email="maria@example.com",
+        psid="PSID1",
+        turn_token=stale_turn["turn_token"],
+        input_sequence=stale_turn["input_sequence"],
+    )
+    assert booking == {"created": False, "error": stale_error}
+    assert Appointment.objects.filter(clinic=clinic).count() == 0
+
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    cancel = cancel_verified_appointment(
+        "PAGE-AI-TURN-STALE-TOOLS",
+        appointment.reference_code,
+        "09175551234",
+        confirmed=True,
+        psid="PSID1",
+        turn_token=stale_turn["turn_token"],
+        input_sequence=stale_turn["input_sequence"],
+    )
+    assert cancel == {"cancelled": False, "error": stale_error}
+    appointment.refresh_from_db()
+    assert appointment.status == Appointment.STATUS_CONFIRMED
+
+    new_start = timezone.make_aware(timezone.datetime.combine(target_date, time(11)), clinic_tz)
+    reschedule = reschedule_verified_appointment(
+        "PAGE-AI-TURN-STALE-TOOLS",
+        appointment.reference_code,
+        "09175551234",
+        new_start.isoformat(),
+        confirmed=True,
+        psid="PSID1",
+        turn_token=stale_turn["turn_token"],
+        input_sequence=stale_turn["input_sequence"],
+    )
+    assert reschedule == {"rescheduled": False, "error": stale_error}
+    appointment.refresh_from_db()
+    assert appointment.starts_at == original_start
 
 
 @pytest.mark.django_db

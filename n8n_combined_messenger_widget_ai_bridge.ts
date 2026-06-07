@@ -32,6 +32,9 @@ const DJANGO_MESSENGER_AI_APPOINTMENT_CANCEL_URL_EXPR = DJANGO_BASE_URL_EXPR + '
 const DJANGO_WIDGET_AI_APPOINTMENT_CANCEL_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/appointment/cancel/"';
 const DJANGO_MESSENGER_AI_APPOINTMENT_RESCHEDULE_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/appointment/reschedule/"';
 const DJANGO_WIDGET_AI_APPOINTMENT_RESCHEDULE_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/appointment/reschedule/"';
+const DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/register/" }}');
+const DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/claim/" }}');
+const DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/complete/" }}');
 const DJANGO_MESSENGER_N8N_WEBHOOK_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/n8n-webhook/" }}');
 
 const metaWebhookVerification = trigger({
@@ -283,12 +286,69 @@ const routeMetaSignature = switchCase({
   },
 });
 
+const registerMessengerTurn = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Register Messenger Turn',
+    position: [1136, 560],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $("Normalize Messenger Request").item.json.page_id, psid: $("Normalize Messenger Request").item.json.psid, message_id: $("Normalize Messenger Request").item.json.message_id, message: $("Normalize Messenger Request").item.json.message, postback: $("Normalize Messenger Request").item.json.postback || "" } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ registered: true, duplicate: false, process_now: true, superseded_previous: false, turn_token: 'turn-token', input_sequence: 1, messages: [{ sequence: 1, text: 'June 15', postback: '' }], message: 'New Messenger messages in order:\n- June 15' }],
+});
+
+const routeMessengerTurnRegistration = switchCase({
+  version: 3.4,
+  config: {
+    name: 'Route Messenger Turn Registration',
+    position: [1360, 560],
+    parameters: {
+      mode: 'rules',
+      rules: {
+        values: [
+          {
+            renameOutput: true,
+            outputKey: 'process_now',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.process_now ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+          {
+            renameOutput: true,
+            outputKey: 'queued_or_duplicate',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.process_now ? "true" : "false" }}'), rightValue: 'false', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+        ],
+      },
+      options: { fallbackOutput: 'none' },
+    },
+  },
+});
+
 const acknowledgeMetaMessengerEvent = node({
   type: 'n8n-nodes-base.respondToWebhook',
   version: 1.5,
   config: {
     name: 'Acknowledge Meta Messenger Event',
-    position: [1136, 560],
+    position: [1584, 560],
     parameters: {
       respondWith: 'text',
       responseBody: 'EVENT_RECEIVED',
@@ -299,6 +359,72 @@ const acknowledgeMetaMessengerEvent = node({
     },
   },
   output: [{ verified: true, duplicate: false }],
+});
+
+const acknowledgeQueuedMessengerTurn = node({
+  type: 'n8n-nodes-base.respondToWebhook',
+  version: 1.5,
+  config: {
+    name: 'Acknowledge Queued Messenger Turn',
+    position: [1584, 720],
+    parameters: {
+      respondWith: 'text',
+      responseBody: 'EVENT_RECEIVED',
+      options: {
+        responseCode: 200,
+        responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/plain' }] },
+      },
+    },
+  },
+  output: [{ registered: false, duplicate: true, process_now: false }],
+});
+
+const claimMessengerTurn = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Claim Messenger Turn',
+    position: [1808, 560],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $("Normalize Messenger Request").item.json.page_id, psid: $("Normalize Messenger Request").item.json.psid, turn_token: $("Register Messenger Turn").item.json.turn_token || "" } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ claimed: true, stale: false, turn_token: 'turn-token', input_sequence: 2, messages: [{ sequence: 1, text: 'June 15', postback: '' }, { sequence: 2, text: 'Cleaning', postback: '' }], message: 'New Messenger messages in order:\n- June 15\n- Cleaning', history: [] }],
+});
+
+const routeMessengerTurnClaim = switchCase({
+  version: 3.4,
+  config: {
+    name: 'Route Messenger Turn Claim',
+    position: [2032, 560],
+    parameters: {
+      mode: 'rules',
+      rules: {
+        values: [
+          {
+            renameOutput: true,
+            outputKey: 'claimed',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.claimed ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+        ],
+      },
+      options: { fallbackOutput: 'none' },
+    },
+  },
 });
 
 const acknowledgeDuplicateMetaMessengerEvent = node({
@@ -458,12 +584,14 @@ const buildMessengerSharedInput = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const sources = $items('Normalize Messenger Request');
+const claims = $items('Claim Messenger Turn');
 return $input.all().map((input, itemIndex) => {
   const rawContext = input.json || {};
   const { page_token: pageToken, ...safeContext } = rawContext;
   const source = sources[itemIndex]?.json || {};
+  const claim = claims[itemIndex]?.json || {};
   const aiVersion = safeContext.ai?.settings_updated_at || 'unversioned';
-  return { json: { ...source, session_key: source.session_key + ':ai-settings:' + aiVersion, access_token: pageToken || '', context: safeContext, fallback_message: safeContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
+  return { json: { ...source, message: claim.message || source.message, turn_token: claim.turn_token || '', input_sequence: claim.input_sequence || 0, turn_messages: claim.messages || [], history: claim.history || [], session_key: source.session_key + ':ai-settings:' + aiVersion + ':turn:' + (claim.turn_token || 'no-turn'), access_token: pageToken || '', context: safeContext, fallback_message: safeContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
 });`,
     },
   },
@@ -674,6 +802,8 @@ const bookConfirmedAppointmentTool = tool({
       jsonBody: {
         page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
         psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
+        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
+        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
         clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
         service_id: fromAi('service_id', 'Numeric service ID selected from clinic services'),
         starts_at: fromAi('starts_at', 'Confirmed appointment start time as clinic-local ISO 8601 datetime with timezone offset'),
@@ -708,6 +838,9 @@ const findVerifiedAppointmentTool = tool({
       specifyBody: 'json',
       jsonBody: {
         page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
+        psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
+        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
+        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
         clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
         reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
         phone: fromAi('phone', 'Patient phone number for verification'),
@@ -737,6 +870,9 @@ const cancelVerifiedAppointmentTool = tool({
       specifyBody: 'json',
       jsonBody: {
         page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
+        psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
+        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
+        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
         clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
         reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
         phone: fromAi('phone', 'Patient phone number for verification'),
@@ -768,6 +904,9 @@ const rescheduleVerifiedAppointmentTool = tool({
       specifyBody: 'json',
       jsonBody: {
         page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
+        psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
+        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
+        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
         clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
         reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
         phone: fromAi('phone', 'Patient phone number for verification'),
@@ -860,7 +999,7 @@ const kliniAssistSharedAiAgent = node({
           '- Timezone: {{ $("Shared AI Input").item.json.context?.current_time?.timezone || $("Shared AI Input").item.json.context?.clinic?.timezone || "UTC" }}\n' +
           '- Now: {{ $("Shared AI Input").item.json.context?.current_time?.now || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISO() }}\n' +
           '- Today: {{ $("Shared AI Input").item.json.context?.current_time?.today || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISODate() }}\n\n' +
-          'Use match_services, check_availability, and book_confirmed_appointment for booking. Collect service, date/time, full name, phone, and email before booking. Ask for explicit confirmation before booking. Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation. ' +
+          'Use business_hours and unavailable_dates from Clinic context JSON to answer general recurring schedule and clinic-closure questions. Do not answer specific appointment availability from business_hours alone. Use check_availability in the current turn for specific service/date/time slot availability, alternatives, or booking claims. Use match_services, check_availability, and book_confirmed_appointment for booking. Collect service, date/time, full name, phone, and email before booking. Ask for explicit confirmation before booking. Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation. ' +
           'Use find_verified_appointment before canceling or rescheduling. Ask for appointment reference code and phone number before appointment management lookup. Summarize the verified appointment and requested action before mutation. Ask for explicit confirmation before canceling or rescheduling. Use cancel_verified_appointment and reschedule_verified_appointment only after explicit confirmation. Do not use user-supplied appointment IDs, patient IDs, clinic IDs, or service IDs for appointment management. ' +
           'Use check_availability suggestion_type metadata: nearest_time means the requested time is unavailable; next_available_date means the requested date has no slots. ' +
           'Use FAQ entries as clinic knowledge without citing the source. Do not say based on the FAQ, according to the FAQ, the FAQ says. ' +
@@ -974,6 +1113,51 @@ const routeChannelReply = switchCase({
   },
 });
 
+const completeMessengerTurn = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Complete Messenger Turn',
+    position: [2640, 640],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence, reply_text: $json.reply_text } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ send_reply: true, stale: false, has_pending: false }],
+});
+
+const prepareCurrentMessengerReply = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Prepare Current Messenger Reply',
+    position: [2864, 640],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const replies = $items('Prepare Channel Reply');
+return $input.all().map((input, itemIndex) => {
+  const completion = input.json || {};
+  const reply = replies[itemIndex]?.json || {};
+  if (!completion.send_reply) {
+    return null;
+  }
+  return { json: { ...reply, turn_completion: completion } };
+}).filter(Boolean);`,
+    },
+  },
+  output: [{ send_reply: true, access_token: 'PAGE_TOKEN', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Assistant reply' } } }],
+});
+
 const sendFacebookReply = node({
   type: 'n8n-nodes-base.httpRequest',
   version: 4.4,
@@ -1020,18 +1204,21 @@ export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI B
   .to(normalizeMessengerRequest)
   .to(verifyMetaSignature)
   .to(routeMetaSignature
-    .onCase(0, acknowledgeMetaMessengerEvent.to(getMessengerClinicContext
-      .to(buildMessengerSharedInput)
-      .to(sharedAiInput)
-      .to(resolveAssistantMode)
-      .to(routeAssistantMode
-        .onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
-          .onCase(0, sendFacebookReply)
-          .onCase(1, returnWidgetReply)))
-        .onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))
-        .onCase(2, prepareSharedFallback.to(prepareChannelReply).to(routeChannelReply
-          .onCase(0, sendFacebookReply)
-          .onCase(1, returnWidgetReply))))))
+    .onCase(0, registerMessengerTurn.to(routeMessengerTurnRegistration
+      .onCase(0, acknowledgeMetaMessengerEvent.to(claimMessengerTurn.to(routeMessengerTurnClaim
+        .onCase(0, getMessengerClinicContext
+          .to(buildMessengerSharedInput)
+          .to(sharedAiInput)
+          .to(resolveAssistantMode)
+          .to(routeAssistantMode
+            .onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
+              .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
+              .onCase(1, returnWidgetReply)))
+            .onCase(1, getMessengerQuickReplies.to(prepareMessengerQuickReplies).to(sendFacebookReply))
+            .onCase(2, prepareSharedFallback.to(prepareChannelReply).to(routeChannelReply
+              .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
+              .onCase(1, returnWidgetReply)))))))
+      .onCase(1, acknowledgeQueuedMessengerTurn)))
     .onCase(1, acknowledgeDuplicateMetaMessengerEvent)
     .onCase(2, acknowledgeIgnoredMetaMessengerEvent)
     .onCase(3, returnInvalidMetaSignature))

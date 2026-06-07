@@ -5,7 +5,7 @@
   <div class="cf-page-header">
     <div>
       <h1 class="cf-page-title ui-page-title">Billing & Subscription</h1>
-      <p class="cf-page-description">Manage your clinic plan, usage limits, and billing preferences.</p>
+      <p class="cf-page-description">Review your manual V1 plan, usage limits, and AI message allowance.</p>
     </div>
   </div>
 
@@ -46,7 +46,7 @@
 
   <!-- Plan Comparison -->
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    <!-- Free -->
+    <!-- Free Trial -->
     <div class="cf-card relative p-5 {% if clinic.group.plan == 'free' %}ring-2 ring-[var(--cf-brand)]{% endif %}">
       {% if clinic.group.plan == "free" %}
         <div class="absolute -top-3 left-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--cf-brand-strong)] px-3.5 py-1.5 text-xs font-black uppercase tracking-wider text-white shadow-md">
@@ -57,14 +57,15 @@
         <div class="cf-icon-box h-10 w-10 rounded-lg">
           <i data-lucide="zap" class="h-5 w-5"></i>
         </div>
-        <span class="cf-kpi-value text-2xl">Free</span>
+        <span class="cf-kpi-value text-2xl">Free Trial</span>
       </div>
-      <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Free</h3>
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">For small practices getting started.</p>
+      <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Free Trial</h3>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Validate online booking before subscribing.</p>
       <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
         <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>50 appointments/month</li>
         <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>1 staff account</li>
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Booking widget</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Booking widget + public booking</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>No AI messages included</li>
       </ul>
     </div>
 
@@ -82,11 +83,14 @@
         <span class="cf-kpi-value text-2xl">₱999/mo</span>
       </div>
       <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Starter</h3>
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">More room to grow your practice.</p>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Core appointment operations for one clinic.</p>
       <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>More appointments</li>
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Patient CRM</li>
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Full calendar</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>250 appointments/month</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>1-2 staff accounts</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Patient CRM + services</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Calendar, filters, CSV export</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Website booking widget + FAQs</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>No AI tokens included</li>
       </ul>
     </div>
 
@@ -101,13 +105,17 @@
         <div class="cf-icon-box h-10 w-10 rounded-lg">
           <i data-lucide="star" class="h-5 w-5"></i>
         </div>
-        <span class="cf-kpi-value text-2xl">₱1,999/mo</span>
+        <span class="cf-kpi-value text-2xl">₱2,499/mo</span>
       </div>
       <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Professional</h3>
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">Advanced tools for busy clinics.</p>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">AI-assisted booking for busier clinics.</p>
       <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Advanced analytics</li>
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Custom assistant</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>1,000 appointments/month</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>3-5 staff accounts</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Everything in Starter</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Website AI assistant</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Messenger quick replies + AI mode</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>1,000 AI messages/month included</li>
         <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Priority support</li>
       </ul>
     </div>
@@ -126,10 +134,12 @@
         <span class="cf-kpi-value text-2xl">Custom</span>
       </div>
       <h3 class="mt-4 text-xl font-bold text-[var(--cf-ink)]">Enterprise</h3>
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">Multi-branch and custom needs.</p>
+      <p class="mt-1 text-sm text-[var(--cf-muted)]">Higher-volume clinics and custom support.</p>
       <ul class="mt-4 space-y-2.5 text-sm text-[var(--cf-muted)]">
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Multiple branches</li>
-        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Custom integrations</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Custom appointment volume</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Custom AI message allowance</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Multi-branch readiness</li>
+        <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Custom n8n/integration work</li>
         <li class="flex items-center gap-2"><i data-lucide="check" class="h-4 w-4 text-[var(--cf-brand)]"></i>Dedicated support</li>
       </ul>
     </div>
@@ -144,7 +154,8 @@
       <div>
         <h3 class="text-base font-bold text-[var(--cf-ink)]">Manual plan management</h3>
         <p class="mt-1.5 text-sm leading-relaxed text-[var(--cf-muted)]">
-          Plan upgrades and billing are managed manually in V1. Contact support to change your plan or for any billing questions.
+          Plan upgrades and billing are managed manually in V1. AI usage is capped to protect service reliability. Extra AI message packs available for Professional and Enterprise plans.
+          Contact support to change your plan or add capacity.
         </p>
       </div>
     </div>

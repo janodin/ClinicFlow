@@ -1153,11 +1153,17 @@ def test_dashboard_sidebar_excludes_profile_and_logout_actions():
     assert "accounts:logout" in topbar
 
 
-def test_billing_page_shows_dummy_monthly_plan_prices():
+def test_billing_page_shows_manual_v1_pricing_and_ai_allowances():
     template = source_text("templates/dashboard/billing.html")
 
     assert "₱999/mo" in template
-    assert "₱1,999/mo" in template
+    assert "₱2,499/mo" in template
+    assert "Free Trial" in template
+    assert "250 appointments/month" in template
+    assert "1,000 AI messages/month included" in template
+    assert "Extra AI message packs available" in template
+    assert "AI usage is capped to protect service reliability" in template
+    assert "₱1,999/mo" not in template
 
 
 def test_dashboard_shell_has_accessible_toasts_and_icon_buttons():

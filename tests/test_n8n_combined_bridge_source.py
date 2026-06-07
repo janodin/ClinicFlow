@@ -153,8 +153,7 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
     widget_start = workflow_block.index(".add(widgetAssistantWebhook)")
     widget_block = workflow_block[widget_start:]
     widget_shared_input_chain = ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)"
-    shared_downstream_chain = ".to(sharedAiInput)\n      .to(resolveAssistantMode)\n      .to(routeAssistantMode"
-    shared_route_start = workflow_block.index(shared_downstream_chain)
+    shared_route_start = workflow_block.index(".to(buildMessengerSharedInput)")
     shared_route_block = workflow_block[shared_route_start:widget_start]
 
     assert "name: 'Widget Assistant Webhook'" in source
@@ -187,6 +186,8 @@ def test_combined_bridge_widget_ai_prompt_requires_tools_and_explicit_confirmati
     agent_block = source[agent_start:agent_end]
 
     assert "Use match_services, check_availability, and book_confirmed_appointment for booking." in agent_block
+    assert "Use business_hours and unavailable_dates from Clinic context JSON" in agent_block
+    assert "Do not answer specific appointment availability from business_hours alone." in agent_block
     assert "Collect service, date/time, full name, phone, and email before booking." in agent_block
     assert "Ask for explicit confirmation before booking." in agent_block
     assert "Patient email required for booking" in source
@@ -295,7 +296,9 @@ def test_meta_messenger_events_acknowledges_only_after_signature_verification():
     assert "responseBody: 'EVENT_RECEIVED'" in source
     assert source.index("name: 'Verify Meta Signature'") < source.index("name: 'Acknowledge Meta Messenger Event'")
     assert ".add(metaMessengerEvents)\n  .to(acknowledgeMetaMessengerEvent)" not in source
-    assert ".to(routeMetaSignature\n    .onCase(0, acknowledgeMetaMessengerEvent.to(getMessengerClinicContext" in source
+    assert ".to(routeMetaSignature\n    .onCase(0, registerMessengerTurn.to(routeMessengerTurnRegistration" in source
+    assert source.index("name: 'Register Messenger Turn'") < source.index("name: 'Acknowledge Meta Messenger Event'")
+    assert source.index("name: 'Acknowledge Meta Messenger Event'") < source.index("name: 'Claim Messenger Turn'")
 
 
 def test_meta_messenger_events_verify_signature_before_context_lookup():
@@ -355,6 +358,81 @@ def test_meta_messenger_duplicate_message_is_acknowledged_without_context_lookup
     assert "$json.duplicate ? \"true\" : \"false\"" in route_block
     assert ".onCase(1, acknowledgeDuplicateMetaMessengerEvent)" in source
     assert "acknowledgeDuplicateMetaMessengerEvent.to(getMessengerClinicContext" not in source
+
+
+def test_meta_messenger_registers_and_claims_turn_before_ai_context_lookup():
+    source = SOURCE.read_text(encoding="utf-8")
+    workflow_block = source[source.index("export default workflow"):]
+
+    assert "DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR" in source
+    assert "DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR" in source
+    assert "/messenger/ai/turn/register/" in source
+    assert "/messenger/ai/turn/claim/" in source
+    assert "name: 'Register Messenger Turn'" in source
+    assert "name: 'Route Messenger Turn Registration'" in source
+    assert "name: 'Acknowledge Queued Messenger Turn'" in source
+    assert "name: 'Claim Messenger Turn'" in source
+    assert "name: 'Route Messenger Turn Claim'" in source
+    assert source.index("name: 'Verify Meta Signature'") < source.index("name: 'Register Messenger Turn'")
+    assert source.index("name: 'Register Messenger Turn'") < source.index("name: 'Claim Messenger Turn'")
+    assert source.index("name: 'Claim Messenger Turn'") < source.index("name: 'Get Messenger Clinic Context'")
+    assert "process_now" in source[source.index("name: 'Route Messenger Turn Registration'"):source.index("const acknowledgeQueuedMessengerTurn")]
+    assert "claimed" in source[source.index("name: 'Route Messenger Turn Claim'"):source.index("const getMessengerClinicContext")]
+    assert ".onCase(0, registerMessengerTurn.to(routeMessengerTurnRegistration" in workflow_block
+    assert "acknowledgeQueuedMessengerTurn.to(getMessengerClinicContext" not in source
+
+
+def test_combined_bridge_uses_claimed_messenger_batch_as_ai_input():
+    source = SOURCE.read_text(encoding="utf-8")
+    messenger_start = source.index("name: 'Build Messenger Shared Input'")
+    widget_start = source.index("name: 'Build Widget Shared Input'")
+    messenger_block = source[messenger_start:widget_start]
+
+    assert "$items('Claim Messenger Turn')" in messenger_block
+    assert "message: claim.message || source.message" in messenger_block
+    assert "turn_token: claim.turn_token || ''" in messenger_block
+    assert "input_sequence: claim.input_sequence || 0" in messenger_block
+    assert "turn_messages: claim.messages || []" in messenger_block
+    assert "history: claim.history || []" in messenger_block
+    assert "':turn:' + (claim.turn_token || 'no-turn')" in messenger_block
+
+
+def test_combined_bridge_completes_messenger_turn_before_facebook_send():
+    source = SOURCE.read_text(encoding="utf-8")
+    workflow_block = source[source.index("export default workflow"):]
+    complete_start = source.index("name: 'Complete Messenger Turn'")
+    prepare_current_start = source.index("name: 'Prepare Current Messenger Reply'")
+    send_start = source.index("name: 'Send Facebook Reply'")
+    complete_block = source[complete_start:prepare_current_start]
+    prepare_current_block = source[prepare_current_start:send_start]
+
+    assert "DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR" in source
+    assert "/messenger/ai/turn/complete/" in source
+    assert "reply_text: $json.reply_text" in complete_block
+    assert "turn_token: $json.turn_token" in complete_block
+    assert "input_sequence: $json.input_sequence" in complete_block
+    assert "completion.send_reply" in prepare_current_block
+    assert ".onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))" in workflow_block
+    assert ".onCase(0, sendFacebookReply)" not in workflow_block
+
+
+def test_combined_bridge_mutating_messenger_tools_send_turn_metadata():
+    source = SOURCE.read_text(encoding="utf-8")
+    book_start = source.index("name: 'book_confirmed_appointment'")
+    lookup_start = source.index("name: 'find_verified_appointment'")
+    cancel_start = source.index("name: 'cancel_verified_appointment'")
+    reschedule_start = source.index("name: 'reschedule_verified_appointment'")
+    quick_replies_start = source.index("const getMessengerQuickReplies")
+    blocks = [
+        source[book_start:lookup_start],
+        source[cancel_start:reschedule_start],
+        source[reschedule_start:quick_replies_start],
+    ]
+
+    for block in blocks:
+        assert "psid: expr('{{ $(\"Shared AI Input\").item.json.channel === \"messenger\" ? $(\"Shared AI Input\").item.json.psid : \"\" }}')" in block
+        assert "turn_token: expr('{{ $(\"Shared AI Input\").item.json.channel === \"messenger\" ? $(\"Shared AI Input\").item.json.turn_token : \"\" }}')" in block
+        assert "input_sequence: expr('{{ $(\"Shared AI Input\").item.json.channel === \"messenger\" ? $(\"Shared AI Input\").item.json.input_sequence : 0 }}')" in block
 
 
 def test_meta_messenger_ignored_events_are_acknowledged_without_context_lookup():

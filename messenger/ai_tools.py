@@ -9,11 +9,15 @@ from django.utils import timezone
 from appointments.models import Appointment
 from clinics.models import Clinic, ClinicAISettings
 from patients.models import normalize_phone
+from scheduling.models import Weekday
 from scheduling.utils import generate_slots, validate_slot
 from widget.views import _process_guest_booking
 
 from .defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
-from .models import MessengerConnection
+from .models import MessengerConnection, MessengerConversation
+
+
+STALE_MESSENGER_TURN_ERROR = "This Messenger request was superseded by a newer user message. Please use the latest conversation turn."
 
 
 def get_or_create_clinic_ai_settings(clinic):
@@ -25,6 +29,34 @@ def get_clinic_for_slug(clinic_slug):
     if not clinic_slug:
         return None
     return Clinic.objects.filter(slug=clinic_slug, is_active=True, requires_onboarding=False).first()
+
+
+def _clean_turn_sequence(value):
+    try:
+        sequence = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return sequence if sequence > 0 else 0
+
+
+def _validate_messenger_turn_metadata(connection, psid="", turn_token="", input_sequence=None):
+    clean_psid = str(psid or "").strip()
+    clean_turn_token = str(turn_token or "").strip()
+    clean_input_sequence = _clean_turn_sequence(input_sequence)
+    if not clean_turn_token and not clean_input_sequence:
+        return ""
+    if not connection or not clean_psid or not clean_turn_token or not clean_input_sequence:
+        return STALE_MESSENGER_TURN_ERROR
+    conversation = MessengerConversation.objects.filter(connection=connection, psid=clean_psid).first()
+    if not conversation:
+        return STALE_MESSENGER_TURN_ERROR
+    if (
+        conversation.active_turn_token != clean_turn_token
+        or conversation.active_input_sequence != clean_input_sequence
+        or conversation.last_sequence > clean_input_sequence
+    ):
+        return STALE_MESSENGER_TURN_ERROR
+    return ""
 
 
 def _ai_payload_for_clinic(clinic):
@@ -70,6 +102,35 @@ def _slot_payload(clinic, slot):
         "local_ends_at": local_end.isoformat(),
         "label": slot.get("label") or local_start.strftime("%I:%M %p").lstrip("0"),
     }
+
+
+def _time_payload(value):
+    return value.strftime("%H:%M") if value else None
+
+
+def _business_hours_payload(clinic):
+    hours_by_weekday = {hour.weekday: hour for hour in clinic.business_hours.all()}
+    weekday_labels = dict(Weekday.choices)
+    payload = []
+    for weekday in range(7):
+        hour = hours_by_weekday.get(weekday)
+        payload.append({
+            "weekday": weekday,
+            "day": weekday_labels[weekday],
+            "is_open": bool(hour and hour.is_open),
+            "open_time": _time_payload(hour.open_time) if hour else None,
+            "close_time": _time_payload(hour.close_time) if hour else None,
+            "break_start": _time_payload(hour.break_start) if hour else None,
+            "break_end": _time_payload(hour.break_end) if hour else None,
+        })
+    return payload
+
+
+def _unavailable_dates_payload(clinic):
+    return [
+        {"date": unavailable.date.isoformat(), "reason": unavailable.reason}
+        for unavailable in clinic.unavailable_dates.order_by("date")
+    ]
 
 
 def _clinic_localdate(clinic):
@@ -194,6 +255,8 @@ def build_ai_context(page_id):
         "ai": _ai_payload_for_clinic(clinic),
         "services": [_service_payload(service) for service in services],
         "faqs": [{"question": faq.question, "answer": faq.answer} for faq in faqs],
+        "business_hours": _business_hours_payload(clinic),
+        "unavailable_dates": _unavailable_dates_payload(clinic),
     }
 
 
@@ -224,6 +287,8 @@ def build_widget_ai_context(clinic_slug):
         "ai": _ai_payload_for_clinic(clinic),
         "services": [_service_payload(service) for service in services],
         "faqs": [{"question": faq.question, "answer": faq.answer} for faq in faqs],
+        "business_hours": _business_hours_payload(clinic),
+        "unavailable_dates": _unavailable_dates_payload(clinic),
     }
 
 
@@ -378,10 +443,13 @@ def find_widget_verified_appointment(clinic_slug, reference_code, phone):
     return _find_verified_appointment_for_clinic(clinic, reference_code, phone)
 
 
-def cancel_verified_appointment(page_id, reference_code, phone, confirmed, reason=""):
+def cancel_verified_appointment(page_id, reference_code, phone, confirmed, reason="", psid="", turn_token="", input_sequence=None):
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"cancelled": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence)
+    if stale_error:
+        return {"cancelled": False, "error": stale_error}
     return _cancel_verified_appointment_for_clinic(connection.clinic, reference_code, phone, confirmed, reason)
 
 
@@ -412,10 +480,13 @@ def _cancel_verified_appointment_for_clinic(clinic, reference_code, phone, confi
         return {"cancelled": True, "appointment": _appointment_summary(locked_clinic, appointment)}
 
 
-def reschedule_verified_appointment(page_id, reference_code, phone, starts_at, confirmed):
+def reschedule_verified_appointment(page_id, reference_code, phone, starts_at, confirmed, psid="", turn_token="", input_sequence=None):
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"rescheduled": False, "error": APPOINTMENT_LOOKUP_ERROR}
+    stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence)
+    if stale_error:
+        return {"rescheduled": False, "error": stale_error}
     return _reschedule_verified_appointment_for_clinic(connection.clinic, reference_code, phone, starts_at, confirmed)
 
 
@@ -459,10 +530,13 @@ def _reschedule_verified_appointment_for_clinic(clinic, reference_code, phone, s
         return {"rescheduled": True, "appointment": _appointment_summary(locked_clinic, appointment)}
 
 
-def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone, confirmed, email="", reason="", psid=""):
+def book_confirmed_appointment(page_id, service_id, starts_at, full_name, phone, confirmed, email="", reason="", psid="", turn_token="", input_sequence=None):
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"created": False, "error": "Messenger connection not found."}
+    stale_error = _validate_messenger_turn_metadata(connection, psid, turn_token, input_sequence)
+    if stale_error:
+        return {"created": False, "error": stale_error}
     return _book_confirmed_appointment_for_clinic(
         connection.clinic,
         Appointment.SOURCE_MESSENGER,

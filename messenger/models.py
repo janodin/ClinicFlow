@@ -96,3 +96,68 @@ class MessengerProcessedMessage(TimeStampedModel):
 
     def __str__(self):
         return f"MessengerProcessedMessage({self.psid} -> {self.message_id})"
+
+
+class MessengerConversation(TimeStampedModel):
+    connection = models.ForeignKey(MessengerConnection, on_delete=models.CASCADE, related_name="ai_conversations")
+    psid = models.CharField(max_length=64, db_index=True)
+    last_sequence = models.PositiveIntegerField(default=0)
+    completed_sequence = models.PositiveIntegerField(default=0)
+    active_turn_token = models.CharField(max_length=64, blank=True, default="")
+    active_input_sequence = models.PositiveIntegerField(default=0)
+    history = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["connection", "psid"], name="unique_messenger_ai_conversation_psid"),
+        ]
+
+    def __str__(self):
+        return f"MessengerConversation({self.psid} -> {self.last_sequence}/{self.completed_sequence})"
+
+
+class MessengerInboundMessage(TimeStampedModel):
+    conversation = models.ForeignKey(MessengerConversation, on_delete=models.CASCADE, related_name="inbound_messages")
+    message_id = models.CharField(max_length=128, blank=True, default="")
+    sequence = models.PositiveIntegerField()
+    text = models.TextField(blank=True, default="")
+    postback = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["sequence"]
+        constraints = [
+            models.UniqueConstraint(fields=["conversation", "sequence"], name="unique_messenger_inbound_sequence"),
+            models.UniqueConstraint(
+                fields=["conversation", "message_id"],
+                condition=~models.Q(message_id=""),
+                name="unique_messenger_inbound_message_id",
+            ),
+        ]
+
+    def __str__(self):
+        return f"MessengerInboundMessage({self.conversation_id} #{self.sequence})"
+
+
+class MessengerAITurn(TimeStampedModel):
+    STATUS_ACTIVE = "active"
+    STATUS_SUPERSEDED = "superseded"
+    STATUS_COMPLETED = "completed"
+    STATUS_STALE = "stale"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_SUPERSEDED, "Superseded"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_STALE, "Stale"),
+    ]
+
+    conversation = models.ForeignKey(MessengerConversation, on_delete=models.CASCADE, related_name="ai_turns")
+    token = models.CharField(max_length=64, unique=True)
+    input_sequence = models.PositiveIntegerField()
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    reply_text = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"MessengerAITurn({self.conversation_id} #{self.input_sequence} {self.status})"

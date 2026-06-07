@@ -1,4 +1,5 @@
 import json
+import re
 import pytest
 from datetime import time, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
@@ -96,6 +97,27 @@ def test_settings_page_does_not_show_blocked_times(clinic_setup, client):
     assert b"Blocked Times" not in response.content
     assert b"Add Blocked Time" not in response.content
     assert b"Unavailable Dates" in response.content
+
+
+@pytest.mark.django_db
+def test_settings_business_hours_missing_rows_render_closed(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+    ClinicBusinessHour.objects.create(
+        clinic=clinic,
+        weekday=0,
+        is_open=True,
+        open_time=time(9),
+        close_time=time(17),
+    )
+
+    response = client.get(reverse("dashboard:settings") + "?tab=hours")
+
+    html = response.content.decode()
+    saturday_checkbox = re.search(r'<input[^>]+name="is_open_5"[^>]*>', html).group(0)
+    sunday_checkbox = re.search(r'<input[^>]+name="is_open_6"[^>]*>', html).group(0)
+    assert "checked" not in saturday_checkbox
+    assert "checked" not in sunday_checkbox
 
 
 @pytest.mark.django_db

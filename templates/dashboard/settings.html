@@ -63,7 +63,7 @@
                 <tr>
                   <td class="p-4 font-semibold">
                     <label for="settings-is-open-{{ weekday }}" class="flex items-center gap-2 cursor-pointer">
-                      <input id="settings-is-open-{{ weekday }}" type="checkbox" name="is_open_{{ weekday }}" {% if h and h.is_open or not h %}checked{% endif %} class="cf-checkbox">
+                      <input id="settings-is-open-{{ weekday }}" type="checkbox" name="is_open_{{ weekday }}" {% if h and h.is_open %}checked{% endif %} class="cf-checkbox">
                       <span class="text-[var(--cf-ink)]">
                         {% if weekday == 0 %}Monday{% elif weekday == 1 %}Tuesday{% elif weekday == 2 %}Wednesday{% elif weekday == 3 %}Thursday{% elif weekday == 4 %}Friday{% elif weekday == 5 %}Saturday{% else %}Sunday{% endif %}
                       </span>
