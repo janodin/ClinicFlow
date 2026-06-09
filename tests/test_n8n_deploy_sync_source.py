@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 
 
@@ -69,3 +71,29 @@ def test_env_example_documents_tracked_n8n_sync_hook():
 
     assert "scripts/vps-post-deploy.sh" in source
     assert "deploy-vps.ps1" not in source[source.index("n8n API access"):]
+
+
+def test_sync_script_rejects_multiline_api_key_without_printing_value(tmp_path):
+    secret = "fake-secret-token"
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(
+        b"N8N_API_URL=http://127.0.0.1:9\n"
+        b"N8N_WORKFLOW_ID=ZTBqwEzdll6TZsUU\n"
+        + f"N8N_API_KEY={secret}\rn\n".encode("utf-8")
+    )
+    env = os.environ.copy()
+    for key in ["N8N_API_URL", "N8N_API_KEY", "N8N_WORKFLOW_ID"]:
+        env.pop(key, None)
+
+    result = subprocess.run(
+        ["node", str(SYNC_SCRIPT), "--env-file", str(env_file)],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert secret not in result.stderr
+    assert "N8N_API_KEY contains newline or control characters" in result.stderr

@@ -83,6 +83,14 @@ function requireEnv(name) {
   return value;
 }
 
+function requireHeaderEnv(name) {
+  const value = requireEnv(name);
+  if (/[\u0000-\u001F\u007F]/.test(value)) {
+    throw new Error(`${name} contains newline or control characters; re-enter it as a single line.`);
+  }
+  return value;
+}
+
 function normalizeApiBase(value) {
   return value.trim().replace(/\/$/, '').replace(/\/api\/v1$/, '');
 }
@@ -157,7 +165,7 @@ async function main() {
   }
 
   const apiBase = normalizeApiBase(requireEnv('N8N_API_URL'));
-  const apiKey = requireEnv('N8N_API_KEY');
+  const apiKey = requireHeaderEnv('N8N_API_KEY');
   const payload = buildWorkflowPayload(workflowJson);
 
   console.log(`Syncing n8n workflow ${workflowId} from ${options.workflowPath}...`);
