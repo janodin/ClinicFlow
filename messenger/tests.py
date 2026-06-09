@@ -1848,6 +1848,34 @@ def test_book_confirmed_appointment_requires_confirmation_and_creates_booking():
 
 
 @pytest.mark.django_db
+def test_book_confirmed_appointment_masks_phone_in_ai_tool_response():
+    import json
+    from messenger.ai_tools import book_confirmed_appointment, check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_booking_masked_phone", "PAGEAI-MASKED-PHONE")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = check_availability("PAGEAI-MASKED-PHONE", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+
+    result = book_confirmed_appointment(
+        "PAGEAI-MASKED-PHONE",
+        service.id,
+        slot["starts_at"],
+        "Maria Santos",
+        "09175551234",
+        confirmed=True,
+        email="maria@example.com",
+    )
+
+    assert result["created"] is True
+    appointment_payload = result["appointment"]
+    assert appointment_payload["patient_phone_last4"] == "1234"
+    assert "patient_phone" not in appointment_payload
+    assert "09175551234" not in json.dumps(result)
+
+
+@pytest.mark.django_db
 def test_book_confirmed_appointment_rejects_missing_email():
     from messenger.ai_tools import book_confirmed_appointment, check_availability
 
@@ -3245,6 +3273,43 @@ def test_ai_turn_new_message_supersedes_in_flight_turn_and_coalesces_pending_mes
         {"role": "user", "content": "June 15\nCleaning"},
         {"role": "assistant", "content": "What time works for Cleaning on June 15?"},
     ]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_payload_redacts_prior_history_phone_numbers():
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_redact_phone", "PAGE-AI-TURN-REDACT-PHONE")
+    client = Client()
+    first = _post_ai_turn_register(
+        client,
+        "PAGE-AI-TURN-REDACT-PHONE",
+        "PSID1",
+        "mid-turn-phone-booking",
+        "Book for Maria Santos, phone 09175551234",
+    ).json()
+    _post_ai_turn_complete(
+        client,
+        "PAGE-AI-TURN-REDACT-PHONE",
+        "PSID1",
+        first["turn_token"],
+        first["input_sequence"],
+        "Booked under 09175551234.",
+    )
+
+    response = _post_ai_turn_register(
+        client,
+        "PAGE-AI-TURN-REDACT-PHONE",
+        "PSID1",
+        "mid-turn-cancel-wrong-phone",
+        "Cancel CF-SPY1LWYH. My phone is 123445667788.",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "09175551234" not in data["message"]
+    assert "09175551234" not in json.dumps(data["history"])
+    assert "[phone redacted]" in data["message"]
+    assert "123445667788" in data["message"]
 
 
 @pytest.mark.django_db

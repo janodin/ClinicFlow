@@ -586,19 +586,9 @@ def _book_confirmed_appointment_for_clinic(clinic, source, service_id, starts_at
         appointment.messenger_psid = psid
         appointment.save(update_fields=["messenger_psid", "updated_at"])
 
-    local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
     return {
         "created": True,
-        "appointment": {
-            "id": appointment.id,
-            "reference_code": appointment.reference_code,
-            "service": appointment.service.name,
-            "status": appointment.status,
-            "starts_at": appointment.starts_at.isoformat(),
-            "local_starts_at": local_start.isoformat(),
-            "patient_name": appointment.patient.full_name,
-            "patient_phone": appointment.patient.phone,
-        },
+        "appointment": _appointment_summary(clinic, appointment),
     }
 
 

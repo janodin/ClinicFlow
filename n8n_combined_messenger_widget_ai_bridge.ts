@@ -949,7 +949,7 @@ const prepareMessengerQuickReplies = node({
   version: 2,
   config: {
     name: 'Prepare Messenger Quick Replies',
-    position: [1968, 520],
+    position: [2192, 520],
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const items = [];
@@ -1007,7 +1007,7 @@ const kliniAssistSharedAiAgent = node({
           '- Now: {{ $("Shared AI Input").item.json.context?.current_time?.now || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISO() }}\n' +
           '- Today: {{ $("Shared AI Input").item.json.context?.current_time?.today || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISODate() }}\n\n' +
           'Use business_hours and unavailable_dates from Clinic context JSON to answer general recurring schedule and clinic-closure questions. Do not answer specific appointment availability from business_hours alone. Use check_availability in the current turn for specific service/date/time slot availability, alternatives, or booking claims. Use match_services, check_availability, and book_confirmed_appointment for booking. Collect service, date/time, full name, phone, and email before booking. Ask for explicit confirmation before booking. Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation. ' +
-          'Use find_verified_appointment before canceling or rescheduling. Ask for appointment reference code and phone number before appointment management lookup. Summarize the verified appointment and requested action before mutation. Ask for explicit confirmation before canceling or rescheduling. Use cancel_verified_appointment and reschedule_verified_appointment only after explicit confirmation. Do not use user-supplied appointment IDs, patient IDs, clinic IDs, or service IDs for appointment management. ' +
+          'Use find_verified_appointment before canceling or rescheduling. Ask for appointment reference code and phone number before appointment management lookup. Summarize the verified appointment and requested action before mutation. Ask for explicit confirmation before canceling or rescheduling. Use cancel_verified_appointment and reschedule_verified_appointment only after explicit confirmation. Do not use user-supplied appointment IDs, patient IDs, clinic IDs, or service IDs for appointment management. If appointment verification fails, use only the tool error and ask the user to re-enter the reference code and phone number. Never reveal, correct, infer, or confirm the stored appointment phone number, even if it appears in prior conversation, user messages, tool results, or memory. Never say booked under or similar wording with a phone number. Appointment summaries may show patient_phone_last4 only; do not display full patient phone numbers. ' +
           'Use check_availability suggestion_type metadata: nearest_time means the requested time is unavailable; next_available_date means the requested date has no slots. ' +
           'Use FAQ entries as clinic knowledge without citing the source. Do not say based on the FAQ, according to the FAQ, the FAQ says. ' +
           'Messenger replies must be plain concise text. Widget replies must be concise and friendly.'),
@@ -1058,6 +1058,18 @@ const prepareChannelReply = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const sharedItems = $items('Shared AI Input');
+function redactPhoneLikeText(value) {
+  return String(value || '').replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, (match) => {
+    const digits = match.replace(/\\D/g, '');
+    return digits.length >= 9 ? '[phone redacted]' : match;
+  });
+}
+function isFailedAppointmentVerificationReply(value) {
+  const text = String(value || '').toLowerCase();
+  const appointmentContext = ['appointment', 'booking', 'reference', 'cancel', 'reschedul'].some((term) => text.includes(term));
+  const identityContext = ['phone', 'number', 'verify', 'verification', 'unable to verify', "couldn't verify", 'could not verify', "doesn't match", 'does not match', 'not match', 'booked under', 'belongs to', 'provided', 'confirm', 'lookup', 'not found'].some((term) => text.includes(term));
+  return appointmentContext && identityContext;
+}
 return $input.all().map((inputItem, itemIndex) => {
   const input = inputItem.json || {};
   const shared = sharedItems[itemIndex]?.json || {};
@@ -1068,6 +1080,9 @@ return $input.all().map((inputItem, itemIndex) => {
   text = String(text).replace(/<think[\\s\\S]*?<\\/think>/gi, '').replace(/<\\/?think>/gi, '').trim();
   if (!text) {
     text = shared.fallback_message || genericFallback;
+  }
+  if (isFailedAppointmentVerificationReply(text)) {
+    text = redactPhoneLikeText(text);
   }
   const maxLength = channel === 'messenger' ? 1900 : 1800;
   if (text.length > maxLength) {
@@ -1126,6 +1141,29 @@ const completeMessengerTurn = node({
   config: {
     name: 'Complete Messenger Turn',
     position: [2640, 640],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $json.page_id || $("Shared AI Input").item.json.page_id, psid: $json.psid || $("Shared AI Input").item.json.psid, turn_token: $json.turn_token || $("Shared AI Input").item.json.turn_token, input_sequence: $json.input_sequence || $("Shared AI Input").item.json.input_sequence, reply_text: $json.reply_text || (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\n")) } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ send_reply: true, stale: false, has_pending: false }],
+});
+
+const completeMessengerQuickReplyTurn = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Complete Messenger Quick Reply Turn',
+    position: [1968, 520],
     parameters: {
       method: 'POST',
       url: DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR,
@@ -1203,6 +1241,48 @@ const returnWidgetReply = node({
   output: [{ reply: 'Assistant reply' }],
 });
 
+const sharedChannelReplyRoute = routeChannelReply
+  .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
+  .onCase(1, returnWidgetReply);
+
+const messengerAiReplyBranch = kliniAssistSharedAiAgent
+  .to(prepareChannelReply)
+  .to(sharedChannelReplyRoute);
+
+const messengerQuickReplyBranch = getMessengerQuickReplies
+  .to(completeMessengerQuickReplyTurn)
+  .to(prepareMessengerQuickReplies)
+  .to(sendFacebookReply);
+
+const sharedFallbackReplyBranch = prepareSharedFallback
+  .to(prepareChannelReply)
+  .to(sharedChannelReplyRoute);
+
+const assistantModeRoute = routeAssistantMode
+  .onCase(0, messengerAiReplyBranch)
+  .onCase(1, messengerQuickReplyBranch)
+  .onCase(2, sharedFallbackReplyBranch);
+
+const messengerAssistantBranch = getMessengerClinicContext
+  .to(buildMessengerSharedInput)
+  .to(sharedAiInput)
+  .to(resolveAssistantMode)
+  .to(assistantModeRoute);
+
+const messengerClaimBranch = claimMessengerTurn
+  .to(routeMessengerTurnClaim.onCase(0, messengerAssistantBranch));
+
+const messengerRouteBranch = registerMessengerTurn
+  .to(routeMessengerTurnRegistration
+    .onCase(0, acknowledgeMetaMessengerEvent.to(messengerClaimBranch))
+    .onCase(1, acknowledgeQueuedMessengerTurn));
+
+const metaSignatureRoute = routeMetaSignature
+  .onCase(0, messengerRouteBranch)
+  .onCase(1, acknowledgeDuplicateMetaMessengerEvent)
+  .onCase(2, acknowledgeIgnoredMetaMessengerEvent)
+  .onCase(3, returnInvalidMetaSignature);
+
 export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI Bridge')
   .add(metaWebhookVerification)
   .to(verifyMetaChallenge)
@@ -1210,25 +1290,7 @@ export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI B
   .add(metaMessengerEvents)
   .to(normalizeMessengerRequest)
   .to(verifyMetaSignature)
-  .to(routeMetaSignature
-    .onCase(0, registerMessengerTurn.to(routeMessengerTurnRegistration
-      .onCase(0, acknowledgeMetaMessengerEvent.to(claimMessengerTurn.to(routeMessengerTurnClaim
-        .onCase(0, getMessengerClinicContext
-          .to(buildMessengerSharedInput)
-          .to(sharedAiInput)
-          .to(resolveAssistantMode)
-          .to(routeAssistantMode
-            .onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply
-              .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
-              .onCase(1, returnWidgetReply)))
-            .onCase(1, getMessengerQuickReplies.to(completeMessengerTurn).to(prepareMessengerQuickReplies).to(sendFacebookReply))
-            .onCase(2, prepareSharedFallback.to(prepareChannelReply).to(routeChannelReply
-              .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
-              .onCase(1, returnWidgetReply)))))))
-      .onCase(1, acknowledgeQueuedMessengerTurn)))
-    .onCase(1, acknowledgeDuplicateMetaMessengerEvent)
-    .onCase(2, acknowledgeIgnoredMetaMessengerEvent)
-    .onCase(3, returnInvalidMetaSignature))
+  .to(metaSignatureRoute)
   .add(widgetAssistantWebhook)
   .to(normalizeWidgetRequest)
   .to(getWidgetClinicContext)

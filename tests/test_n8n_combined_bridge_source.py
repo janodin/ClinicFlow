@@ -24,10 +24,23 @@ def test_combined_bridge_uses_kliniassist_technical_namespace():
     assert "path: 'kliniassist-messenger'" in source
     assert "path: 'kliniassist-widget-assistant'" in source
     assert "const kliniAssistSharedAiAgent" in source
-    assert ".onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in source
+    assert "const messengerAiReplyBranch = kliniAssistSharedAiAgent\n  .to(prepareChannelReply)" in source
+    assert ".onCase(0, messengerAiReplyBranch)" in source
     assert f"path: '{legacy_prefix}-messenger'" not in source
     assert f"path: '{legacy_prefix}-widget-assistant'" not in source
     assert legacy_agent not in source
+
+
+def test_combined_bridge_uses_flat_route_branch_constants_for_sdk_parser():
+    source = SOURCE.read_text(encoding="utf-8")
+    workflow_block = source[source.index("export default workflow"):]
+
+    assert "const messengerAiReplyBranch =" in source
+    assert "const messengerRouteBranch =" in source
+    assert "const metaSignatureRoute =" in source
+    assert ".to(routeMetaSignature\n    .onCase" not in workflow_block
+    assert ".to(metaSignatureRoute)" in workflow_block
+    assert ".add(widgetAssistantWebhook)" in workflow_block
 
 
 def test_combined_bridge_builds_django_urls_from_one_base_url_constant():
@@ -153,18 +166,20 @@ def test_combined_bridge_widget_path_uses_shared_ai_agent_and_widget_context():
     widget_start = workflow_block.index(".add(widgetAssistantWebhook)")
     widget_block = workflow_block[widget_start:]
     widget_shared_input_chain = ".add(widgetAssistantWebhook)\n  .to(normalizeWidgetRequest)\n  .to(getWidgetClinicContext)\n  .to(buildWidgetSharedInput)\n  .to(sharedAiInput)"
-    shared_route_start = workflow_block.index(".to(buildMessengerSharedInput)")
-    shared_route_block = workflow_block[shared_route_start:widget_start]
+    assistant_route_start = source.index("const assistantModeRoute")
+    export_start = source.index("export default workflow")
+    assistant_route_block = source[assistant_route_start:export_start]
 
     assert "name: 'Widget Assistant Webhook'" in source
     assert "name: 'Get Widget Clinic Context'" in source
     assert "/messenger/ai/widget/context/" in source
     assert widget_shared_input_chain in widget_block
-    assert workflow_block.count(".to(sharedAiInput)") == 2
-    assert workflow_block.count(".to(resolveAssistantMode)") == 1
-    assert workflow_block.count(".to(routeAssistantMode") == 1
-    assert ".onCase(0, kliniAssistSharedAiAgent.to(prepareChannelReply).to(routeChannelReply" in shared_route_block
-    assert ".onCase(1, returnWidgetReply)" in shared_route_block
+    assert workflow_block.count(".to(sharedAiInput)") == 1
+    assert assistant_route_block.count(".to(sharedAiInput)") == 1
+    assert assistant_route_block.count(".to(resolveAssistantMode)") == 1
+    assert "const assistantModeRoute = routeAssistantMode" in source
+    assert ".onCase(0, messengerAiReplyBranch)" in assistant_route_block
+    assert ".onCase(1, returnWidgetReply)" in source[source.index("const sharedChannelReplyRoute"):source.index("const messengerAiReplyBranch")]
 
 
 def test_combined_bridge_widget_webhook_requires_shared_secret_header_auth():
@@ -239,6 +254,18 @@ def test_combined_bridge_prompt_requires_verified_cancel_and_reschedule_confirma
     assert "Do not use user-supplied appointment IDs, patient IDs, clinic IDs, or service IDs for appointment management." in agent_block
 
 
+def test_combined_bridge_prompt_forbids_phone_disclosure_after_failed_appointment_verification():
+    source = SOURCE.read_text(encoding="utf-8")
+    agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
+    agent_end = source.index("const prepareSharedFallback")
+    agent_block = source[agent_start:agent_end]
+
+    assert "If appointment verification fails, use only the tool error and ask the user to re-enter the reference code and phone number." in agent_block
+    assert "Never reveal, correct, infer, or confirm the stored appointment phone number" in agent_block
+    assert "Never say booked under" in agent_block
+    assert "Appointment summaries may show patient_phone_last4 only; do not display full patient phone numbers." in agent_block
+
+
 def test_combined_bridge_prompt_uses_availability_suggestion_metadata_and_hides_faq_source():
     source = SOURCE.read_text(encoding="utf-8")
     agent_start = source.index("name: 'KliniAssist Shared AI Agent'")
@@ -298,6 +325,25 @@ def test_channel_reply_code_preserves_regex_escapes_for_n8n():
     assert "<\\\\/?think>" in source
 
 
+def test_channel_reply_redacts_failed_appointment_verification_phone_numbers():
+    source = SOURCE.read_text(encoding="utf-8")
+    prepare_start = source.index("name: 'Prepare Channel Reply'")
+    prepare_end = source.index("const routeChannelReply")
+    prepare_block = source[prepare_start:prepare_end]
+
+    assert "function redactPhoneLikeText" in prepare_block
+    assert "function isFailedAppointmentVerificationReply" in prepare_block
+    assert "text = redactPhoneLikeText(text);" in prepare_block
+    assert "replace(/\\\\+?\\\\d[\\\\d\\\\s().-]{7,}\\\\d/g" in prepare_block
+    assert "replace(/\\\\D/g" in prepare_block
+    assert "booked under" in prepare_block
+    assert "doesn't match" in prepare_block
+    assert "unable to verify" in prepare_block
+    assert "belongs to" in prepare_block
+    assert "reschedul" in prepare_block
+    assert "[phone redacted]" in prepare_block
+
+
 def test_meta_messenger_events_acknowledges_only_after_signature_verification():
     source = SOURCE.read_text(encoding="utf-8")
 
@@ -310,7 +356,7 @@ def test_meta_messenger_events_acknowledges_only_after_signature_verification():
     assert "responseBody: 'EVENT_RECEIVED'" in source
     assert source.index("name: 'Verify Meta Signature'") < source.index("name: 'Acknowledge Meta Messenger Event'")
     assert ".add(metaMessengerEvents)\n  .to(acknowledgeMetaMessengerEvent)" not in source
-    assert ".to(routeMetaSignature\n    .onCase(0, registerMessengerTurn.to(routeMessengerTurnRegistration" in source
+    assert "const metaSignatureRoute = routeMetaSignature\n  .onCase(0, messengerRouteBranch)" in source
     assert source.index("name: 'Register Messenger Turn'") < source.index("name: 'Acknowledge Meta Messenger Event'")
     assert source.index("name: 'Acknowledge Meta Messenger Event'") < source.index("name: 'Claim Messenger Turn'")
 
@@ -331,7 +377,7 @@ def test_meta_messenger_events_verify_signature_before_context_lookup():
     assert "signature_invalid" in source
     assert "Get Messenger Clinic Context" in source
     assert source.index("name: 'Verify Meta Signature'") < source.index("name: 'Get Messenger Clinic Context'")
-    assert ".to(normalizeMessengerRequest)\n  .to(verifyMetaSignature)\n  .to(routeMetaSignature" in source
+    assert ".to(normalizeMessengerRequest)\n  .to(verifyMetaSignature)\n  .to(metaSignatureRoute)" in source
 
 
 def test_meta_messenger_signature_verification_sends_message_identity_to_django():
@@ -392,7 +438,8 @@ def test_meta_messenger_registers_and_claims_turn_before_ai_context_lookup():
     assert source.index("name: 'Claim Messenger Turn'") < source.index("name: 'Get Messenger Clinic Context'")
     assert "process_now" in source[source.index("name: 'Route Messenger Turn Registration'"):source.index("const acknowledgeQueuedMessengerTurn")]
     assert "claimed" in source[source.index("name: 'Route Messenger Turn Claim'"):source.index("const getMessengerClinicContext")]
-    assert ".onCase(0, registerMessengerTurn.to(routeMessengerTurnRegistration" in workflow_block
+    assert "const messengerRouteBranch = registerMessengerTurn\n  .to(routeMessengerTurnRegistration" in source
+    assert "const messengerClaimBranch = claimMessengerTurn\n  .to(routeMessengerTurnClaim.onCase(0, messengerAssistantBranch));" in source
     assert "acknowledgeQueuedMessengerTurn.to(getMessengerClinicContext" not in source
 
 
@@ -426,7 +473,7 @@ def test_combined_bridge_completes_messenger_turn_before_facebook_send():
     assert "turn_token: $json.turn_token" in complete_block
     assert "input_sequence: $json.input_sequence" in complete_block
     assert "completion.send_reply" in prepare_current_block
-    assert ".onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))" in workflow_block
+    assert ".onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))" in source
     assert ".onCase(0, sendFacebookReply)" not in workflow_block
 
 
@@ -503,13 +550,16 @@ def test_combined_bridge_routes_messenger_quick_replies_without_ai_agent():
     assert "name: 'Resolve Assistant Mode'" in source
     assert "name: 'Route Assistant Mode'" in source
     assert "name: 'Get Messenger Quick Replies'" in source
+    assert "name: 'Complete Messenger Quick Reply Turn'" in source
     assert "name: 'Prepare Messenger Quick Replies'" in source
     assert "/messenger/n8n-webhook/" in source
     assert "messenger_response_mode" in source
     assert "should_use_quick_replies" in source
     assert "messaging.postback?.payload" in source
     assert "messaging.message?.quick_reply?.payload" in source
-    assert ".onCase(1, getMessengerQuickReplies.to(completeMessengerTurn).to(prepareMessengerQuickReplies).to(sendFacebookReply))" in source
+    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(completeMessengerQuickReplyTurn)\n  .to(prepareMessengerQuickReplies)\n  .to(sendFacebookReply);" in source
+    assert "getMessengerQuickReplies\n  .to(completeMessengerTurn)" not in source
+    assert ".onCase(1, messengerQuickReplyBranch)" in source
     assert "const replyItems = $items('Get Messenger Quick Replies');" in source
     shared_input_start = source.index("name: 'Build Messenger Shared Input'")
     shared_input_end = source.index("name: 'Build Widget Shared Input'")

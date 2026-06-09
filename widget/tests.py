@@ -363,6 +363,23 @@ class WidgetTests(TestCase):
         self.assertIn("this.chatHistory.push({id: this.nextId++, role: 'assistant'", send_chat_block)
         self.assertLess(send_chat_block.index("catch (error)"), send_chat_block.index("finally {"))
 
+    def test_widget_chat_does_not_parse_non_json_error_response_as_json(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        send_chat_start = content.index("async sendChatAction(")
+        send_chat_end = content.index("selectChatOption", send_chat_start)
+        send_chat_block = content[send_chat_start:send_chat_end]
+
+        self.assertIn("resp.headers.get('content-type')", send_chat_block)
+        self.assertIn("contentType.includes('application/json')", send_chat_block)
+        self.assertIn("const assistantErrorMessage = 'Sorry, I could not reach the assistant.", send_chat_block)
+        self.assertIn("throw new Error(assistantErrorMessage);", send_chat_block)
+        self.assertLess(
+            send_chat_block.index("if (!contentType.includes('application/json'))"),
+            send_chat_block.index("const data = await resp.json();"),
+        )
+
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
     def test_chat_step_ai_init_does_not_return_quick_button_options(self, mock_post):

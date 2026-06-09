@@ -47,6 +47,9 @@ deploy-vps.ps1
 deploy-vps.bat
 mobile-*.png
 
+# Local marketing video artifacts
+marketing/remotion-video/
+
 # IDE
 .vscode/
 .idea/
