@@ -11,7 +11,7 @@ from clinics.models import Clinic, ClinicAISettings
 from patients.models import normalize_phone
 from scheduling.models import Weekday
 from scheduling.utils import generate_slots, validate_slot
-from widget.views import _process_guest_booking
+from widget.views import PAST_APPOINTMENT_TIME_MESSAGE, _process_guest_booking
 
 from .defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 from .models import MessengerConnection, MessengerConversation
@@ -169,6 +169,19 @@ def _validation_error_text(error):
 
 APPOINTMENT_LOOKUP_ERROR = "Appointment not found. Please check the reference code and phone number."
 CONFIRMATION_REQUIRED_ERROR = "Appointment change requires explicit user confirmation."
+
+
+def _availability_error_response(error, requested_date=None):
+    return {
+        "found": True,
+        "available": False,
+        "error": error,
+        "selected_slot": None,
+        "alternatives": [],
+        "suggestion_type": "none",
+        "requested_date": requested_date.isoformat() if requested_date else None,
+        "suggested_date": None,
+    }
 
 
 def _appointment_summary(clinic, appointment):
@@ -345,19 +358,6 @@ def check_availability(page_id, service_id, preferred_starts_at=None, preferred_
 
 
 def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None, preferred_date=None):
-    service = clinic.services.filter(pk=service_id, is_active=True, is_archived=False).first()
-    if not service:
-        return {
-            "found": True,
-            "available": False,
-            "error": "Service not found.",
-            "selected_slot": None,
-            "alternatives": [],
-            "suggestion_type": "none",
-            "requested_date": None,
-            "suggested_date": None,
-        }
-
     try:
         requested_start = _parse_datetime(preferred_starts_at) if preferred_starts_at else None
         if requested_start:
@@ -367,16 +367,15 @@ def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None,
         else:
             target_date = _clinic_localdate(clinic) + timedelta(days=1)
     except (ValueError, TypeError):
-        return {
-            "found": True,
-            "available": False,
-            "error": "Invalid date or time.",
-            "selected_slot": None,
-            "alternatives": [],
-            "suggestion_type": "none",
-            "requested_date": None,
-            "suggested_date": None,
-        }
+        return _availability_error_response("Invalid date or time.")
+
+    clinic_today = _clinic_localdate(clinic)
+    if target_date < clinic_today or (requested_start and requested_start <= timezone.now()):
+        return _availability_error_response(PAST_APPOINTMENT_TIME_MESSAGE, target_date)
+
+    service = clinic.services.filter(pk=service_id, is_active=True, is_archived=False).first()
+    if not service:
+        return _availability_error_response("Service not found.")
 
     raw_slots = generate_slots(clinic, service, target_date)
     selected = None
@@ -519,7 +518,7 @@ def _reschedule_verified_appointment_for_clinic(clinic, reference_code, phone, s
     if not new_starts_at:
         return {"rescheduled": False, "error": "Invalid date or time."}
     if new_starts_at <= timezone.now():
-        return {"rescheduled": False, "error": "Cannot reschedule to the past."}
+        return {"rescheduled": False, "error": PAST_APPOINTMENT_TIME_MESSAGE}
 
     with transaction.atomic():
         locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)

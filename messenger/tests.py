@@ -73,6 +73,8 @@ def test_default_ai_prompt_hides_faq_source_and_uses_suggestion_metadata():
 
     assert "Do not say based on the FAQ" in DEFAULT_MESSENGER_AI_PROMPT
     assert "Answer FAQ-backed information as normal clinic information." in DEFAULT_MESSENGER_AI_PROMPT
+    assert "Previous dates and past times are not available" in DEFAULT_MESSENGER_AI_PROMPT
+    assert "Do not ask for a time, offer alternatives, or call availability for previous dates" in DEFAULT_MESSENGER_AI_PROMPT
     assert "Use check_availability suggestion_type metadata" in DEFAULT_MESSENGER_AI_PROMPT
     assert "nearest_time means the requested time is unavailable" in DEFAULT_MESSENGER_AI_PROMPT
     assert "next_available_date means the requested date has no slots" in DEFAULT_MESSENGER_AI_PROMPT
@@ -1790,6 +1792,100 @@ def test_check_availability_suggests_first_future_date_when_requested_date_has_n
 
 
 @pytest.mark.django_db
+def test_check_availability_rejects_past_preferred_date_without_alternatives():
+    from datetime import timezone as dt_timezone
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_past_date", "PAGEAI-PAST-DATE")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    fixed_now = timezone.datetime(2026, 6, 9, 1, 0, tzinfo=dt_timezone.utc)
+    past_date = date(2026, 6, 2)
+    today = date(2026, 6, 9)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=today.weekday(), open_time=time(10), close_time=time(12))
+
+    with patch("messenger.ai_tools.timezone.now", return_value=fixed_now), patch("scheduling.utils.timezone.now", return_value=fixed_now):
+        result = check_availability("PAGEAI-PAST-DATE", service.id, preferred_date=past_date.isoformat())
+
+    assert result["available"] is False
+    assert result["error"] == "Please choose today or a future appointment date/time. Previous dates and past times are not available."
+    assert result["selected_slot"] is None
+    assert result["alternatives"] == []
+    assert result["suggestion_type"] == "none"
+    assert result["requested_date"] == past_date.isoformat()
+    assert result["suggested_date"] is None
+
+
+@pytest.mark.django_db
+def test_check_availability_rejects_past_preferred_date_before_service_validation():
+    from datetime import timezone as dt_timezone
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_past_date_no_service", "PAGEAI-PAST-DATE-NO-SERVICE")
+    fixed_now = timezone.datetime(2026, 6, 9, 1, 0, tzinfo=dt_timezone.utc)
+    past_date = date(2026, 6, 2)
+
+    with patch("messenger.ai_tools.timezone.now", return_value=fixed_now):
+        result = check_availability("PAGEAI-PAST-DATE-NO-SERVICE", 999999, preferred_date=past_date.isoformat())
+
+    assert result["available"] is False
+    assert result["error"] == "Please choose today or a future appointment date/time. Previous dates and past times are not available."
+    assert result["alternatives"] == []
+    assert result["suggestion_type"] == "none"
+    assert result["requested_date"] == past_date.isoformat()
+    assert result["suggested_date"] is None
+
+
+@pytest.mark.django_db
+def test_check_widget_availability_rejects_past_preferred_date_without_alternatives():
+    from datetime import timezone as dt_timezone
+    from messenger.ai_tools import check_widget_availability
+
+    clinic, _ = _create_messenger_clinic("owner_widget_past_date", "PAGE-WIDGET-PAST-DATE")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    fixed_now = timezone.datetime(2026, 6, 9, 1, 0, tzinfo=dt_timezone.utc)
+    past_date = date(2026, 6, 2)
+    today = date(2026, 6, 9)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=today.weekday(), open_time=time(10), close_time=time(12))
+
+    with patch("messenger.ai_tools.timezone.now", return_value=fixed_now), patch("scheduling.utils.timezone.now", return_value=fixed_now):
+        result = check_widget_availability(clinic.slug, service.id, preferred_date=past_date.isoformat())
+
+    assert result["found"] is True
+    assert result["available"] is False
+    assert result["error"] == "Please choose today or a future appointment date/time. Previous dates and past times are not available."
+    assert result["alternatives"] == []
+    assert result["suggestion_type"] == "none"
+    assert result["requested_date"] == past_date.isoformat()
+    assert result["suggested_date"] is None
+
+
+@pytest.mark.django_db
+def test_check_availability_rejects_past_exact_datetime_without_alternatives():
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_past_datetime", "PAGEAI-PAST-DATETIME")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    clinic_tz = ZoneInfo(clinic.timezone)
+    fixed_now = timezone.datetime(2026, 6, 9, 1, 0, tzinfo=dt_timezone.utc)
+    past_start = timezone.make_aware(timezone.datetime(2026, 6, 3, 10, 0), clinic_tz)
+    today = date(2026, 6, 9)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=today.weekday(), open_time=time(10), close_time=time(12))
+
+    with patch("messenger.ai_tools.timezone.now", return_value=fixed_now), patch("scheduling.utils.timezone.now", return_value=fixed_now):
+        result = check_availability("PAGEAI-PAST-DATETIME", service.id, preferred_starts_at=past_start.isoformat())
+
+    assert result["available"] is False
+    assert result["error"] == "Please choose today or a future appointment date/time. Previous dates and past times are not available."
+    assert result["selected_slot"] is None
+    assert result["alternatives"] == []
+    assert result["suggestion_type"] == "none"
+    assert result["requested_date"] == "2026-06-03"
+    assert result["suggested_date"] is None
+
+
+@pytest.mark.django_db
 def test_check_widget_availability_returns_shared_suggestion_metadata():
     from messenger.ai_tools import check_widget_availability
 
@@ -1896,6 +1992,37 @@ def test_book_confirmed_appointment_rejects_missing_email():
 
     assert result["created"] is False
     assert result["error"] == "Please provide your email address."
+    assert Appointment.objects.filter(clinic=clinic).count() == 0
+
+
+@pytest.mark.django_db
+def test_book_confirmed_appointment_rejects_past_start_with_explicit_message():
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import book_confirmed_appointment
+
+    clinic, _ = _create_messenger_clinic("owner_ai_booking_past", "PAGEAI-BOOKING-PAST")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    clinic_tz = ZoneInfo(clinic.timezone)
+    fixed_now = timezone.datetime(2026, 6, 9, 1, 0, tzinfo=dt_timezone.utc)
+    past_start = timezone.make_aware(timezone.datetime(2026, 6, 2, 10, 0), clinic_tz)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=past_start.date().weekday(), open_time=time(9), close_time=time(12))
+
+    with patch("widget.views.timezone.now", return_value=fixed_now), patch("scheduling.utils.timezone.now", return_value=fixed_now):
+        result = book_confirmed_appointment(
+            "PAGEAI-BOOKING-PAST",
+            service.id,
+            past_start.isoformat(),
+            "Maria Santos",
+            "09175551234",
+            confirmed=True,
+            email="maria@example.com",
+        )
+
+    assert result == {
+        "created": False,
+        "error": "Please choose today or a future appointment date/time. Previous dates and past times are not available.",
+    }
     assert Appointment.objects.filter(clinic=clinic).count() == 0
 
 
@@ -2468,7 +2595,10 @@ def test_reschedule_verified_appointment_rejects_overlap_and_past_time():
 
     appointment.refresh_from_db()
     assert overlap == {"rescheduled": False, "error": "This slot is not available."}
-    assert past == {"rescheduled": False, "error": "Cannot reschedule to the past."}
+    assert past == {
+        "rescheduled": False,
+        "error": "Please choose today or a future appointment date/time. Previous dates and past times are not available.",
+    }
     assert appointment.starts_at == original_start
 
 

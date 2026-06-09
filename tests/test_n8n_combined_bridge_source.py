@@ -272,6 +272,9 @@ def test_combined_bridge_prompt_uses_availability_suggestion_metadata_and_hides_
     agent_end = source.index("const prepareSharedFallback")
     agent_block = source[agent_start:agent_end]
 
+    assert "If requested booking or reschedule date is before Today" in agent_block
+    assert "Previous dates and past times are not available" in agent_block
+    assert "Do not ask for a time, offer alternatives, or call availability for previous dates" in agent_block
     assert "Use check_availability suggestion_type metadata" in agent_block
     assert "nearest_time means the requested time is unavailable" in agent_block
     assert "next_available_date means the requested date has no slots" in agent_block

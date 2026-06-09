@@ -352,6 +352,11 @@
             body: formData,
             headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
           });
+          const assistantErrorMessage = 'Sorry, I could not reach the assistant. Please try again or use Book an Appointment.';
+          const contentType = resp.headers.get('content-type') || '';
+          if (!contentType.includes('application/json')) {
+            throw new Error(assistantErrorMessage);
+          }
           const data = await resp.json();
           if (!resp.ok) {
             throw new Error(data.message || 'Assistant request failed.');

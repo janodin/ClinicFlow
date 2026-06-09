@@ -1,0 +1,11 @@
+{
+  "name": "kliniassist-n8n-workflow-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync:n8n": "node scripts/sync-n8n-workflow.mjs"
+  },
+  "dependencies": {
+    "@n8n/workflow-sdk": "0.16.0"
+  }
+}

@@ -24,6 +24,7 @@ from widget.ai_client import AssistantUnavailable, call_assistant_webhook, fallb
 
 MIN_BOOKING_PHONE_DIGITS = 7
 SLOT_CONFLICT_MESSAGE = "That slot is no longer available. Please choose another time."
+PAST_APPOINTMENT_TIME_MESSAGE = "Please choose today or a future appointment date/time. Previous dates and past times are not available."
 WIDGET_AI_DEFAULT_MAX_MESSAGE_LENGTH = 1000
 WIDGET_AI_DEFAULT_RATE_LIMIT = 20
 WIDGET_AI_DEFAULT_RATE_WINDOW_SECONDS = 300
@@ -153,6 +154,8 @@ def _process_guest_booking(clinic, data, source):
         service = locked_clinic.services.filter(is_active=True, is_archived=False, pk=data.get("service")).first()
         if service is None:
             return None, "Please choose a valid service."
+        if starts_at <= timezone.now():
+            return None, PAST_APPOINTMENT_TIME_MESSAGE
 
         ends_at = starts_at + timedelta(minutes=service.effective_duration())
         local_date = starts_at.astimezone(ZoneInfo(locked_clinic.timezone)).date()

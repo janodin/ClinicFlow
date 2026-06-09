@@ -675,6 +675,31 @@ class WidgetTests(TestCase):
         self.assertFalse(Appointment.objects.filter(clinic__in=[self.clinic, other_clinic]).exists())
         self.assertFalse(Patient.objects.filter(clinic__in=[self.clinic, other_clinic], full_name="Cross Clinic Tamper").exists())
 
+    def test_widget_booking_rejects_past_start_with_explicit_message(self):
+        fixed_now = datetime(2026, 6, 9, 1, 0, tzinfo=dt_timezone.utc)
+        past_start = timezone.make_aware(datetime(2026, 6, 2, 10, 0), timezone=timezone.get_fixed_timezone(480))
+
+        with patch("widget.views.timezone.now", return_value=fixed_now), patch("scheduling.utils.timezone.now", return_value=fixed_now):
+            response = self.client.post(
+                reverse("widget:book", args=[self.clinic.slug]),
+                {
+                    "service": self.service.id,
+                    "starts_at": past_start.isoformat(),
+                    "full_name": "Past Date Patient",
+                    "phone": "09170001111",
+                    "email": "past@example.com",
+                },
+                HTTP_HX_REQUEST="true",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(
+            response,
+            "Please choose today or a future appointment date/time. Previous dates and past times are not available.",
+            status_code=409,
+        )
+        self.assertFalse(Appointment.objects.filter(clinic=self.clinic, patient__full_name="Past Date Patient").exists())
+
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
     def test_chat_step_text_input_calls_n8n_when_ai_enabled(self, mock_post):
