@@ -31,6 +31,30 @@
         </div>
       {% endfor %}
     </div>
+    {% if yakap_rule_form %}
+      <section class="rounded-[var(--cf-radius-lg)] border border-[var(--cf-line)] bg-[var(--cf-surface-warm)] p-4">
+        <div>
+          <h3 class="cf-section-title text-base">YAKAP coverage rule</h3>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Coverage amounts are estimates only. Clinic staff must verify PhilHealth YAKAP eligibility before honoring any coverage.</p>
+        </div>
+        {% if yakap_rule_form.non_field_errors %}
+          <div class="cf-error mt-3 rounded-[var(--cf-radius-lg)] bg-[var(--cf-status-cancelled-bg)] p-3">
+            {{ yakap_rule_form.non_field_errors.0 }}
+          </div>
+        {% endif %}
+        <div class="mt-4 space-y-3">
+          {% for field in yakap_rule_form %}
+            <div class="cf-field">
+              <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
+              {{ field }}
+              {% if field.errors %}
+                <p class="cf-error">{{ field.errors.0 }}</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
   </div>
   <div class="cf-modal-footer">
     <button type="submit" class="cf-btn cf-btn-primary w-full"><i data-lucide="{% if service %}save{% else %}plus-circle{% endif %}" class="h-4 w-4"></i>{% if service %}Save Changes{% else %}Create Service{% endif %}</button>

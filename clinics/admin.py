@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .admin_mixins import SuperuserOnlyAdminMixin
-from .models import Clinic, ClinicFAQ, ClinicGroup, ClinicMembership
+from .models import Clinic, ClinicAIProviderSettings, ClinicFAQ, ClinicGroup, ClinicMembership
 
 
 @admin.register(ClinicGroup)
@@ -15,6 +15,15 @@ class ClinicAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("name", "slug", "group", "timezone", "booking_approval_mode", "is_active")
     list_filter = ("is_active", "booking_approval_mode")
     search_fields = ("name", "slug", "email", "phone")
+
+
+@admin.register(ClinicAIProviderSettings)
+class ClinicAIProviderSettingsAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
+    list_display = ("clinic", "provider", "model", "is_enabled", "has_api_key")
+    list_filter = ("provider", "is_enabled")
+    search_fields = ("clinic__name", "clinic__slug", "model")
+    readonly_fields = ("has_api_key",)
+    exclude = ("api_key",)
 
 
 @admin.register(ClinicMembership)

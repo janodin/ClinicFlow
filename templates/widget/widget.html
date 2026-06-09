@@ -28,6 +28,14 @@
         <div class="mx-auto grid h-16 w-16 place-items-center rounded-3xl" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="bot" class="h-8 w-8"></i></div>
         <h2 class="mt-5 text-xl font-black text-[var(--cf-ink)]">{{ clinic.name }}</h2>
         <p class="mx-auto mt-2 max-w-xs text-sm leading-6 text-[var(--cf-muted)]">{{ clinic.widget_welcome_message }}</p>
+        {% if yakap_settings %}
+        <div class="mt-4 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left text-[var(--cf-ink)]">
+          <p class="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--cf-brand-strong)]">YAKAP estimates</p>
+          <h3 class="mt-1 text-sm font-bold text-[var(--cf-ink)]">{{ yakap_settings.public_promo_headline }}</h3>
+          <p class="mt-1 text-xs leading-5 text-[var(--cf-muted)]">{{ yakap_settings.public_promo_body }}</p>
+          <p class="mt-2 text-[11px] leading-4 text-[var(--cf-muted)]">{{ yakap_settings.public_disclaimer }}</p>
+        </div>
+        {% endif %}
         <button @click="startBook()" class="mt-6 flex w-full items-center gap-3 rounded-2xl border bg-white/90 p-3 text-left transition hover:bg-white" :style="'border-color:' + accentColor">
           <span class="grid h-11 w-11 place-items-center rounded-2xl" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="calendar-days" class="h-5 w-5"></i></span>
           <span><strong class="text-[var(--cf-ink)]">Book an Appointment</strong><br><span class="text-sm text-[var(--cf-muted)]">Choose a service, date & time</span></span>
@@ -108,6 +116,15 @@
               <div class="cf-field"><label for="widget-phone" class="cf-label">Phone</label><input id="widget-phone" name="phone" type="tel" required autocomplete="tel" class="cf-input"></div>
               <div class="cf-field"><label for="widget-email" class="cf-label">Email</label><input id="widget-email" name="email" type="email" required autocomplete="email" class="cf-input"></div>
               <div class="cf-field"><label for="widget-reason" class="cf-label">Reason for visit</label><textarea id="widget-reason" name="reason" rows="3" class="cf-textarea" placeholder="Optional details for the clinic"></textarea></div>
+              {% if yakap_settings %}
+              <label class="flex gap-3 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left">
+                <input type="checkbox" name="yakap_requested" class="cf-checkbox mt-0.5">
+                <span>
+                  <span class="block text-sm font-bold text-[var(--cf-ink)]">I want to use YAKAP benefits if eligible</span>
+                  <span class="mt-1 block text-xs leading-5 text-[var(--cf-muted)]">Subject to PhilHealth and clinic verification.</span>
+                </span>
+              </label>
+              {% endif %}
               <button type="submit" class="cf-btn w-full" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="check-circle-2" class="h-4 w-4"></i>Confirm Appointment</button>
             </form>
           </div>

@@ -5,9 +5,107 @@
   <div class="cf-page-header">
     <div>
       <h1 class="cf-page-title ui-page-title">Assistant</h1>
-      <p class="cf-page-description">Manage the shared AI prompt, FAQs, and website booking widget experience.</p>
+      <p class="cf-page-description">Manage the shared AI prompt, provider routing, Messenger mode, tone, fallback message, and FAQs.</p>
     </div>
   </div>
+
+  <section class="cf-card p-6" data-section="ai-provider-settings" aria-labelledby="ai-provider-title">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div class="flex min-w-0 items-start gap-3">
+        <div class="cf-icon-box p-3 shrink-0">
+          <i data-lucide="key-round" class="h-5 w-5"></i>
+        </div>
+        <div class="min-w-0">
+          <p class="cf-eyebrow">Assistant routing</p>
+          <h2 id="ai-provider-title" class="cf-section-title mt-2">AI Provider</h2>
+          <p class="mt-2 max-w-2xl text-sm text-[var(--cf-muted)]">Configure the provider, model failover, and secret used by Assistant AI replies.</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 lg:justify-end">
+        <span class="cf-badge cf-badge-info">
+          <i data-lucide="shield-check" class="h-3 w-3" aria-hidden="true"></i>
+          Clinic-owned
+        </span>
+        <span class="cf-badge {% if ai_provider_settings.is_enabled %}cf-badge-active{% else %}cf-badge-inactive{% endif %}">
+          <i data-lucide="{% if ai_provider_settings.is_enabled %}check-circle{% else %}x-circle{% endif %}" class="h-3 w-3" aria-hidden="true"></i>
+          {% if ai_provider_settings.is_enabled %}Enabled{% else %}Disabled{% endif %}
+        </span>
+      </div>
+    </div>
+
+    <form method="post" action="{% url 'dashboard:assistant_settings' %}" class="mt-5 grid gap-5">
+      {% csrf_token %}
+      <input type="hidden" name="_form" value="ai_provider_settings">
+
+      {% if ai_provider_form.non_field_errors %}
+        <div class="cf-form-error">
+          {% for error in ai_provider_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+        </div>
+      {% endif %}
+
+      <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <label class="flex cursor-pointer items-start gap-3 normal-case tracking-normal">
+            {{ ai_provider_form.is_enabled }}
+            <span class="min-w-0">
+              <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ ai_provider_form.is_enabled.label }}</span>
+              <span class="mt-1 block text-xs font-normal leading-5 text-[var(--cf-muted)]">When disabled, the Assistant falls back to the platform default behavior.</span>
+            </span>
+          </label>
+          <span class="cf-badge {% if ai_provider_settings.is_enabled %}cf-badge-active{% else %}cf-badge-inactive{% endif %} self-start">
+            {% if ai_provider_settings.is_enabled %}Active routing{% else %}Fallback routing{% endif %}
+          </span>
+        </div>
+        {% if ai_provider_form.is_enabled.errors %}<p class="cf-error">{{ ai_provider_form.is_enabled.errors.0 }}</p>{% endif %}
+      </div>
+
+      <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none">
+        <div data-ai-provider-layout="responsive-grid" class="grid gap-4 lg:grid-cols-2">
+          <div data-ai-provider-field="provider" class="cf-field order-1 lg:order-1">
+            <label class="cf-label" for="{{ ai_provider_form.provider.id_for_label }}">{{ ai_provider_form.provider.label }}</label>
+            {{ ai_provider_form.provider }}
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Choose the AI endpoint for this clinic.</p>
+            {% if ai_provider_form.provider.errors %}<p class="cf-error">{{ ai_provider_form.provider.errors.0 }}</p>{% endif %}
+          </div>
+
+          <div data-ai-provider-field="base-url" class="cf-field order-2 lg:order-3">
+            <label class="cf-label" for="{{ ai_provider_form.base_url.id_for_label }}">{{ ai_provider_form.base_url.label }}</label>
+            {{ ai_provider_form.base_url }}
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Required only for OpenAI-compatible providers. HTTPS public API hosts only.</p>
+            {% if ai_provider_form.base_url.errors %}<p class="cf-error">{{ ai_provider_form.base_url.errors.0 }}</p>{% endif %}
+          </div>
+
+          <div data-ai-provider-field="api-key" class="cf-field order-3 lg:order-5">
+            <label class="cf-label" for="{{ ai_provider_form.api_key.id_for_label }}">{{ ai_provider_form.api_key.label }}</label>
+            {{ ai_provider_form.api_key }}
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">{% if ai_provider_settings.has_api_key %}A saved API key is on file. Leave the mask unchanged to keep it.{% else %}Paste the provider API key. It will not be shown again after saving.{% endif %}</p>
+            {% if ai_provider_form.api_key.errors %}<p class="cf-error">{{ ai_provider_form.api_key.errors.0 }}</p>{% endif %}
+          </div>
+
+          <div data-ai-provider-field="primary-model" class="cf-field order-4 lg:order-2">
+            <label class="cf-label" for="{{ ai_provider_form.openai_model.id_for_label }}">{{ ai_provider_form.openai_model.label }}</label>
+            {{ ai_provider_form.openai_model }}
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Primary model used first for the selected provider.</p>
+            {% if ai_provider_form.openai_model.errors %}<p class="cf-error">{{ ai_provider_form.openai_model.errors.0 }}</p>{% endif %}
+          </div>
+
+          <div data-ai-provider-field="fallback-model" class="cf-field order-5 lg:order-4">
+            <label class="cf-label" for="{{ ai_provider_form.openai_fallback_model.id_for_label }}">{{ ai_provider_form.openai_fallback_model.label }}</label>
+            {{ ai_provider_form.openai_fallback_model }}
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Fallback model retries only if the primary model fails or returns no usable reply.</p>
+            {% if ai_provider_form.openai_fallback_model.errors %}<p class="cf-error">{{ ai_provider_form.openai_fallback_model.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-3 border-t border-[var(--cf-line)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p class="text-xs text-[var(--cf-muted)]">Provider changes apply to Assistant replies after saving.</p>
+        <button type="submit" class="cf-btn cf-btn-primary">
+          <i data-lucide="save" class="h-4 w-4"></i> Save AI Provider
+        </button>
+      </div>
+    </form>
+  </section>
 
   <section class="cf-card p-6">
     <div class="flex items-center gap-3 mb-4">
@@ -140,121 +238,6 @@
         </button>
       </div>
     </form>
-  </section>
-
-  <section class="cf-card p-6" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, previewOpen: false, accentColor:'{{ clinic.widget_accent_color|default:'#06b6d4' }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;} window.addEventListener('message', event => { if (event.data && event.data.type === 'kliniassist-minimize') { previewOpen = false; } });">
-    <h2 class="cf-section-title">Website Booking Widget</h2>
-    <p class="mt-2 text-sm text-[var(--cf-muted)]">Customize website-only appearance, preview, and embed settings.</p>
-
-    <!-- Appearance -->
-    <form method="post" action="{% url 'dashboard:assistant_settings' %}" class="mt-6">
-      {% csrf_token %}
-      <input type="hidden" name="_form" value="widget_settings">
-      <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-        <!-- Left: All form fields + Save button -->
-        <div class="grid gap-5 content-start">
-          <div class="cf-field">
-            <label for="{{ widget_form.widget_accent_color.id_for_label }}" class="cf-label">{{ widget_form.widget_accent_color.label }}</label>
-            {{ widget_form.widget_accent_color }}
-            {% if widget_form.widget_accent_color.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.widget_accent_color.errors.0 }}</p>{% endif %}
-          </div>
-          <div class="cf-field">
-            <label for="{{ widget_form.widget_welcome_message.id_for_label }}" class="cf-label">{{ widget_form.widget_welcome_message.label }}</label>
-            {{ widget_form.widget_welcome_message }}
-            {% if widget_form.widget_welcome_message.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.widget_welcome_message.errors.0 }}</p>{% endif %}
-          </div>
-          <div class="flex justify-end pt-2">
-            <button class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Save Changes</button>
-          </div>
-        </div>
-        <!-- Right: Live Preview exclusively -->
-        <div>
-          <p class="cf-kpi-label mb-2">Live Preview</p>
-          <div class="relative h-[420px] overflow-hidden rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] sm:h-[520px]">
-            <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,.16),transparent_38%),linear-gradient(135deg,#ffffff,#f0fdff)]"></div>
-            <div class="relative z-10 flex h-full flex-col justify-between p-4">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cf-muted)]">Clinic website preview</p>
-                <div class="mt-3 h-3 w-32 rounded-full bg-[var(--cf-line)]"></div>
-                <div class="mt-2 h-2 w-44 rounded-full bg-[var(--cf-line)]/70"></div>
-              </div>
-
-              <button x-show="!previewOpen" x-transition @click="previewOpen = true" type="button" class="absolute bottom-4 right-4 grid h-[60px] w-[60px] place-items-center rounded-full text-white shadow-[0_10px_24px_rgba(8,51,68,.22)] transition hover:scale-105 focus:outline focus:outline-3 focus:outline-offset-4 focus:outline-[rgba(8,51,68,.35)]" :style="'background-color:' + accentColor" aria-label="Open booking widget preview" title="Book an appointment">
-                <i data-lucide="calendar-days" class="h-7 w-7" aria-hidden="true"></i>
-              </button>
-
-              <div x-show="previewOpen" x-transition x-cloak class="absolute inset-0 bg-transparent">
-                <iframe src="{{ iframe_url }}" class="h-full w-full" style="border:none;" allow="clipboard-write"></iframe>
-              </div>
-            </div>
-          </div>
-          <p class="mt-2 text-xs text-[var(--cf-muted)]">Click the launcher to preview how patients open the widget.</p>
-        </div>
-      </div>
-    </form>
-
-    <!-- Share -->
-    <div class="mt-6 border-t border-[var(--cf-line)] pt-6">
-      <p class="cf-kpi-label mb-3">Share Your Widget</p>
-      <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <code class="block min-w-0 max-w-full flex-1 break-all rounded-md bg-[var(--cf-surface)] px-3 py-2 text-sm text-[var(--cf-blue)]">{{ request.scheme }}://{{ request.get_host }}{% url 'widget:home' clinic.slug %}</code>
-          <div class="flex flex-wrap items-center gap-2 shrink-0">
-            <button @click="navigator.clipboard.writeText('{{ request.scheme }}://{{ request.get_host }}{% url 'widget:home' clinic.slug %}').then(() => {urlCopied=true; setTimeout(() => urlCopied=false, 2000)})" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
-              <i data-lucide="copy" class="h-4 w-4"></i>
-              <span x-show="!urlCopied">Copy</span>
-              <span x-show="urlCopied" x-cloak>Copied!</span>
-            </button>
-            <a class="cf-btn cf-btn-secondary cf-btn-sm" target="_blank" href="{% url 'widget:home' clinic.slug %}">
-              <i data-lucide="external-link" class="h-4 w-4"></i>Open
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Embed -->
-    <div class="mt-6 border-t border-[var(--cf-line)] pt-6">
-      <p class="cf-kpi-label mb-3">Embed on Your Website</p>
-      <div class="grid gap-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
-        <!-- JavaScript Embed -->
-        <div class="rounded-lg border border-[var(--cf-brand-soft)] bg-[var(--cf-surface)] p-4 shadow-sm">
-          <div class="mb-2 flex flex-wrap items-center gap-2">
-            <i data-lucide="file-code" class="h-4 w-4 text-[var(--cf-brand)]"></i>
-            <p class="text-sm font-semibold text-[var(--cf-ink)]">Recommended JavaScript launcher</p>
-            <span class="cf-badge cf-badge-info">Recommended</span>
-          </div>
-          <p class="text-xs text-[var(--cf-muted)] mb-3">Paste before the closing <code class="rounded bg-[var(--cf-surface-muted)] px-1 py-0.5 text-[var(--cf-blue)]">&lt;/body&gt;</code> tag. Adds a small bottom-right booking button. The full widget opens after click.</p>
-          <div class="relative">
-            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="script-code">&lt;script src="{{ script_url }}"&gt;&lt;/script&gt;</pre>
-            <button @click="navigator.clipboard.writeText(document.getElementById('script-code').innerText).then(() => {scriptCopied=true; setTimeout(() => scriptCopied=false, 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-2 sm:top-2 sm:mt-0" type="button">
-              <i data-lucide="copy" class="h-3 w-3" x-show="!scriptCopied"></i>
-              <i data-lucide="check" class="h-3 w-3" x-show="scriptCopied" x-cloak></i>
-              <span x-show="!scriptCopied">Copy</span>
-              <span x-show="scriptCopied" x-cloak>Copied</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Iframe Embed -->
-        <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
-          <div class="flex items-center gap-2 mb-2">
-            <i data-lucide="frame" class="h-4 w-4 text-[var(--cf-muted)]"></i>
-            <p class="text-sm font-semibold text-[var(--cf-ink)]">Advanced iframe fallback</p>
-          </div>
-          <p class="text-xs text-[var(--cf-muted)] mb-3">Embeds the full panel directly and can be visible immediately. Use only for custom placements where you intentionally want the widget panel shown.</p>
-          <div class="relative">
-            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
-            <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {iframeCopied=true; setTimeout(() => iframeCopied=false, 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-2 sm:top-2 sm:mt-0" type="button">
-              <i data-lucide="copy" class="h-3 w-3" x-show="!iframeCopied"></i>
-              <i data-lucide="check" class="h-3 w-3" x-show="iframeCopied" x-cloak></i>
-              <span x-show="!iframeCopied">Copy</span>
-              <span x-show="iframeCopied" x-cloak>Copied</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   </section>
 
   <section class="cf-card cf-faq-shell">

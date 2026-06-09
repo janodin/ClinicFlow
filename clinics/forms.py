@@ -2,13 +2,26 @@ from zoneinfo import available_timezones
 
 from django import forms
 
-from .models import Clinic, ClinicAISettings, ClinicFAQ
+from .ai_provider_validation import validate_ai_provider_base_url
+from .models import Clinic, ClinicAIProviderSettings, ClinicAISettings, ClinicFAQ
 
 _INPUT = "cf-input"
 _SELECT = "cf-select"
 _TEXTAREA = "cf-textarea"
 _CHECKBOX = "cf-checkbox"
 _COLOR = "h-10 w-20 rounded-xl border border-[var(--cf-line)] p-1 cursor-pointer"
+
+SAVED_PROVIDER_SECRET_MASK = "************"
+
+
+class SavedProviderSecretInput(forms.PasswordInput):
+    def __init__(self, attrs=None):
+        super().__init__(attrs=attrs, render_value=True)
+
+    def get_context(self, name, value, attrs):
+        safe_value = value if value == SAVED_PROVIDER_SECRET_MASK else None
+        return super().get_context(name, safe_value, attrs)
+
 
 _TIMEZONE_CHOICES = sorted([(tz, tz) for tz in available_timezones()])
 
@@ -93,6 +106,109 @@ class SharedAISettingsForm(forms.ModelForm):
             "instructions": "Used by the website Assistant and Messenger AI mode for broader clinic policies. Tone is controlled above. Services, prices, and availability still come from KliniAssist.",
             "fallback_message": "Shown when AI replies are disabled or unavailable.",
         }
+
+
+class AIProviderSettingsForm(forms.ModelForm):
+    base_url = forms.CharField(
+        required=False,
+        max_length=255,
+        widget=forms.URLInput(attrs={"class": _INPUT, "placeholder": "https://api.openai.com/v1"}),
+        label="Base URL",
+    )
+    openai_model = forms.ChoiceField(
+        choices=ClinicAIProviderSettings.OPENAI_MODEL_CHOICES,
+        required=False,
+        widget=forms.Select(attrs={"class": _SELECT}),
+        label="Primary model",
+    )
+    openai_fallback_model = forms.ChoiceField(
+        choices=ClinicAIProviderSettings.OPENAI_MODEL_CHOICES,
+        required=False,
+        widget=forms.Select(attrs={"class": _SELECT}),
+        label="Fallback model",
+    )
+
+    class Meta:
+        model = ClinicAIProviderSettings
+        fields = [
+            "provider",
+            "base_url",
+            "openai_model",
+            "openai_fallback_model",
+            "api_key",
+            "is_enabled",
+        ]
+        widgets = {
+            "provider": forms.Select(attrs={"class": _SELECT}),
+            "api_key": SavedProviderSecretInput(attrs={"class": f"{_INPUT} pr-12", "placeholder": "Leave blank to keep saved API key"}),
+            "is_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
+        }
+        labels = {
+            "provider": "AI provider",
+            "api_key": "API key",
+            "is_enabled": "Enable clinic-owned AI provider",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            if self.instance.api_key:
+                self.initial["api_key"] = SAVED_PROVIDER_SECRET_MASK
+            self.initial["openai_model"] = self.instance.model or ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
+            self.initial["openai_fallback_model"] = self.instance.fallback_model or ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
+
+    def clean_api_key(self):
+        api_key = self.cleaned_data.get("api_key", "")
+        if api_key in {"", SAVED_PROVIDER_SECRET_MASK} and self.instance and self.instance.pk:
+            return self.instance.api_key
+        return api_key
+
+    def clean(self):
+        cleaned = super().clean()
+        provider = cleaned.get("provider")
+        enabled = cleaned.get("is_enabled")
+        base_url_invalid = False
+        selected_model = cleaned.get("openai_model") or ""
+        selected_fallback_model = cleaned.get("openai_fallback_model") or ""
+        if provider == ClinicAIProviderSettings.PROVIDER_OPENAI:
+            cleaned["base_url"] = ClinicAIProviderSettings.OPENAI_BASE_URL
+            cleaned["model"] = selected_model
+            cleaned["fallback_model"] = selected_fallback_model
+        elif provider == ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE:
+            base_url = cleaned.get("base_url") or ""
+            if base_url:
+                try:
+                    cleaned["base_url"] = validate_ai_provider_base_url(base_url)
+                except forms.ValidationError as exc:
+                    base_url_invalid = True
+                    self.add_error("base_url", exc)
+            cleaned["model"] = selected_model
+            cleaned["fallback_model"] = selected_fallback_model
+        else:
+            self.add_error("provider", "Choose a supported AI provider.")
+
+        if enabled:
+            if not (cleaned.get("api_key") or "").strip():
+                self.add_error("api_key", "API key is required when the AI provider is enabled.")
+            if not (cleaned.get("model") or "").strip():
+                self.add_error("openai_model", "Model is required when the AI provider is enabled.")
+            if not (cleaned.get("fallback_model") or "").strip():
+                self.add_error("openai_fallback_model", "Fallback model is required when the AI provider is enabled.")
+            if not base_url_invalid and not (cleaned.get("base_url") or "").strip():
+                self.add_error("base_url", "Base URL is required when the AI provider is enabled.")
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.model = self.cleaned_data.get("model", instance.model)
+        instance.fallback_model = self.cleaned_data.get("fallback_model", instance.fallback_model)
+        if instance.provider == ClinicAIProviderSettings.PROVIDER_OPENAI:
+            instance.base_url = ClinicAIProviderSettings.OPENAI_BASE_URL
+        else:
+            instance.base_url = self.cleaned_data.get("base_url", instance.base_url)
+        if commit:
+            instance.save()
+        return instance
 
 
 class ClinicFAQForm(forms.ModelForm):

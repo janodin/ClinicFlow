@@ -1276,6 +1276,277 @@ def _create_messenger_clinic(username="owner_ai", page_id="PAGEAI"):
 
 
 @pytest.mark.django_db
+@override_settings(AI_PROVIDER_TIMEOUT_SECONDS=7)
+@patch("messenger.ai_provider_client.requests.Session.post")
+def test_ai_provider_client_calls_openai_compatible_chat_completions(mock_post, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import call_chat_completion
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic, _connection = _create_messenger_clinic("owner_provider_client", "PAGE-PROVIDER-CLIENT")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="https://openrouter.ai/api/v1/",
+        model="openai/gpt-4o-mini",
+        api_key="sk-provider-secret",
+        is_enabled=True,
+    )
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {
+        "choices": [{"message": {"role": "assistant", "content": "Provider reply"}}]
+    }
+
+    message = call_chat_completion(provider, [{"role": "user", "content": "Hello"}])
+
+    assert message == {"role": "assistant", "content": "Provider reply"}
+    call = mock_post.call_args
+    assert call.args[0] == "https://openrouter.ai/api/v1/chat/completions"
+    assert call.kwargs["headers"]["Authorization"] == "Bearer sk-provider-secret"
+    assert call.kwargs["headers"]["Content-Type"] == "application/json"
+    assert call.kwargs["json"]["model"] == "openai/gpt-4o-mini"
+    assert call.kwargs["json"]["messages"] == [{"role": "user", "content": "Hello"}]
+    assert call.kwargs["timeout"] == 7
+    assert call.kwargs["allow_redirects"] is False
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_provider_client.requests.Session.post")
+def test_ai_provider_client_rejects_unsafe_persisted_base_url_before_request(mock_post):
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import AIProviderError, call_chat_completion
+
+    clinic, _connection = _create_messenger_clinic("owner_provider_unsafe_url", "PAGE-PROVIDER-UNSAFE-URL")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-4o-mini",
+        api_key="sk-provider-secret",
+        is_enabled=True,
+    )
+
+    with pytest.raises(AIProviderError) as exc:
+        call_chat_completion(provider, [{"role": "user", "content": "Hello"}])
+
+    assert "AI provider request failed" in str(exc.value)
+    mock_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_provider_client.requests.Session.post")
+def test_ai_provider_client_rejects_https_internal_persisted_base_url_before_request(mock_post):
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import AIProviderError, call_chat_completion
+
+    clinic, _connection = _create_messenger_clinic("owner_provider_internal_url", "PAGE-PROVIDER-INTERNAL-URL")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="https://10.0.0.1/v1",
+        model="gpt-4o-mini",
+        api_key="sk-provider-secret",
+        is_enabled=True,
+    )
+
+    with pytest.raises(AIProviderError) as exc:
+        call_chat_completion(provider, [{"role": "user", "content": "Hello"}])
+
+    assert "AI provider request failed" in str(exc.value)
+    mock_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_provider_client.requests.Session.post")
+def test_ai_provider_client_rejects_provider_redirect_response(mock_post, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import AIProviderError, call_chat_completion
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic, _connection = _create_messenger_clinic("owner_provider_redirect", "PAGE-PROVIDER-REDIRECT")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="https://openrouter.ai/api/v1",
+        model="gpt-4o-mini",
+        api_key="sk-provider-secret",
+        is_enabled=True,
+    )
+    mock_post.return_value.status_code = 302
+    mock_post.return_value.headers = {"Location": "https://127.0.0.1/internal"}
+    mock_post.return_value.json.return_value = {
+        "choices": [{"message": {"role": "assistant", "content": "Redirect reply"}}]
+    }
+
+    with pytest.raises(AIProviderError) as exc:
+        call_chat_completion(provider, [{"role": "user", "content": "Hello"}])
+
+    assert "AI provider request failed" in str(exc.value)
+    assert mock_post.call_args.kwargs["allow_redirects"] is False
+
+
+def test_ai_provider_safe_socket_connection_rejects_rebound_private_dns(monkeypatch):
+    import socket
+    from messenger.ai_provider_client import _create_safe_provider_connection
+
+    def fail_socket(*args, **kwargs):
+        raise AssertionError("socket should not open for unsafe resolved address")
+
+    monkeypatch.setattr(
+        "messenger.ai_provider_client.socket.getaddrinfo",
+        lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 443))],
+    )
+    monkeypatch.setattr("messenger.ai_provider_client.socket.socket", fail_socket)
+
+    with pytest.raises(OSError, match="AI provider resolved to an unsafe address"):
+        _create_safe_provider_connection(("api.example.com", 443), timeout=1)
+
+
+def test_ai_provider_session_disables_env_proxies_and_mounts_safe_https_adapter():
+    from messenger.ai_provider_client import _SafeAIProviderHTTPAdapter, _create_ai_provider_session
+
+    with _create_ai_provider_session() as session:
+        assert session.trust_env is False
+        assert isinstance(session.adapters["https://"], _SafeAIProviderHTTPAdapter)
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_provider_client.requests.Session.post")
+def test_ai_provider_client_uses_model_override_without_mutating_settings(mock_post, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import call_chat_completion
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic, _connection = _create_messenger_clinic("owner_provider_override", "PAGE-PROVIDER-OVERRIDE")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
+        model="gpt-4o",
+        fallback_model="gpt-4o-mini",
+        api_key="sk-provider-secret",
+        is_enabled=True,
+    )
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {
+        "choices": [{"message": {"role": "assistant", "content": "Fallback reply"}}]
+    }
+
+    message = call_chat_completion(
+        provider,
+        [{"role": "user", "content": "Hello"}],
+        model="gpt-4o-mini",
+        model_role="fallback",
+    )
+
+    assert message == {"role": "assistant", "content": "Fallback reply"}
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["model"] == "gpt-4o-mini"
+    provider.refresh_from_db()
+    assert provider.model == "gpt-4o"
+    assert provider.fallback_model == "gpt-4o-mini"
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_provider_client.requests.Session.post")
+def test_ai_provider_client_supports_tool_calls(mock_post, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import call_chat_completion
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic, _connection = _create_messenger_clinic("owner_provider_tools", "PAGE-PROVIDER-TOOLS")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
+        model="gpt-4o-mini",
+        api_key="sk-provider-secret",
+        is_enabled=True,
+    )
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "match_services",
+            "description": "Match services",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "match_services", "arguments": "{}"},
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+
+    message = call_chat_completion(provider, [{"role": "user", "content": "Services"}], tools=[tool])
+
+    assert message["tool_calls"][0]["function"]["name"] == "match_services"
+    assert mock_post.call_args.kwargs["json"]["tools"] == [tool]
+    assert mock_post.call_args.kwargs["json"]["tool_choice"] == "auto"
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_provider_client.requests.Session.post")
+def test_ai_provider_client_logs_provider_errors_without_provider_or_model_metadata(mock_post, caplog, monkeypatch):
+    import requests
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import AIProviderError, call_chat_completion
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic, _connection = _create_messenger_clinic("owner_provider_error", "PAGE-PROVIDER-ERROR")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        model="gpt-4o-mini",
+        api_key="sk-provider-secret",
+        is_enabled=True,
+    )
+    mock_post.side_effect = requests.Timeout("timeout with sk-provider-secret")
+    caplog.set_level("WARNING", logger="messenger.ai_provider_client")
+
+    with pytest.raises(AIProviderError) as exc:
+        call_chat_completion(
+            provider,
+            [{"role": "user", "content": "Hello"}],
+            model="gpt-4o-mini",
+            model_role="fallback",
+        )
+
+    assert "sk-provider-secret" not in str(exc.value)
+    assert "AI provider request failed" in str(exc.value)
+    assert exc.value.__context__ is None
+    record = next(record for record in caplog.records if record.message == "AI provider request failed")
+    assert record.clinic_id == clinic.id
+    assert record.model_role == "fallback"
+    assert "provider" not in record.__dict__
+    assert "model" not in record.__dict__
+
+
+@pytest.mark.django_db
 def test_messenger_ai_settings_defaults_and_unique_connection():
     from messenger.defaults import DEFAULT_MESSENGER_AI_PROMPT
     from messenger.models import MessengerAISettings
@@ -1616,6 +1887,516 @@ def test_widget_ai_context_endpoint_requires_secret(client):
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_ai_gateway_returns_fallback_when_provider_unconfigured():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_unconfigured", "PAGE-GATEWAY-UNCONFIGURED")
+    ClinicAISettings.objects.create(clinic=clinic, fallback_message="Please call the clinic.")
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
+
+    assert result == {"reply": "Please call the clinic.", "fallback": True, "error": "ai_provider_unconfigured"}
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_calls_provider_for_widget_clinic(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_widget", "PAGE-GATEWAY-WIDGET")
+    ClinicAISettings.objects.create(clinic=clinic, instructions="Use clinic policy.", fallback_message="Fallback.")
+    provider = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        model="gpt-4o-mini",
+        api_key="sk-widget-key",
+        is_enabled=True,
+    )
+    mock_call.return_value = {"role": "assistant", "content": "Gateway reply"}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Can I book?", "history": []})
+
+    assert result == {"reply": "Gateway reply", "fallback": False, "error": ""}
+    assert mock_call.call_args.args[0] == provider
+    messages = mock_call.call_args.args[1]
+    assert messages[0]["role"] == "system"
+    assert "Use clinic policy." in messages[0]["content"]
+    assert messages[-1] == {"role": "user", "content": "Can I book?"}
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_retries_fallback_model_when_primary_provider_errors(mock_call, caplog):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_fallback_error", "PAGE-GATEWAY-FALLBACK-ERROR")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        model="gpt-4o",
+        fallback_model="gpt-4o-mini",
+        api_key="sk-fallback-error",
+        is_enabled=True,
+    )
+    mock_call.side_effect = [
+        AIProviderError("AI provider request failed."),
+        {"role": "assistant", "content": "Fallback model reply"},
+    ]
+    caplog.set_level("WARNING", logger="messenger.ai_gateway")
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
+
+    assert result == {"reply": "Fallback model reply", "fallback": False, "error": ""}
+    assert mock_call.call_args_list[0].kwargs["model"] == "gpt-4o"
+    assert mock_call.call_args_list[0].kwargs["model_role"] == "primary"
+    assert mock_call.call_args_list[1].kwargs["model"] == "gpt-4o-mini"
+    assert mock_call.call_args_list[1].kwargs["model_role"] == "fallback"
+    record = next(record for record in caplog.records if record.message == "AI gateway provider request failed")
+    assert record.clinic_id == clinic.id
+    assert record.model_role == "primary"
+    assert "provider" not in record.__dict__
+    assert "model" not in record.__dict__
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_retries_fallback_model_when_primary_reply_is_empty(mock_call, caplog):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_fallback_empty", "PAGE-GATEWAY-FALLBACK-EMPTY")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        model="gpt-4o",
+        fallback_model="gpt-4o-mini",
+        api_key="sk-fallback-empty",
+        is_enabled=True,
+    )
+    mock_call.side_effect = [
+        {"role": "assistant", "content": ""},
+        {"role": "assistant", "content": "Fallback model reply"},
+    ]
+    caplog.set_level("WARNING", logger="messenger.ai_gateway")
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
+
+    assert result == {"reply": "Fallback model reply", "fallback": False, "error": ""}
+    assert mock_call.call_args_list[0].kwargs["model"] == "gpt-4o"
+    assert mock_call.call_args_list[1].kwargs["model"] == "gpt-4o-mini"
+    record = next(record for record in caplog.records if record.message == "AI gateway provider returned empty reply")
+    assert record.clinic_id == clinic.id
+    assert record.model_role == "primary"
+    assert "provider" not in record.__dict__
+    assert "model" not in record.__dict__
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_returns_clinic_fallback_when_primary_and_fallback_models_fail(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_fallback_both_fail", "PAGE-GATEWAY-FALLBACK-BOTH-FAIL")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        model="gpt-4o",
+        fallback_model="gpt-4o-mini",
+        api_key="sk-both-fail",
+        is_enabled=True,
+    )
+    mock_call.side_effect = [
+        AIProviderError("AI provider request failed."),
+        AIProviderError("AI provider request failed."),
+    ]
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
+
+    assert result == {"reply": "Please call us.", "fallback": True, "error": "ai_provider_error"}
+    assert mock_call.call_count == 2
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_system_prompt_does_not_include_page_token(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_secret_prompt", "PAGE-GATEWAY-SECRET-PROMPT")
+    connection.page_access_token = "PAGE-TOKEN-SHOULD-NOT-ENTER-PROMPT"
+    connection.save(update_fields=["page_access_token"])
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-provider-prompt-secret", is_enabled=True)
+    mock_call.return_value = {"role": "assistant", "content": "Safe reply"}
+
+    result = build_gateway_reply({"channel": "messenger", "page_id": connection.page_id, "message": "Hello"})
+
+    assert result["fallback"] is False
+    system_content = mock_call.call_args.args[1][0]["content"]
+    assert "PAGE-TOKEN-SHOULD-NOT-ENTER-PROMPT" not in system_content
+    assert "sk-provider-prompt-secret" not in system_content
+    assert "page_token" not in system_content
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_gateway_endpoint_requires_secret(client):
+    clinic, _connection = _create_messenger_clinic("owner_gateway_secret", "PAGE-GATEWAY-SECRET")
+
+    response = client.post(
+        reverse("messenger:ai_gateway_reply"),
+        data=json.dumps({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_endpoint_returns_provider_reply_without_secret(mock_call, client):
+    from clinics.models import ClinicAIProviderSettings
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_endpoint", "PAGE-GATEWAY-ENDPOINT")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-endpoint-secret", is_enabled=True)
+    mock_call.return_value = {"role": "assistant", "content": "Endpoint reply"}
+
+    response = client.post(
+        reverse("messenger:ai_gateway_reply"),
+        data=json.dumps({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"}),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"reply": "Endpoint reply", "fallback": False, "error": ""}
+    assert "sk-endpoint-secret" not in response.content.decode()
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_does_not_call_provider_when_widget_ai_disabled(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_widget_disabled", "PAGE-GATEWAY-WIDGET-DISABLED")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=False, fallback_message="Widget fallback.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-widget-disabled", is_enabled=True)
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
+
+    assert result == {"reply": "Widget fallback.", "fallback": True, "error": "ai_disabled"}
+    mock_call.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_does_not_call_provider_when_messenger_not_in_ai_mode(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_messenger_disabled", "PAGE-GATEWAY-MESSENGER-DISABLED")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
+        fallback_message="Messenger fallback.",
+    )
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-messenger-disabled", is_enabled=True)
+
+    result = build_gateway_reply({"channel": "messenger", "page_id": connection.page_id, "message": "Hello"})
+
+    assert result == {"reply": "Messenger fallback.", "fallback": True, "error": "ai_disabled"}
+    mock_call.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.build_widget_ai_context")
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_prompt_sanitizes_hyphenated_secret_keys(mock_call, mock_context):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_hyphen_secret", "PAGE-GATEWAY-HYPHEN-SECRET")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-hyphen-provider-secret", is_enabled=True)
+    mock_context.return_value = {
+        "found": True,
+        "api-key": "SHOULD-NOT-ENTER-PROMPT",
+        "nested": {"x-api-key": "SHOULD-NOT-ENTER-PROMPT-EITHER"},
+    }
+    mock_call.return_value = {"role": "assistant", "content": "Safe reply"}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
+
+    assert result["fallback"] is False
+    system_content = mock_call.call_args.args[1][0]["content"]
+    assert "SHOULD-NOT-ENTER-PROMPT" not in system_content
+    assert "SHOULD-NOT-ENTER-PROMPT-EITHER" not in system_content
+    assert "api-key" not in system_content
+    assert "x-api-key" not in system_content
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_limits_history_entries_sent_to_provider(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_history_limit", "PAGE-GATEWAY-HISTORY-LIMIT")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-history-limit", is_enabled=True)
+    history = [{"role": "user", "content": f"history-{index}"} for index in range(20)]
+    mock_call.return_value = {"role": "assistant", "content": "Limited reply"}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Latest", "history": history})
+
+    assert result["fallback"] is False
+    messages = mock_call.call_args.args[1]
+    history_messages = messages[1:-1]
+    assert len(history_messages) == 16
+    assert history_messages[0] == {"role": "user", "content": "history-4"}
+    assert history_messages[-1] == {"role": "user", "content": "history-19"}
+    assert messages[-1] == {"role": "user", "content": "Latest"}
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_executes_match_services_tool_with_server_side_widget_clinic(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_tools", "PAGE-GATEWAY-TOOLS")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-tool-key", is_enabled=True)
+    Service.objects.create(clinic=clinic, name="Dental Cleaning", description="Routine cleaning", duration_minutes=30, price=0)
+    other_clinic, _other_connection = _create_messenger_clinic("owner_gateway_tools_other", "PAGE-GATEWAY-TOOLS-OTHER")
+    Service.objects.create(clinic=other_clinic, name="Other Cleaning", duration_minutes=30, price=0)
+    mock_call.side_effect = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "match_services", "arguments": json.dumps({"query": "cleaning", "clinic_slug": other_clinic.slug})}}]},
+        {"role": "assistant", "content": "We offer Dental Cleaning."},
+    ]
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Do you offer cleaning?"})
+
+    assert result["reply"] == "We offer Dental Cleaning."
+    assert mock_call.call_count == 2
+    assert mock_call.call_args_list[0].kwargs["tools"]
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "Dental Cleaning" in tool_message["content"]
+    assert "Other Cleaning" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_booking_tool_preserves_confirmation_and_messenger_identity(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.models import MessengerConversation
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_booking", "PAGE-GATEWAY-BOOKING")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-tool-key", is_enabled=True)
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    from messenger.ai_tools import check_availability
+    slot = check_availability("PAGE-GATEWAY-BOOKING", service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+    conversation = MessengerConversation.objects.create(connection=connection, psid="PSID-GATEWAY", last_sequence=1, active_turn_token="turn-token", active_input_sequence=1)
+    assert conversation.pk
+    mock_call.side_effect = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "book_confirmed_appointment", "arguments": json.dumps({"service_id": service.id, "starts_at": slot["starts_at"], "full_name": "Maria Santos", "phone": "09175551234", "email": "maria@example.com", "confirmed": True})}}]},
+        {"role": "assistant", "content": "Your appointment is booked."},
+    ]
+
+    result = build_gateway_reply({"channel": "messenger", "page_id": "PAGE-GATEWAY-BOOKING", "psid": "PSID-GATEWAY", "turn_token": "turn-token", "input_sequence": 1, "message": "Book it"})
+
+    assert result["reply"] == "Your appointment is booked."
+    appointment = Appointment.objects.get(clinic=clinic)
+    assert appointment.source == Appointment.SOURCE_MESSENGER
+    assert appointment.messenger_psid == "PSID-GATEWAY"
+
+
+@pytest.mark.django_db
+@override_settings(AI_GATEWAY_MAX_TOOL_ITERATIONS=1)
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_returns_fallback_when_tool_loop_exceeds_cap(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_loop", "PAGE-GATEWAY-LOOP")
+    ClinicAISettings.objects.create(clinic=clinic, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-loop-key", is_enabled=True)
+    mock_call.return_value = {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "match_services", "arguments": "{}"}}]}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Services?"})
+
+    assert result == {"reply": "Please call us.", "fallback": True, "error": "tool_loop_exceeded"}
+
+
+def test_ai_gateway_bool_value_accepts_only_literal_true():
+    from messenger.ai_gateway import _bool_value
+
+    assert _bool_value(True) is True
+    for value in [False, None, "true", "1", "yes", 1, {"confirmed": True}, [True]]:
+        assert _bool_value(value) is False
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_booking_tool_rejects_string_confirmation(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.models import MessengerConversation
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_string_confirm", "PAGE-GATEWAY-STRING-CONFIRM")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-string-confirm", is_enabled=True)
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    from messenger.ai_tools import check_availability
+    slot = check_availability(connection.page_id, service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+    MessengerConversation.objects.create(connection=connection, psid="PSID-STRING-CONFIRM", last_sequence=1, active_turn_token="turn-token", active_input_sequence=1)
+    mock_call.side_effect = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "book_confirmed_appointment", "arguments": json.dumps({"service_id": service.id, "starts_at": slot["starts_at"], "full_name": "Maria Santos", "phone": "09175551234", "email": "maria@example.com", "confirmed": "true"})}}]},
+        {"role": "assistant", "content": "Please confirm explicitly."},
+    ]
+
+    result = build_gateway_reply({"channel": "messenger", "page_id": connection.page_id, "psid": "PSID-STRING-CONFIRM", "turn_token": "turn-token", "input_sequence": 1, "message": "Book it"})
+
+    assert result["reply"] == "Please confirm explicitly."
+    assert not Appointment.objects.filter(clinic=clinic).exists()
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "explicit user confirmation" in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_rejects_multiple_mutation_tools_in_one_response(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_multi_mutation", "PAGE-GATEWAY-MULTI-MUTATION")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-multi-mutation", is_enabled=True)
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_start = (timezone.now() + timedelta(days=1)).isoformat()
+    tool_call = {"type": "function", "function": {"name": "book_confirmed_appointment", "arguments": json.dumps({"service_id": service.id, "starts_at": target_start, "full_name": "Maria Santos", "phone": "09175551234", "email": "maria@example.com", "confirmed": True})}}
+    mock_call.return_value = {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", **tool_call}, {"id": "call_2", **tool_call}]}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Book twice"})
+
+    assert result == {"reply": "Please call us.", "fallback": True, "error": "invalid_tool_call"}
+    assert not Appointment.objects.filter(clinic=clinic).exists()
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_rejects_too_many_tool_calls_in_one_response(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_many_tools", "PAGE-GATEWAY-MANY-TOOLS")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-many-tools", is_enabled=True)
+    mock_call.return_value = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"id": f"call_{index}", "type": "function", "function": {"name": "match_services", "arguments": "{}"}}
+            for index in range(5)
+        ],
+    }
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Services?"})
+
+    assert result == {"reply": "Please call us.", "fallback": True, "error": "invalid_tool_call"}
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_contains_malformed_tool_execution_errors(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_bad_tool_args", "PAGE-GATEWAY-BAD-TOOL-ARGS")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-bad-tool-args", is_enabled=True)
+    mock_call.side_effect = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "check_availability", "arguments": json.dumps({"service_id": {"bad": "type"}})}}]},
+        {"role": "assistant", "content": "Please choose a valid service."},
+    ]
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Check availability"})
+
+    assert result["reply"] == "Please choose a valid service."
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "Tool execution failed" in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_rejects_unknown_tool_calls(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_unknown_tool", "PAGE-GATEWAY-UNKNOWN-TOOL")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-unknown-tool", is_enabled=True)
+    mock_call.return_value = {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "delete_clinic", "arguments": "{}"}}]}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Bad tool"})
+
+    assert result == {"reply": "Please call us.", "fallback": True, "error": "invalid_tool_call"}
+    assert mock_call.call_count == 1
+
+
+def test_ai_gateway_match_services_tool_requires_query():
+    from messenger.ai_gateway import _tool_definitions
+
+    match_tool = next(tool for tool in _tool_definitions() if tool["function"]["name"] == "match_services")
+
+    assert "query" in match_tool["function"]["parameters"]["required"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_rejects_second_mutation_across_tool_iterations(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_second_mutation", "PAGE-GATEWAY-SECOND-MUTATION")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-second-mutation", is_enabled=True)
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))
+    from messenger.ai_tools import check_widget_availability
+    slots = check_widget_availability(clinic.slug, service.id, preferred_date=target_date.isoformat())["alternatives"]
+    first_args = {"service_id": service.id, "starts_at": slots[0]["starts_at"], "full_name": "Maria Santos", "phone": "09175551234", "email": "maria@example.com", "confirmed": True}
+    second_args = {"service_id": service.id, "starts_at": slots[1]["starts_at"], "full_name": "Ana Reyes", "phone": "09176662345", "email": "ana@example.com", "confirmed": True}
+    mock_call.side_effect = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "book_confirmed_appointment", "arguments": json.dumps(first_args)}}]},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "book_confirmed_appointment", "arguments": json.dumps(second_args)}}]},
+    ]
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Book twice across turns"})
+
+    assert result == {"reply": "Please call us.", "fallback": True, "error": "invalid_tool_call"}
+    assert Appointment.objects.filter(clinic=clinic).count() == 1
 
 
 @pytest.mark.django_db

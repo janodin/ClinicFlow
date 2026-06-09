@@ -20,8 +20,8 @@ from django.conf import settings as django_settings
 
 from appointments.forms import AppointmentNoteForm, AppointmentStatusForm, StaffAppointmentForm
 from appointments.models import Appointment
-from clinics.forms import ClinicFAQForm, ClinicSettingsForm, SharedAISettingsForm, WidgetSettingsForm
-from clinics.models import Clinic, ClinicAISettings, ClinicMembership
+from clinics.forms import AIProviderSettingsForm, ClinicFAQForm, ClinicSettingsForm, SharedAISettingsForm, WidgetSettingsForm
+from clinics.models import Clinic, ClinicAIProviderSettings, ClinicAISettings, ClinicMembership
 from clinics.tenant import current_clinic, get_active_membership, user_can_manage_daily_ops, user_can_manage_settings
 from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
@@ -31,6 +31,9 @@ from patients.forms import PatientForm
 from patients.models import Patient
 from services.forms import ServiceForm
 from accounts.forms import AppPasswordChangeForm
+from yakap.forms import ClinicYakapSettingsForm, ServiceYakapRuleForm, YakapCoverageCategoryForm, YakapLedgerEntryForm
+from yakap.models import ServiceYakapRule
+from yakap.services import ensure_default_yakap_setup, estimated_remaining_for, yakap_profile_for_patient
 
 
 def _clinic_or_redirect(request, allow_missing=False):
@@ -109,6 +112,39 @@ def _require_settings_permission(user):
         raise PermissionDenied
 
 
+def _service_yakap_rule_instance(service):
+    if service is None:
+        return None
+    try:
+        return service.yakap_rule
+    except ServiceYakapRule.DoesNotExist:
+        return None
+
+
+def _service_yakap_rule_form(clinic, service=None, data=None):
+    return ServiceYakapRuleForm(
+        clinic,
+        data=data,
+        instance=_service_yakap_rule_instance(service),
+        prefix="yakap",
+    )
+
+
+def _service_yakap_rule_data_submitted(data):
+    return bool(data) and any(key.startswith("yakap_") for key in data)
+
+
+def _save_service_yakap_rule(clinic, service, data):
+    form = _service_yakap_rule_form(clinic, service, data)
+    if not form.is_valid():
+        return form
+    rule = form.save(commit=False)
+    rule.clinic = clinic
+    rule.service = service
+    rule.save()
+    return form
+
+
 def _calendar_modal_trigger(message, *, close=False, refetch=True):
     trigger = {"toast-message": {"message": message, "type": "success"}}
     if refetch:
@@ -184,8 +220,46 @@ def _appointments_context(request, clinic):
     }
 
 
+def _appointment_detail_context(
+    clinic,
+    appointment,
+    *,
+    init_mode="detail",
+    source="",
+    status_form=None,
+    note_form=None,
+    yakap_ledger_form=None,
+):
+    return {
+        "clinic": clinic,
+        "appointment": appointment,
+        "status_form": status_form if status_form is not None else AppointmentStatusForm(instance=appointment),
+        "note_form": note_form if note_form is not None else AppointmentNoteForm(),
+        "init_mode": init_mode,
+        "source": source,
+        "yakap_ledger_form": yakap_ledger_form if yakap_ledger_form is not None else YakapLedgerEntryForm(clinic),
+    }
+
+
 def _patient_detail_context(clinic, patient):
-    appointments = patient.appointments.all()
+    appointments = clinic.appointments.filter(patient=patient)
+    try:
+        yakap_profile = patient.yakap_profile
+    except Patient.yakap_profile.RelatedObjectDoesNotExist:
+        yakap_profile = None
+
+    yakap_balances = []
+    yakap_ledger_entries = []
+    if yakap_profile:
+        for category in clinic.yakap_categories.filter(is_active=True):
+            balance = estimated_remaining_for(yakap_profile, category)
+            yakap_balances.append({"category": category, **balance})
+        yakap_ledger_entries = clinic.yakap_ledger_entries.filter(patient=patient).select_related(
+            "category",
+            "appointment",
+            "service",
+        )[:5]
+
     return {
         "clinic": clinic,
         "patient": patient,
@@ -194,6 +268,9 @@ def _patient_detail_context(clinic, patient):
         "kpi_completed": appointments.filter(status="completed").count(),
         "kpi_cancelled": appointments.filter(status__in=["cancelled", "no_show"]).count(),
         "last_appointment": appointments.order_by("starts_at").last(),
+        "yakap_profile": yakap_profile,
+        "yakap_balances": yakap_balances,
+        "yakap_ledger_entries": yakap_ledger_entries,
     }
 
 
@@ -452,15 +529,16 @@ def appointment_detail(request, pk):
     init_mode = request.GET.get("mode", "detail")
     if init_mode not in {"detail", "cancel", "reschedule", "delete"}:
         init_mode = "detail"
-    context = {
-        "clinic": clinic,
-        "appointment": appointment,
-        "status_form": AppointmentStatusForm(instance=appointment),
-        "note_form": AppointmentNoteForm(),
-        "init_mode": init_mode,
-        "source": request.GET.get("source", ""),
-    }
-    return render(request, "dashboard/partials/appointment_detail.html", context)
+    return render(
+        request,
+        "dashboard/partials/appointment_detail.html",
+        _appointment_detail_context(
+            clinic,
+            appointment,
+            init_mode=init_mode,
+            source=request.GET.get("source", ""),
+        ),
+    )
 
 
 @login_required
@@ -497,12 +575,11 @@ def appointment_edit(request, pk):
         if form.is_valid():
             if request.headers.get("HX-Request"):
                 if request.POST.get("modal_source") == "calendar":
-                    response = render(request, "dashboard/partials/appointment_detail.html", {
-                        "appointment": appointment,
-                        "status_form": AppointmentStatusForm(instance=appointment),
-                        "note_form": AppointmentNoteForm(),
-                        "source": "calendar",
-                    })
+                    response = render(
+                        request,
+                        "dashboard/partials/appointment_detail.html",
+                        _appointment_detail_context(clinic, appointment, source="calendar"),
+                    )
                     response["HX-Trigger"] = _calendar_modal_trigger("Appointment updated.")
                     return response
                 response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
@@ -706,7 +783,7 @@ def export_csv(request):
 @require_POST
 def update_appointment(request, pk):
     clinic = _clinic_or_redirect(request)
-    appointment = get_object_or_404(clinic.appointments, pk=pk)
+    appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
     form = AppointmentStatusForm(request.POST, instance=appointment)
     updated = form.is_valid()
     if updated:
@@ -715,12 +792,16 @@ def update_appointment(request, pk):
     else:
         appointment.refresh_from_db()
     if request.headers.get("HX-Request"):
-        response = render(request, "dashboard/partials/appointment_detail.html", {
-            "appointment": appointment,
-            "status_form": AppointmentStatusForm(instance=appointment) if updated else form,
-            "note_form": AppointmentNoteForm(),
-            "source": request.POST.get("modal_source", ""),
-        })
+        response = render(
+            request,
+            "dashboard/partials/appointment_detail.html",
+            _appointment_detail_context(
+                clinic,
+                appointment,
+                status_form=AppointmentStatusForm(instance=appointment) if updated else form,
+                source=request.POST.get("modal_source", ""),
+            ),
+        )
         if not updated:
             return response
         if request.POST.get("modal_source") == "calendar":
@@ -737,7 +818,7 @@ def update_appointment(request, pk):
 @require_POST
 def add_appointment_note(request, pk):
     clinic = _clinic_or_redirect(request)
-    appointment = get_object_or_404(clinic.appointments, pk=pk)
+    appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
     form = AppointmentNoteForm(request.POST)
     added = form.is_valid()
     if added:
@@ -747,12 +828,16 @@ def add_appointment_note(request, pk):
         note.save()
         messages.success(request, "Note added.")
     if request.headers.get("HX-Request"):
-        response = render(request, "dashboard/partials/appointment_detail.html", {
-            "appointment": appointment,
-            "status_form": AppointmentStatusForm(instance=appointment),
-            "note_form": AppointmentNoteForm() if added else form,
-            "source": request.POST.get("modal_source", ""),
-        })
+        response = render(
+            request,
+            "dashboard/partials/appointment_detail.html",
+            _appointment_detail_context(
+                clinic,
+                appointment,
+                note_form=AppointmentNoteForm() if added else form,
+                source=request.POST.get("modal_source", ""),
+            ),
+        )
         if not added:
             return response
         if request.POST.get("modal_source") == "calendar":
@@ -762,6 +847,69 @@ def add_appointment_note(request, pk):
                 "toast-message": {"message": "Note added.", "type": "success"}
             })
         return response
+    return redirect("dashboard:appointments")
+
+
+@login_required
+@require_POST
+def appointment_yakap_ledger(request, pk):
+    clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
+
+    appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
+    form = YakapLedgerEntryForm(clinic, request.POST)
+    saved = form.is_valid()
+    if saved:
+        profile = yakap_profile_for_patient(appointment.patient)
+        entry = form.save(commit=False)
+        entry.clinic = clinic
+        entry.patient = appointment.patient
+        entry.profile = profile
+        entry.appointment = appointment
+        entry.service = appointment.service
+        entry.created_by = request.user
+        try:
+            entry.full_clean()
+            entry.save()
+        except ValidationError as exc:
+            saved = False
+            if hasattr(exc, "message_dict"):
+                for field, errors in exc.message_dict.items():
+                    target = field if field in form.fields else None
+                    for error in errors:
+                        form.add_error(target, error)
+            else:
+                for error in exc.messages:
+                    form.add_error(None, error)
+            messages.error(request, form.errors.as_text())
+        else:
+            messages.success(request, "YAKAP usage added.")
+    else:
+        messages.error(request, form.errors.as_text())
+
+    if request.headers.get("HX-Request"):
+        response = render(
+            request,
+            "dashboard/partials/appointment_detail.html",
+            _appointment_detail_context(
+                clinic,
+                appointment,
+                source=request.POST.get("modal_source", ""),
+                yakap_ledger_form=YakapLedgerEntryForm(clinic) if saved else form,
+            ),
+        )
+        if not saved:
+            return response
+        if request.POST.get("modal_source") == "calendar":
+            response["HX-Trigger"] = _calendar_modal_trigger("YAKAP usage added.", refetch=False)
+        else:
+            response["HX-Trigger"] = json.dumps({
+                "toast-message": {"message": "YAKAP usage added.", "type": "success"}
+            })
+        return response
+
     return redirect("dashboard:appointments")
 
 
@@ -812,15 +960,11 @@ def patient_edit(request, pk):
             current_url = request.headers.get("HX-Current-URL", "")
             is_detail_page = f"/patients/{patient.id}/" in current_url
             if is_detail_page:
-                response = render(request, "dashboard/partials/patient_detail_content.html", {
-                    "clinic": clinic,
-                    "patient": patient,
-                    "kpi_total": patient.appointments.count(),
-                    "kpi_upcoming": patient.appointments.filter(status__in=["pending", "confirmed"], starts_at__gte=timezone.now()).count(),
-                    "kpi_completed": patient.appointments.filter(status="completed").count(),
-                    "kpi_cancelled": patient.appointments.filter(status__in=["cancelled", "no_show"]).count(),
-                    "last_appointment": patient.appointments.order_by("starts_at").last(),
-                })
+                response = render(
+                    request,
+                    "dashboard/partials/patient_detail_content.html",
+                    _patient_detail_context(clinic, patient),
+                )
                 response["HX-Retarget"] = "#patient-detail-content"
                 response["HX-Reswap"] = "innerHTML"
                 response["HX-Trigger"] = json.dumps({
@@ -934,8 +1078,8 @@ def services(request):
     clinic = _clinic_or_redirect(request)
     if not clinic:
         return redirect("accounts:signup")
-    active_services = clinic.services.filter(is_archived=False).select_related("clinic")
-    archived_services = clinic.services.filter(is_archived=True).select_related("clinic")
+    active_services = clinic.services.filter(is_archived=False).select_related("clinic", "yakap_rule")
+    archived_services = clinic.services.filter(is_archived=True).select_related("clinic", "yakap_rule")
     membership = get_active_membership(request.user)
     can_manage = user_can_manage_daily_ops(membership)
     return render(
@@ -946,6 +1090,7 @@ def services(request):
             "active_services": active_services,
             "archived_services": archived_services,
             "form": ServiceForm(clinic),
+            "yakap_rule_form": _service_yakap_rule_form(clinic),
             "can_manage": can_manage,
         },
     )
@@ -962,11 +1107,17 @@ def create_service(request):
         raise PermissionDenied
     form = ServiceForm(clinic, request.POST)
     form.instance.clinic = clinic
-    if form.is_valid():
+    yakap_rule_data_submitted = _service_yakap_rule_data_submitted(request.POST)
+    yakap_rule_form = _service_yakap_rule_form(clinic, data=request.POST)
+    yakap_rule_valid = True if not yakap_rule_data_submitted else yakap_rule_form.is_valid()
+    if form.is_valid() and yakap_rule_valid:
         service = form.save(commit=False)
         service.clinic = clinic
         try:
-            service.save()
+            with transaction.atomic():
+                service.save()
+                if yakap_rule_data_submitted:
+                    yakap_rule_form = _save_service_yakap_rule(clinic, service, request.POST)
         except ValidationError as exc:
             form.add_error(None, exc)
             if request.headers.get("HX-Request"):
@@ -977,13 +1128,14 @@ def create_service(request):
                         "clinic": clinic,
                         "service": None,
                         "form": form,
+                        "yakap_rule_form": yakap_rule_form,
                     },
                 )
             messages.error(request, exc.messages[0] if hasattr(exc, "messages") else str(exc))
             return redirect("dashboard:services")
         if request.headers.get("HX-Request"):
-            active_services = clinic.services.filter(is_archived=False).select_related("clinic")
-            archived_services = clinic.services.filter(is_archived=True).select_related("clinic")
+            active_services = clinic.services.filter(is_archived=False).select_related("clinic", "yakap_rule")
+            archived_services = clinic.services.filter(is_archived=True).select_related("clinic", "yakap_rule")
             response = render(
                 request,
                 "dashboard/partials/service_list.html",
@@ -992,6 +1144,7 @@ def create_service(request):
                     "active_services": active_services,
                     "archived_services": archived_services,
                     "form": ServiceForm(clinic),
+                    "yakap_rule_form": _service_yakap_rule_form(clinic),
                     "can_manage": True,
                 },
             )
@@ -1012,9 +1165,11 @@ def create_service(request):
                     "clinic": clinic,
                     "service": None,
                     "form": form,
+                    "yakap_rule_form": yakap_rule_form,
                 },
             )
-        messages.error(request, form.errors.as_text())
+        error_text = form.errors.as_text() or yakap_rule_form.errors.as_text()
+        messages.error(request, error_text)
     return redirect("dashboard:services")
 
 
@@ -1024,7 +1179,7 @@ def toggle_service(request, pk):
     clinic = _clinic_or_redirect(request)
     if not clinic:
         return redirect("accounts:signup")
-    service = get_object_or_404(clinic.services.select_related("clinic"), pk=pk)
+    service = get_object_or_404(clinic.services.select_related("clinic", "yakap_rule"), pk=pk)
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
@@ -1051,14 +1206,20 @@ def edit_service(request, pk):
     clinic = _clinic_or_redirect(request)
     if not clinic:
         return redirect("accounts:signup")
-    service = get_object_or_404(clinic.services.select_related("clinic"), pk=pk)
+    service = get_object_or_404(clinic.services.select_related("clinic", "yakap_rule"), pk=pk)
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
     if request.method == "POST":
         form = ServiceForm(clinic, request.POST, instance=service)
-        if form.is_valid():
-            form.save()
+        yakap_rule_data_submitted = _service_yakap_rule_data_submitted(request.POST)
+        yakap_rule_form = _service_yakap_rule_form(clinic, service, request.POST)
+        yakap_rule_valid = True if not yakap_rule_data_submitted else yakap_rule_form.is_valid()
+        if form.is_valid() and yakap_rule_valid:
+            with transaction.atomic():
+                service = form.save()
+                if yakap_rule_data_submitted:
+                    yakap_rule_form = _save_service_yakap_rule(clinic, service, request.POST)
             if request.headers.get("HX-Request"):
                 response = render(
                     request,
@@ -1078,16 +1239,18 @@ def edit_service(request, pk):
             return render(
                 request,
                 "dashboard/partials/service_form.html",
-                {"clinic": clinic, "service": service, "form": form},
+                {"clinic": clinic, "service": service, "form": form, "yakap_rule_form": yakap_rule_form},
             )
-        messages.error(request, form.errors.as_text())
+        error_text = form.errors.as_text() or yakap_rule_form.errors.as_text()
+        messages.error(request, error_text)
         return redirect("dashboard:services")
     form = ServiceForm(clinic, instance=service)
+    yakap_rule_form = _service_yakap_rule_form(clinic, service)
     if request.headers.get("HX-Request"):
         return render(
             request,
             "dashboard/partials/service_form.html",
-            {"clinic": clinic, "service": service, "form": form},
+            {"clinic": clinic, "service": service, "form": form, "yakap_rule_form": yakap_rule_form},
         )
     return redirect("dashboard:services")
 
@@ -1105,8 +1268,8 @@ def archive_service(request, pk):
     service.is_archived = True
     service.save(update_fields=["is_archived", "updated_at"])
     if request.headers.get("HX-Request"):
-        active_services = clinic.services.filter(is_archived=False).select_related("clinic")
-        archived_services = clinic.services.filter(is_archived=True).select_related("clinic")
+        active_services = clinic.services.filter(is_archived=False).select_related("clinic", "yakap_rule")
+        archived_services = clinic.services.filter(is_archived=True).select_related("clinic", "yakap_rule")
         response = render(
             request,
             "dashboard/partials/service_list.html",
@@ -1115,6 +1278,7 @@ def archive_service(request, pk):
                 "active_services": active_services,
                 "archived_services": archived_services,
                 "form": ServiceForm(clinic),
+                "yakap_rule_form": _service_yakap_rule_form(clinic),
                 "can_manage": True,
             },
         )
@@ -1141,8 +1305,8 @@ def restore_service(request, pk):
     service.is_archived = False
     service.save(update_fields=["is_archived", "updated_at"])
     if request.headers.get("HX-Request"):
-        active_services = clinic.services.filter(is_archived=False).select_related("clinic")
-        archived_services = clinic.services.filter(is_archived=True).select_related("clinic")
+        active_services = clinic.services.filter(is_archived=False).select_related("clinic", "yakap_rule")
+        archived_services = clinic.services.filter(is_archived=True).select_related("clinic", "yakap_rule")
         response = render(
             request,
             "dashboard/partials/service_list.html",
@@ -1151,6 +1315,7 @@ def restore_service(request, pk):
                 "active_services": active_services,
                 "archived_services": archived_services,
                 "form": ServiceForm(clinic),
+                "yakap_rule_form": _service_yakap_rule_form(clinic),
                 "can_manage": True,
             },
         )
@@ -1165,8 +1330,8 @@ def restore_service(request, pk):
 
 
 def _service_list_response(request, clinic, message, *, toast_type="success"):
-    active_services = clinic.services.filter(is_archived=False).select_related("clinic")
-    archived_services = clinic.services.filter(is_archived=True).select_related("clinic")
+    active_services = clinic.services.filter(is_archived=False).select_related("clinic", "yakap_rule")
+    archived_services = clinic.services.filter(is_archived=True).select_related("clinic", "yakap_rule")
     membership = get_active_membership(request.user)
     response = render(
         request,
@@ -1176,6 +1341,7 @@ def _service_list_response(request, clinic, message, *, toast_type="success"):
             "active_services": active_services,
             "archived_services": archived_services,
             "form": ServiceForm(clinic),
+            "yakap_rule_form": _service_yakap_rule_form(clinic),
             "can_manage": user_can_manage_daily_ops(membership),
         },
     )
@@ -1264,23 +1430,32 @@ def settings(request):
     })
 
 
-def _assistant_settings_context(request, clinic, *, widget_form=None, ai_form=None, faq_form=None):
+def _assistant_settings_context(request, clinic, *, ai_form=None, ai_provider_form=None, faq_form=None):
     ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
+    ai_provider_settings, _ = ClinicAIProviderSettings.objects.get_or_create(clinic=clinic)
     faqs = clinic.faqs.all()
+    return {
+        "clinic": clinic,
+        "ai_form": ai_form or SharedAISettingsForm(instance=ai_settings),
+        "ai_provider_form": ai_provider_form or AIProviderSettingsForm(instance=ai_provider_settings),
+        "ai_provider_settings": ai_provider_settings,
+        "faq_form": faq_form or ClinicFAQForm(),
+        "faqs": faqs,
+        "faq_total_count": faqs.count(),
+        "faq_visible_count": faqs.filter(is_active=True).count(),
+        "default_ai_prompt": DEFAULT_MESSENGER_AI_PROMPT,
+        "default_ai_fallback_message": DEFAULT_AI_FALLBACK_MESSAGE,
+    }
+
+
+def _widget_embed_context(request, clinic, *, widget_form=None):
     iframe_url = _embedded_iframe_url(request, clinic)
     script_url = request.build_absolute_uri(reverse("widget:embed_js", args=[clinic.slug]))
     return {
         "clinic": clinic,
         "widget_form": widget_form or WidgetSettingsForm(instance=clinic),
-        "ai_form": ai_form or SharedAISettingsForm(instance=ai_settings),
-        "faq_form": faq_form or ClinicFAQForm(),
-        "faqs": faqs,
-        "faq_total_count": faqs.count(),
-        "faq_visible_count": faqs.filter(is_active=True).count(),
         "iframe_url": iframe_url,
         "script_url": script_url,
-        "default_ai_prompt": DEFAULT_MESSENGER_AI_PROMPT,
-        "default_ai_fallback_message": DEFAULT_AI_FALLBACK_MESSAGE,
     }
 
 
@@ -1290,8 +1465,9 @@ def assistant_settings(request):
     _require_settings_permission(request.user)
 
     ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=clinic)
-    widget_form = WidgetSettingsForm(instance=clinic)
+    ai_provider_settings, _ = ClinicAIProviderSettings.objects.get_or_create(clinic=clinic)
     ai_form = SharedAISettingsForm(instance=ai_settings)
+    ai_provider_form = AIProviderSettingsForm(instance=ai_provider_settings)
     post_form = request.POST.get("_form")
 
     if request.method == "POST" and post_form == "ai_settings":
@@ -1300,26 +1476,77 @@ def assistant_settings(request):
             ai_form.save()
             messages.success(request, "Shared assistant settings saved.")
             return redirect("dashboard:assistant_settings")
-    elif request.method == "POST" and post_form == "widget_settings":
-        widget_form = WidgetSettingsForm(request.POST, instance=clinic)
-        if widget_form.is_valid():
-            widget_form.save()
-            messages.success(request, "Widget settings saved.")
+    elif request.method == "POST" and post_form == "ai_provider_settings":
+        ai_provider_form = AIProviderSettingsForm(request.POST, instance=ai_provider_settings)
+        if ai_provider_form.is_valid():
+            ai_provider_form.save()
+            messages.success(request, "AI provider settings saved.")
             return redirect("dashboard:assistant_settings")
 
     return render(
         request,
         "dashboard/assistant_settings.html",
-        _assistant_settings_context(request, clinic, widget_form=widget_form, ai_form=ai_form),
+        _assistant_settings_context(request, clinic, ai_form=ai_form, ai_provider_form=ai_provider_form),
+    )
+
+
+@login_required
+def yakap(request):
+    clinic = _clinic_or_redirect(request)
+    _require_settings_permission(request.user)
+
+    settings_obj, _categories = ensure_default_yakap_setup(clinic)
+    settings_form = ClinicYakapSettingsForm(instance=settings_obj)
+    category_form = YakapCoverageCategoryForm(clinic=clinic)
+    post_form = request.POST.get("_form")
+    unverified_appointments = clinic.appointments.select_related("patient", "service", "yakap_snapshot").filter(
+        yakap_snapshot__requested=True,
+        yakap_snapshot__coverage_status__in=["requested", "unverified"],
+    ).order_by("starts_at")[:10]
+
+    if request.method == "POST" and post_form == "settings":
+        settings_form = ClinicYakapSettingsForm(request.POST, instance=settings_obj)
+        if settings_form.is_valid():
+            settings_form.save()
+            messages.success(request, "YAKAP settings saved.")
+            return redirect("dashboard:yakap")
+    elif request.method == "POST" and post_form == "category":
+        category_form = YakapCoverageCategoryForm(request.POST, clinic=clinic)
+        if category_form.is_valid():
+            category = category_form.save(commit=False)
+            category.clinic = clinic
+            category.save()
+            messages.success(request, "YAKAP coverage category added.")
+            return redirect("dashboard:yakap")
+
+    return render(
+        request,
+        "dashboard/yakap.html",
+        {
+            "clinic": clinic,
+            "yakap_settings": settings_obj,
+            "settings_form": settings_form,
+            "category_form": category_form,
+            "categories": clinic.yakap_categories.all(),
+            "unverified_appointments": unverified_appointments,
+        },
     )
 
 
 @login_required
 def widget_embed(request):
     clinic = _clinic_or_redirect(request)
-    iframe_url = _embedded_iframe_url(request, clinic)
-    script_url = request.build_absolute_uri(reverse("widget:embed_js", args=[clinic.slug]))
-    return render(request, "dashboard/widget_embed.html", {"clinic": clinic, "iframe_url": iframe_url, "script_url": script_url})
+    _require_settings_permission(request.user)
+
+    widget_form = WidgetSettingsForm(instance=clinic)
+    if request.method == "POST":
+        widget_form = WidgetSettingsForm(request.POST, instance=clinic)
+        if widget_form.is_valid():
+            widget_form.save()
+            messages.success(request, "Widget settings saved.")
+            return redirect("dashboard:widget_embed")
+
+    return render(request, "dashboard/widget_embed.html", _widget_embed_context(request, clinic, widget_form=widget_form))
 
 
 @login_required

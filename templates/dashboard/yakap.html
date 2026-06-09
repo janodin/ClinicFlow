@@ -1,0 +1,267 @@
+{% extends "dashboard/base.html" %}
+{% block title %}YAKAP{% endblock %}
+{% block content %}
+<div class="cf-page">
+  <div class="cf-page-header">
+    <div>
+      <h1 class="cf-page-title ui-page-title">YAKAP</h1>
+      <p class="cf-page-description">Configure patient-facing YAKAP copy, estimated annual credit, and clinic-owned coverage categories.</p>
+    </div>
+    <span class="cf-badge {% if yakap_settings.is_enabled %}cf-badge-active{% else %}cf-badge-inactive{% endif %}">
+      {% if yakap_settings.is_enabled %}Enabled{% else %}Disabled{% endif %}
+    </span>
+  </div>
+
+  <section class="cf-card p-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <p class="cf-eyebrow">PhilHealth YAKAP</p>
+        <h2 class="cf-section-title mt-2">Estimated YAKAP coverage</h2>
+        <p class="mt-2 text-sm text-[var(--cf-muted)]">Show careful public guidance while keeping all balances as estimates until clinic staff verify eligibility.</p>
+      </div>
+      <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] px-4 py-3 text-right">
+        <p class="cf-kpi-label">Default annual credit</p>
+        <p class="mt-1 text-2xl font-light tabular-nums text-[var(--cf-ink)]">PHP {{ yakap_settings.default_annual_credit }}</p>
+      </div>
+    </div>
+    <p class="mt-4 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] px-4 py-3 text-sm text-[var(--cf-ink)]">YAKAP coverage shown in KliniAssist is public guidance only. Estimated remaining balances are not official PhilHealth balances and must be verified through the clinic's PhilHealth workflow before service.</p>
+  </section>
+
+  <div class="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,.9fr)]">
+    <section class="cf-card p-6">
+      <div class="mb-5 flex items-center gap-3">
+        <div class="cf-icon-box p-3"><i data-lucide="settings-2" class="h-5 w-5"></i></div>
+        <div>
+          <h2 class="cf-section-title">Public and Staff Copy</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Patients see public copy; staff see verification reminders before honoring estimates.</p>
+        </div>
+      </div>
+
+      <form method="post" action="{% url 'dashboard:yakap' %}" class="grid gap-5">
+        {% csrf_token %}
+        <input type="hidden" name="_form" value="settings">
+
+        {% if settings_form.non_field_errors %}
+          <div class="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+            {% for error in settings_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="md:col-span-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              {{ settings_form.is_enabled }}
+              <span class="text-sm font-semibold text-[var(--cf-ink)]">Enable YAKAP guidance</span>
+            </label>
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">This enables estimated YAKAP messaging in future patient-facing flows. It does not connect to PhilHealth.</p>
+            {% if settings_form.is_enabled.errors %}<p class="cf-error">{{ settings_form.is_enabled.errors.0 }}</p>{% endif %}
+          </div>
+
+          <div class="cf-field md:col-span-2">
+            <label class="cf-label" for="{{ settings_form.public_promo_headline.id_for_label }}">{{ settings_form.public_promo_headline.label }}</label>
+            {{ settings_form.public_promo_headline }}
+            {% if settings_form.public_promo_headline.errors %}<p class="cf-error">{{ settings_form.public_promo_headline.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field md:col-span-2">
+            <label class="cf-label" for="{{ settings_form.public_promo_body.id_for_label }}">{{ settings_form.public_promo_body.label }}</label>
+            {{ settings_form.public_promo_body }}
+            {% if settings_form.public_promo_body.errors %}<p class="cf-error">{{ settings_form.public_promo_body.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field md:col-span-2">
+            <label class="cf-label" for="{{ settings_form.public_disclaimer.id_for_label }}">{{ settings_form.public_disclaimer.label }}</label>
+            {{ settings_form.public_disclaimer }}
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell patients that eligibility and remaining coverage require clinic verification.</p>
+            {% if settings_form.public_disclaimer.errors %}<p class="cf-error">{{ settings_form.public_disclaimer.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label class="cf-label" for="{{ settings_form.default_annual_credit.id_for_label }}">{{ settings_form.default_annual_credit.label }}</label>
+            {{ settings_form.default_annual_credit }}
+            {% if settings_form.default_annual_credit.errors %}<p class="cf-error">{{ settings_form.default_annual_credit.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="cf-field">
+              <label class="cf-label" for="{{ settings_form.reset_month.id_for_label }}">{{ settings_form.reset_month.label }}</label>
+              {{ settings_form.reset_month }}
+              {% if settings_form.reset_month.errors %}<p class="cf-error">{{ settings_form.reset_month.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label class="cf-label" for="{{ settings_form.reset_day.id_for_label }}">{{ settings_form.reset_day.label }}</label>
+              {{ settings_form.reset_day }}
+              {% if settings_form.reset_day.errors %}<p class="cf-error">{{ settings_form.reset_day.errors.0 }}</p>{% endif %}
+            </div>
+          </div>
+          <div class="cf-field md:col-span-2">
+            <label class="cf-label" for="{{ settings_form.internal_disclaimer.id_for_label }}">{{ settings_form.internal_disclaimer.label }}</label>
+            {{ settings_form.internal_disclaimer }}
+            {% if settings_form.internal_disclaimer.errors %}<p class="cf-error">{{ settings_form.internal_disclaimer.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field md:col-span-2">
+            <label class="cf-label" for="{{ settings_form.verification_instructions.id_for_label }}">{{ settings_form.verification_instructions.label }}</label>
+            {{ settings_form.verification_instructions }}
+            {% if settings_form.verification_instructions.errors %}<p class="cf-error">{{ settings_form.verification_instructions.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="md:col-span-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              {{ settings_form.hard_block_exceeded }}
+              <span class="text-sm font-semibold text-[var(--cf-ink)]">Hard-block when estimated credit is exceeded</span>
+            </label>
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">When enabled in later booking tasks, staff workflows can block usage that exceeds the clinic estimate.</p>
+            {% if settings_form.hard_block_exceeded.errors %}<p class="cf-error">{{ settings_form.hard_block_exceeded.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+
+        <div class="flex justify-end border-t border-[var(--cf-line)] pt-4">
+          <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Save YAKAP Settings</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="cf-card p-6">
+      <div class="mb-5 flex items-center gap-3">
+        <div class="cf-icon-box p-3"><i data-lucide="list-plus" class="h-5 w-5"></i></div>
+        <div>
+          <h2 class="cf-section-title">Coverage Categories</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Categories are always saved to the active clinic server-side.</p>
+        </div>
+      </div>
+
+      <form method="post" action="{% url 'dashboard:yakap' %}" class="grid gap-4">
+        {% csrf_token %}
+        <input type="hidden" name="_form" value="category">
+
+        {% if category_form.non_field_errors %}
+          <div class="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+            {% for error in category_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="cf-field sm:col-span-2">
+            <label class="cf-label" for="{{ category_form.name.id_for_label }}">{{ category_form.name.label }}</label>
+            {{ category_form.name }}
+            {% if category_form.name.errors %}<p class="cf-error">{{ category_form.name.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label class="cf-label" for="{{ category_form.category_type.id_for_label }}">{{ category_form.category_type.label }}</label>
+            {{ category_form.category_type }}
+            {% if category_form.category_type.errors %}<p class="cf-error">{{ category_form.category_type.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label class="cf-label" for="{{ category_form.annual_limit.id_for_label }}">{{ category_form.annual_limit.label }}</label>
+            {{ category_form.annual_limit }}
+            {% if category_form.annual_limit.errors %}<p class="cf-error">{{ category_form.annual_limit.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label class="cf-label" for="{{ category_form.sort_order.id_for_label }}">{{ category_form.sort_order.label }}</label>
+            {{ category_form.sort_order }}
+            {% if category_form.sort_order.errors %}<p class="cf-error">{{ category_form.sort_order.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="flex items-center pt-6">
+            <label class="flex items-center gap-2 cursor-pointer">
+              {{ category_form.is_active }}
+              <span class="text-sm font-semibold text-[var(--cf-ink)]">Active</span>
+            </label>
+            {% if category_form.is_active.errors %}<p class="cf-error">{{ category_form.is_active.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field sm:col-span-2">
+            <label class="cf-label" for="{{ category_form.notes.id_for_label }}">{{ category_form.notes.label }}</label>
+            {{ category_form.notes }}
+            {% if category_form.notes.errors %}<p class="cf-error">{{ category_form.notes.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+
+        <div class="flex justify-end border-t border-[var(--cf-line)] pt-4">
+          <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add Category</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <section class="cf-card p-6">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="cf-section-title">Current YAKAP Categories</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Default categories are created automatically for each clinic.</p>
+      </div>
+      <span class="cf-badge cf-badge-info">{{ categories|length }} categories</span>
+    </div>
+
+    {% if categories %}
+      <div class="cf-table-wrap">
+        <div class="cf-table-scroll" tabindex="0" aria-label="YAKAP coverage categories table">
+          <table class="cf-table cf-table-compact">
+            <thead>
+              <tr>
+                <th class="p-4">Category</th>
+                <th class="p-4">Type</th>
+                <th class="p-4">Annual limit</th>
+                <th class="p-4">Status</th>
+                <th class="p-4">Notes</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[var(--cf-line-soft)]">
+              {% for category in categories %}
+                <tr>
+                  <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ category.name }}</td>
+                  <td class="p-4 text-[var(--cf-muted)]">{{ category.get_category_type_display }}</td>
+                  <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ category.annual_limit }}</td>
+                  <td class="p-4"><span class="cf-badge {% if category.is_active %}cf-badge-active{% else %}cf-badge-inactive{% endif %}">{% if category.is_active %}Active{% else %}Inactive{% endif %}</span></td>
+                  <td class="p-4 text-[var(--cf-muted)]">{{ category.notes|default:"-" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="cf-empty-state">
+        <div class="cf-icon-box mb-4 p-4"><i data-lucide="shield-check" class="h-6 w-6"></i></div>
+        <p class="cf-section-title">No YAKAP categories</p>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Refresh this page to create the default clinic categories.</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="cf-card p-6">
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="cf-section-title">Unverified YAKAP requests</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Verify before service so the clinic does not absorb uncovered YAKAP usage.</p>
+      </div>
+      <span class="cf-badge cf-badge-warning cf-status-pending">Needs verification</span>
+    </div>
+
+    {% if unverified_appointments %}
+      <div class="cf-table-wrap">
+        <div class="cf-table-scroll" tabindex="0" aria-label="Unverified YAKAP requests table">
+          <table class="cf-table cf-table-compact">
+            <thead>
+              <tr>
+                <th class="p-4">Patient</th>
+                <th class="p-4">Service</th>
+                <th class="p-4">Date and time</th>
+                <th class="p-4">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[var(--cf-line-soft)]">
+              {% for appointment in unverified_appointments %}
+                <tr>
+                  <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</td>
+                  <td class="p-4 text-[var(--cf-muted)]">{{ appointment.service.name }}</td>
+                  <td class="p-4 tabular-nums text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</td>
+                  <td class="p-4"><span class="cf-badge cf-badge-warning cf-status-pending">Needs verification</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="cf-empty-state">
+        <div class="cf-icon-box mb-4 p-4"><i data-lucide="shield-alert" class="h-6 w-6"></i></div>
+        <p class="cf-section-title">No unverified YAKAP requests.</p>
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

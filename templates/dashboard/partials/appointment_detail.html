@@ -78,6 +78,61 @@
     </div>
 
     <div class="border-t border-[var(--cf-line-soft)] pt-5">
+      <div class="rounded-[var(--cf-radius)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 class="cf-label">YAKAP estimated coverage</h3>
+            <p class="mt-1 text-sm text-[var(--cf-muted)]">Record staff-estimated usage only. Verify eligibility and remaining coverage through the clinic workflow.</p>
+          </div>
+          <span class="cf-badge cf-badge-info">Estimated</span>
+        </div>
+        {% with snapshot=appointment.yakap_snapshot %}
+          {% if snapshot.requested %}
+            <p class="mt-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">YAKAP was requested at booking. Confirm eligibility before applying any usage estimate.</p>
+          {% else %}
+            <p class="mt-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-muted)]">No YAKAP request was recorded for this appointment.</p>
+          {% endif %}
+        {% endwith %}
+        <form method="post" action="{% url 'dashboard:appointment_yakap_ledger' appointment.id %}" class="mt-4 grid gap-3" hx-post="{% url 'dashboard:appointment_yakap_ledger' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
+          {% csrf_token %}
+          {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
+          {% for error in yakap_ledger_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.category.id_for_label }}" class="cf-label">{{ yakap_ledger_form.category.label }}</label>
+              {{ yakap_ledger_form.category }}
+              {% if yakap_ledger_form.category.errors %}<p class="cf-error">{{ yakap_ledger_form.category.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.entry_type.id_for_label }}" class="cf-label">{{ yakap_ledger_form.entry_type.label }}</label>
+              {{ yakap_ledger_form.entry_type }}
+              {% if yakap_ledger_form.entry_type.errors %}<p class="cf-error">{{ yakap_ledger_form.entry_type.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.amount.id_for_label }}" class="cf-label">{{ yakap_ledger_form.amount.label }}</label>
+              {{ yakap_ledger_form.amount }}
+              {% if yakap_ledger_form.amount.errors %}<p class="cf-error">{{ yakap_ledger_form.amount.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.verification_status.id_for_label }}" class="cf-label">{{ yakap_ledger_form.verification_status.label }}</label>
+              {{ yakap_ledger_form.verification_status }}
+              {% if yakap_ledger_form.verification_status.errors %}<p class="cf-error">{{ yakap_ledger_form.verification_status.errors.0 }}</p>{% endif %}
+            </div>
+          </div>
+          <div class="cf-field">
+            <label for="{{ yakap_ledger_form.note.id_for_label }}" class="cf-label">{{ yakap_ledger_form.note.label }}</label>
+            {{ yakap_ledger_form.note }}
+            {% if yakap_ledger_form.note.errors %}<p class="cf-error">{{ yakap_ledger_form.note.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-xs text-[var(--cf-muted)]">Estimated coverage only; this is not an official PhilHealth balance.</p>
+            <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add YAKAP Usage</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="border-t border-[var(--cf-line-soft)] pt-5">
       <h3 class="cf-label mb-3">Add Internal Note</h3>
       <form method="post" action="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-post="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
         {% csrf_token %}

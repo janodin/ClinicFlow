@@ -15,6 +15,7 @@ from django.views.decorators.http import require_http_methods
 
 from clinics.models import ClinicAISettings
 
+from .ai_gateway import build_gateway_reply
 from .ai_tools import (
     DEFAULT_AI_FALLBACK_MESSAGE,
     build_ai_context,
@@ -356,6 +357,12 @@ def _ai_tool_response(request, handler):
 @require_http_methods(["POST"])
 def ai_context(request):
     return _ai_tool_response(request, lambda data: build_ai_context(data.get("page_id", "")))
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def ai_gateway_reply(request):
+    return _ai_tool_response(request, build_gateway_reply)
 
 
 @csrf_exempt

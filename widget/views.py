@@ -5,7 +5,7 @@ import json
 import requests
 from django.conf import settings
 from django.core.cache import cache
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 from django.http import HttpResponse, JsonResponse
@@ -20,6 +20,7 @@ from clinics.models import Clinic, ClinicAISettings
 from patients.models import Patient, normalize_phone
 from scheduling.utils import generate_slots
 from widget.ai_client import AssistantUnavailable, call_assistant_webhook, fallback_message_for
+from yakap.services import create_appointment_yakap_snapshot
 
 
 MIN_BOOKING_PHONE_DIGITS = 7
@@ -44,6 +45,14 @@ def _find_next_available_date(clinic, service, from_date, max_days=14):
         if slots:
             return d
     return None
+
+
+def _enabled_yakap_settings(clinic):
+    try:
+        yakap_settings = clinic.yakap_settings
+    except ObjectDoesNotExist:
+        return None
+    return yakap_settings if yakap_settings.is_enabled else None
 
 
 def _booking_context(clinic, request):
@@ -73,6 +82,7 @@ def _booking_context(clinic, request):
         "selected_date": selected_date,
         "slots": slots,
         "next_available_date": next_available_date,
+        "yakap_settings": _enabled_yakap_settings(clinic),
     }
 
 
@@ -135,6 +145,7 @@ def _process_guest_booking(clinic, data, source):
     phone = data.get("phone", "").strip()
     email = data.get("email", "").strip()
     reason = data.get("reason", "").strip()
+    yakap_requested = data.get("yakap_requested") == "on"
     error = _validate_guest_identity(full_name, phone, email)
     if error:
         return None, error
@@ -186,6 +197,8 @@ def _process_guest_booking(clinic, data, source):
             )
         except ValidationError:
             return None, SLOT_CONFLICT_MESSAGE
+        if yakap_requested and _enabled_yakap_settings(locked_clinic):
+            create_appointment_yakap_snapshot(appointment, requested=True)
     return appointment, None
 
 

@@ -98,6 +98,57 @@
   </div>
 
   <div class="cf-card p-5 lg:p-6">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="cf-section-title">Estimated YAKAP balances</h2>
+        <p class="cf-muted mt-1">Clinic-entered estimates only. Verify before honoring coverage.</p>
+      </div>
+      <span class="cf-badge cf-badge-info">Estimated</span>
+    </div>
+    {% if yakap_profile %}
+      {% if yakap_balances %}
+        <div class="mt-4 grid gap-3 lg:grid-cols-2">
+          {% for balance in yakap_balances %}
+            <div class="rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold text-[var(--cf-ink)]">{{ balance.category.name }}</h3>
+                  <p class="text-xs text-[var(--cf-muted)]">{{ balance.category.get_category_type_display }}</p>
+                </div>
+                <span class="text-xs tabular-nums text-[var(--cf-muted)]">{{ balance.limit|floatformat:2 }} limit</span>
+              </div>
+              <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                <span class="rounded-[var(--cf-radius-sm)] bg-white px-3 py-2 text-sm tabular-nums text-[var(--cf-ink)]">{{ balance.used|floatformat:2 }} used</span>
+                <span class="rounded-[var(--cf-radius-sm)] bg-white px-3 py-2 text-sm tabular-nums text-[var(--cf-ink)]">{{ balance.remaining|floatformat:2 }} remaining</span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="mt-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-sm text-[var(--cf-muted)]">No active YAKAP coverage categories are configured for this clinic.</p>
+      {% endif %}
+      {% if yakap_ledger_entries %}
+        <div class="mt-5">
+          <h3 class="cf-label mb-3">Recent YAKAP ledger entries</h3>
+          <div class="space-y-2">
+            {% for entry in yakap_ledger_entries %}
+              <div class="flex flex-wrap items-center justify-between gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white px-4 py-3 text-sm">
+                <div class="min-w-0">
+                  <p class="cf-mobile-break font-semibold text-[var(--cf-ink)]">{{ entry.category.name }} &middot; {{ entry.get_entry_type_display }}</p>
+                  <p class="cf-mobile-break text-xs text-[var(--cf-muted)]">{{ entry.get_verification_status_display }}{% if entry.appointment_id %} &middot; Appointment #{{ entry.appointment_id }}{% endif %}</p>
+                </div>
+                <span class="tabular-nums text-[var(--cf-ink)]">{{ entry.amount|floatformat:2 }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="mt-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-sm text-[var(--cf-muted)]">No YAKAP profile exists for this patient yet. A profile is created when staff record YAKAP usage.</p>
+    {% endif %}
+  </div>
+
+  <div class="cf-card p-5 lg:p-6">
     <h2 class="cf-section-title">Notes</h2>
     <div class="mt-3 min-h-24 rounded-[var(--cf-radius)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-sm text-[var(--cf-ink)] whitespace-pre-wrap">{{ patient.notes|default:"No notes added yet." }}</div>
   </div>

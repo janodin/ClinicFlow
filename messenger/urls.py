@@ -10,6 +10,7 @@ urlpatterns = [
     path("ai/turn/claim/", views.ai_turn_claim, name="ai_turn_claim"),
     path("ai/turn/complete/", views.ai_turn_complete, name="ai_turn_complete"),
     path("ai/context/", views.ai_context, name="ai_context"),
+    path("ai/gateway/reply/", views.ai_gateway_reply, name="ai_gateway_reply"),
     path("ai/services/", views.ai_services, name="ai_services"),
     path("ai/availability/", views.ai_availability, name="ai_availability"),
     path("ai/book/", views.ai_book, name="ai_book"),

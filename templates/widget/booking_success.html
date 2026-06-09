@@ -28,6 +28,10 @@
       <div class="flex justify-between gap-3 py-2"><span class="shrink-0 text-[var(--cf-muted)]">Patient</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></div>
     </div>
 
+    {% if appointment.yakap_snapshot.requested %}
+    <p class="mt-4 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left text-xs leading-5 text-[var(--cf-muted)]">YAKAP requested. Clinic staff will verify eligibility and estimated remaining coverage before service.</p>
+    {% endif %}
+
     <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full"><i data-lucide="calendar-plus" class="h-4 w-4"></i>Book Another Appointment</a>
   </section>
 </main>

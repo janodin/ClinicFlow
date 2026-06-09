@@ -295,6 +295,21 @@ def test_mobile_dashboard_shell_contracts():
     assert ">More</span>" in settings_anchor
 
 
+def test_mobile_more_nav_marks_yakap_as_setup_active():
+    template = dashboard_base_text()
+    nav_start = template.index("<!-- Bottom mobile nav -->")
+    nav_end = template.index("</nav>", nav_start) + len("</nav>")
+    bottom_nav_block = template[nav_start:nav_end]
+
+    settings_href = "{% url 'dashboard:settings' %}"
+    settings_href_index = bottom_nav_block.index(settings_href)
+    settings_anchor_start = bottom_nav_block.rfind("<a ", 0, settings_href_index)
+    settings_anchor_end = bottom_nav_block.index("</a>", settings_href_index) + len("</a>")
+    settings_anchor = bottom_nav_block[settings_anchor_start:settings_anchor_end]
+
+    assert "request.resolver_match.url_name == 'yakap'" in settings_anchor
+
+
 def test_calendar_mobile_viewport_contracts():
     template = source_text("templates/dashboard/calendar.html")
     css = css_text()
@@ -529,7 +544,9 @@ def test_widget_mobile_embed_contracts_are_specific():
     assert "border-[var(--cf-danger)]" in widget_error
     assert "bg-[var(--cf-danger-soft)]" in widget_error
     assert "text-[var(--cf-danger)]" in widget_error
-    assert "height:min(500px, 70dvh)" in widget_embed
+    assert "relative h-[420px] overflow-hidden" in widget_embed
+    assert "sm:h-[520px]" in widget_embed
+    assert "class=\"h-full w-full\" style=\"border:none;\"" in widget_embed
     assert "kliniassist-widget-frame" in widget_views
     assert "@media (max-width: 640px)" in widget_views
 
@@ -1139,11 +1156,12 @@ def test_dashboard_shell_uses_task_2_navigation_groups_and_labels():
     assert "label=\"Overview\"" in template
     assert 'label="Services"' in operations_group
     assert "label=\"Assistant\"" in template
+    assert 'url_name="dashboard:widget_embed"' in setup_group
+    assert 'icon="panel-top-open" label="Booking Widget"' in template
     assert 'url_name="dashboard:billing"' in setup_group
     assert "icon=\"message-circle\" label=\"Assistant\"" in template
     assert "<span>Overview</span>" in template
     assert "label=\"Dashboard\"" not in template
-    assert "label=\"Booking Widget\"" not in template
     assert "<span>Home</span>" not in template
     assert ">Main<" not in template
     assert ">Config<" not in template
@@ -1903,6 +1921,46 @@ def test_assistant_page_messenger_mode_uses_custom_aqua_radio_cards():
     assert "transform: scale(1);" in selected_mark
 
 
+def test_assistant_ai_provider_card_uses_compact_design_system_layout():
+    template = source_text("templates/dashboard/assistant_settings.html")
+    forms = source_text("clinics/forms.py")
+    data_index = template.index('data-section="ai-provider-settings"')
+    section_start = template.rindex("<section", 0, data_index)
+    section_end = template.index("\n  <section", section_start + 1)
+    provider_section = template[section_start:section_end]
+    form_start = forms.index("class AIProviderSettingsForm")
+    form_end = forms.index("class ClinicFAQForm", form_start)
+    provider_form = forms[form_start:form_end]
+
+    assert '<section class="cf-card p-6" data-section="ai-provider-settings"' in provider_section
+    assert "cf-card overflow-hidden p-0" not in provider_section
+    assert "border-b border-[var(--cf-line)]" not in provider_section
+    assert "cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none" in provider_section
+    assert "data-ai-provider-column=" not in provider_section
+    assert "data-ai-provider-row=" not in provider_section
+    assert 'data-ai-provider-layout="responsive-grid" class="grid gap-4 lg:grid-cols-2"' in provider_section
+    assert 'data-ai-provider-field="provider" class="cf-field order-1 lg:order-1"' in provider_section
+    assert 'data-ai-provider-field="base-url" class="cf-field order-2 lg:order-3"' in provider_section
+    assert 'data-ai-provider-field="api-key" class="cf-field order-3 lg:order-5"' in provider_section
+    assert 'data-ai-provider-field="primary-model" class="cf-field order-4 lg:order-2"' in provider_section
+    assert 'data-ai-provider-field="fallback-model" class="cf-field order-5 lg:order-4"' in provider_section
+    assert provider_section.index('data-ai-provider-field="provider"') < provider_section.index('data-ai-provider-field="base-url"')
+    assert provider_section.index('data-ai-provider-field="base-url"') < provider_section.index('data-ai-provider-field="api-key"')
+    assert provider_section.index('data-ai-provider-field="api-key"') < provider_section.index('data-ai-provider-field="primary-model"')
+    assert provider_section.index('data-ai-provider-field="primary-model"') < provider_section.index('data-ai-provider-field="fallback-model"')
+    assert "Choose the AI endpoint for this clinic." in provider_section
+    assert "Primary model used first for the selected provider." in provider_section
+    assert "Required only for OpenAI-compatible providers." in provider_section
+    assert "Fallback model retries only if the primary model fails" in provider_section
+    assert "{{ ai_provider_form.api_key }}" in provider_section
+    assert provider_section.count('class="cf-field ') >= 5
+    assert 'widget=forms.URLInput(attrs={"class": _INPUT' in provider_form
+    assert provider_form.count('widget=forms.Select(attrs={"class": _SELECT})') >= 2
+    assert '"provider": forms.Select(attrs={"class": _SELECT})' in provider_form
+    assert 'SavedProviderSecretInput(attrs={"class": f"{_INPUT} pr-12"' in provider_form
+    assert '"is_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX})' in provider_form
+
+
 def test_faq_summary_metrics_use_aqua_soft_pills():
     metric_block = css_rule_block(".cf-faq-summary-metric")
     separator_block = css_rule_block(".cf-faq-summary-separator")
@@ -2598,7 +2656,6 @@ def test_mobile_responsive_calendar_and_widget_use_safe_viewports():
     calendar = source_text("templates/dashboard/calendar.html")
     widget = source_text("templates/widget/widget.html")
     embed_js = source_text("widget/views.py")
-    assistant_settings = source_text("templates/dashboard/assistant_settings.html")
     widget_embed = source_text("templates/dashboard/widget_embed.html")
 
     assert "const calendarScreen = window.matchMedia('(max-width: 768px)');" in calendar
@@ -2611,12 +2668,12 @@ def test_mobile_responsive_calendar_and_widget_use_safe_viewports():
     assert "bottom:max(16px, env(safe-area-inset-bottom))" in embed_js
     assert "right:max(16px, env(safe-area-inset-right))" in embed_js
     assert "max-height:calc(100dvh - 32px - env(safe-area-inset-bottom))" in embed_js
-    assert "max-height:calc(100dvh - 32px - env(safe-area-inset-bottom))" in assistant_settings
     assert "max-height:calc(100dvh - 32px - env(safe-area-inset-bottom))" in widget_embed
 
 
 def test_mobile_responsive_dynamic_text_has_wrapping_guards():
     assistant_settings = source_text("templates/dashboard/assistant_settings.html")
+    widget_embed = source_text("templates/dashboard/widget_embed.html")
     duplicate_list = partial_text("duplicate_list.html")
     merge_confirm = partial_text("merge_confirm.html")
     faq_row = partial_text("faq_row.html")
@@ -2626,7 +2683,7 @@ def test_mobile_responsive_dynamic_text_has_wrapping_guards():
     partial_success = source_text("templates/widget/partials/booking_success.html")
     full_success = source_text("templates/widget/booking_success.html")
 
-    assert "block min-w-0 max-w-full flex-1 break-all" in assistant_settings
+    assert "block min-w-0 max-w-full flex-1 break-all" in widget_embed
     assert "flex flex-col gap-3 rounded-[var(--cf-radius)] border border-[var(--cf-line-soft)] p-4 sm:flex-row sm:items-center sm:justify-between" in duplicate_list
     assert "min-w-0 break-words text-sm" in duplicate_list
     assert "flex flex-col gap-3 sm:flex-row sm:items-center" in merge_confirm
@@ -2646,13 +2703,14 @@ def test_mobile_responsive_dynamic_text_has_wrapping_guards():
 
 def test_settings_page_level_save_buttons_align_right():
     assistant_settings = source_text("templates/dashboard/assistant_settings.html")
+    widget_embed = source_text("templates/dashboard/widget_embed.html")
     settings = source_text("templates/dashboard/settings.html")
     business_hours = source_text("templates/dashboard/business_hours.html")
     slot_preview = source_text("templates/dashboard/slot_preview.html")
 
     page_level_save_blocks = [
         div_block_containing(assistant_settings, "Save Assistant Settings"),
-        div_block_containing(assistant_settings, "Save Changes"),
+        div_block_containing(widget_embed, "Save Changes"),
         div_block_containing(settings, "Save Changes"),
         div_block_containing(settings, "Save Business Hours"),
         div_block_containing(settings, "Preview Slots"),

@@ -1,39 +1,119 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Widget Embed{% endblock %}
+{% block title %}Booking Widget{% endblock %}
 {% block content %}
-<div class="cf-page" x-data="{copied: ''}">
+<div class="cf-page" x-data="{urlCopied: false, scriptCopied: false, iframeCopied: false, previewOpen: false, accentColor:'{{ clinic.safe_widget_accent_color|escapejs }}'}" x-init="const input=$el.querySelector('input[name=widget_accent_color]'); if(input){input.addEventListener('input',e=>accentColor=e.target.value); accentColor=input.value;} window.addEventListener('message', event => { if (event.data && event.data.type === 'kliniassist-minimize') { previewOpen = false; } });">
   <div class="cf-page-header">
     <div>
-      <h1 class="cf-page-title ui-page-title">Widget Embed</h1>
-      <p class="cf-page-description">Copy the recommended launcher script or use the advanced iframe fallback for custom placements.</p>
+      <h1 class="cf-page-title ui-page-title">Booking Widget</h1>
+      <p class="cf-page-description">Customize your website booking widget appearance, preview, public link, and embed code.</p>
     </div>
   </div>
-  <section class="cf-card p-6 border border-[var(--cf-brand-soft)]">
-    <div class="flex flex-wrap items-center gap-2">
-      <h2 class="cf-section-title">Recommended JavaScript launcher</h2>
-      <span class="cf-badge cf-badge-info">Recommended</span>
-    </div>
-    <p class="cf-muted mt-2 text-sm">Adds a small bottom-right booking button. The full widget opens after click.</p>
-    <div class="relative mt-4">
-      <pre class="overflow-x-auto rounded-xl bg-[var(--cf-dashboard-dark)] p-5 text-sm text-white shadow-[var(--cf-shadow-raised)]" id="script-code">&lt;script src="{{ script_url }}"&gt;&lt;/script&gt;</pre>
-      <button @click="navigator.clipboard.writeText(document.getElementById('script-code').innerText).then(() => {copied='script'; setTimeout(() => copied='', 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-3 sm:top-3 sm:mt-0">Copy</button>
-      <span x-show="copied==='script'" x-transition class="absolute right-3 top-12 rounded-lg bg-green-600 px-2 py-1 text-xs font-bold text-white">Copied!</span>
-    </div>
-  </section>
+
   <section class="cf-card p-6">
-    <h2 class="cf-section-title">Advanced iframe fallback</h2>
-    <p class="cf-muted mt-2 text-sm">Embeds the full panel directly and can be visible immediately. Use only for custom placements where you intentionally want the widget panel shown.</p>
-    <div class="relative mt-4">
-      <pre class="overflow-x-auto rounded-xl bg-[var(--cf-dashboard-dark)] p-5 text-sm text-white shadow-[var(--cf-shadow-raised)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
-      <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {copied='iframe'; setTimeout(() => copied='', 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-3 sm:top-3 sm:mt-0">Copy</button>
-      <span x-show="copied==='iframe'" x-transition class="absolute right-3 top-12 rounded-lg bg-green-600 px-2 py-1 text-xs font-bold text-white">Copied!</span>
+    <h2 class="cf-section-title">Website Booking Widget</h2>
+    <p class="mt-2 text-sm text-[var(--cf-muted)]">Control the patient-facing website widget without changing Assistant or Messenger settings.</p>
+
+    <form method="post" action="{% url 'dashboard:widget_embed' %}" class="mt-6">
+      {% csrf_token %}
+      <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+        <div class="grid gap-5 content-start">
+          <div class="cf-field">
+            <label for="{{ widget_form.widget_accent_color.id_for_label }}" class="cf-label">{{ widget_form.widget_accent_color.label }}</label>
+            {{ widget_form.widget_accent_color }}
+            {% if widget_form.widget_accent_color.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.widget_accent_color.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ widget_form.widget_welcome_message.id_for_label }}" class="cf-label">{{ widget_form.widget_welcome_message.label }}</label>
+            {{ widget_form.widget_welcome_message }}
+            {% if widget_form.widget_welcome_message.errors %}<p class="mt-1 text-xs text-[var(--cf-red)]">{{ widget_form.widget_welcome_message.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="flex justify-end pt-2">
+            <button class="cf-btn cf-btn-primary" type="submit"><i data-lucide="save" class="h-4 w-4"></i>Save Changes</button>
+          </div>
+        </div>
+
+        <div>
+          <p class="cf-kpi-label mb-2">Live Preview</p>
+          <div class="relative h-[420px] overflow-hidden rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] sm:h-[520px]">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,.16),transparent_38%),linear-gradient(135deg,#ffffff,#f0fdff)]"></div>
+            <div class="relative z-10 flex h-full flex-col justify-between p-4">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--cf-muted)]">Clinic website preview</p>
+                <div class="mt-3 h-3 w-32 rounded-full bg-[var(--cf-line)]"></div>
+                <div class="mt-2 h-2 w-44 rounded-full bg-[var(--cf-line)]/70"></div>
+              </div>
+
+              <button x-show="!previewOpen" x-transition @click="previewOpen = true" type="button" class="absolute bottom-4 right-4 grid h-[60px] w-[60px] place-items-center rounded-full text-white shadow-[0_10px_24px_rgba(8,51,68,.22)] transition hover:scale-105 focus:outline focus:outline-3 focus:outline-offset-4 focus:outline-[rgba(8,51,68,.35)]" :style="'background-color:' + accentColor" aria-label="Open booking widget preview" title="Book an appointment">
+                <i data-lucide="calendar-days" class="h-7 w-7" aria-hidden="true"></i>
+              </button>
+
+              <div x-show="previewOpen" x-transition x-cloak class="absolute inset-0 bg-transparent">
+                <iframe src="{{ iframe_url }}" class="h-full w-full" style="border:none;" allow="clipboard-write"></iframe>
+              </div>
+            </div>
+          </div>
+          <p class="mt-2 text-xs text-[var(--cf-muted)]">Click the launcher to preview how patients open the widget.</p>
+        </div>
+      </div>
+    </form>
+
+    <div class="mt-6 border-t border-[var(--cf-line)] pt-6">
+      <p class="cf-kpi-label mb-3">Share Your Widget</p>
+      <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <code class="block min-w-0 max-w-full flex-1 break-all rounded-md bg-[var(--cf-surface)] px-3 py-2 text-sm text-[var(--cf-blue)]">{{ request.scheme }}://{{ request.get_host }}{% url 'widget:home' clinic.slug %}</code>
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <button @click="navigator.clipboard.writeText('{{ request.scheme }}://{{ request.get_host }}{% url 'widget:home' clinic.slug %}').then(() => {urlCopied=true; setTimeout(() => urlCopied=false, 2000)})" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+              <i data-lucide="copy" class="h-4 w-4"></i>
+              <span x-show="!urlCopied">Copy</span>
+              <span x-show="urlCopied" x-cloak>Copied!</span>
+            </button>
+            <a class="cf-btn cf-btn-secondary cf-btn-sm" target="_blank" href="{% url 'widget:home' clinic.slug %}">
+              <i data-lucide="external-link" class="h-4 w-4"></i>Open
+            </a>
+          </div>
+        </div>
+      </div>
     </div>
-  </section>
-  <section class="cf-card p-6">
-    <h2 class="cf-section-title">Preview</h2>
-    <p class="cf-muted mt-2 text-sm">Preview shows the full widget after a visitor opens the bottom-right launcher.</p>
-    <div class="mt-4 overflow-hidden rounded-xl border border-[var(--cf-line)] shadow-[var(--cf-shadow-raised)]" style="max-width:420px;">
-      <iframe src="{{ iframe_url }}" style="width:100%; height:min(500px, 70dvh); border:0;" allow="clipboard-write"></iframe>
+
+    <div class="mt-6 border-t border-[var(--cf-line)] pt-6">
+      <p class="cf-kpi-label mb-3">Embed on Your Website</p>
+      <div class="grid gap-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
+        <div class="rounded-lg border border-[var(--cf-brand-soft)] bg-[var(--cf-surface)] p-4 shadow-sm">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <i data-lucide="file-code" class="h-4 w-4 text-[var(--cf-brand)]"></i>
+            <p class="text-sm font-semibold text-[var(--cf-ink)]">Recommended JavaScript launcher</p>
+            <span class="cf-badge cf-badge-info">Recommended</span>
+          </div>
+          <p class="text-xs text-[var(--cf-muted)] mb-3">Paste before the closing <code class="rounded bg-[var(--cf-surface-muted)] px-1 py-0.5 text-[var(--cf-blue)]">&lt;/body&gt;</code> tag. Adds a small bottom-right booking button. The full widget opens after click.</p>
+          <div class="relative">
+            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="script-code">&lt;script src="{{ script_url }}"&gt;&lt;/script&gt;</pre>
+            <button @click="navigator.clipboard.writeText(document.getElementById('script-code').innerText).then(() => {scriptCopied=true; setTimeout(() => scriptCopied=false, 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-2 sm:top-2 sm:mt-0" type="button">
+              <i data-lucide="copy" class="h-3 w-3" x-show="!scriptCopied"></i>
+              <i data-lucide="check" class="h-3 w-3" x-show="scriptCopied" x-cloak></i>
+              <span x-show="!scriptCopied">Copy</span>
+              <span x-show="scriptCopied" x-cloak>Copied</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <i data-lucide="frame" class="h-4 w-4 text-[var(--cf-muted)]"></i>
+            <p class="text-sm font-semibold text-[var(--cf-ink)]">Advanced iframe fallback</p>
+          </div>
+          <p class="text-xs text-[var(--cf-muted)] mb-3">Embeds the full panel directly and can be visible immediately. Use only for custom placements where you intentionally want the widget panel shown.</p>
+          <div class="relative">
+            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-24 text-xs text-[var(--cf-brand-soft)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
+            <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {iframeCopied=true; setTimeout(() => iframeCopied=false, 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-2 sm:top-2 sm:mt-0" type="button">
+              <i data-lucide="copy" class="h-3 w-3" x-show="!iframeCopied"></i>
+              <i data-lucide="check" class="h-3 w-3" x-show="iframeCopied" x-cloak></i>
+              <span x-show="!iframeCopied">Copy</span>
+              <span x-show="iframeCopied" x-cloak>Copied</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 </div>

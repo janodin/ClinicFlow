@@ -3,11 +3,7 @@ import {
   node,
   trigger,
   switchCase,
-  languageModel,
-  memory,
-  tool,
   newCredential,
-  fromAi,
   expr,
 } from '@n8n/workflow-sdk';
 
@@ -19,19 +15,8 @@ const WIDGET_FALLBACK = 'Sorry, the assistant is unavailable right now. You can 
 const DJANGO_MESSENGER_WEBHOOK_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/webhook/" }}');
 const DJANGO_META_SIGNATURE_VERIFY_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/meta/verify-signature/" }}');
 const DJANGO_MESSENGER_AI_CONTEXT_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/context/" }}');
+const DJANGO_AI_GATEWAY_REPLY_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/gateway/reply/" }}');
 const DJANGO_WIDGET_AI_CONTEXT_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/context/" }}');
-const DJANGO_MESSENGER_AI_SERVICES_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/services/"';
-const DJANGO_WIDGET_AI_SERVICES_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/services/"';
-const DJANGO_MESSENGER_AI_AVAILABILITY_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/availability/"';
-const DJANGO_WIDGET_AI_AVAILABILITY_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/availability/"';
-const DJANGO_MESSENGER_AI_BOOK_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/book/"';
-const DJANGO_WIDGET_AI_BOOK_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/book/"';
-const DJANGO_MESSENGER_AI_APPOINTMENT_LOOKUP_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/appointment/lookup/"';
-const DJANGO_WIDGET_AI_APPOINTMENT_LOOKUP_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/appointment/lookup/"';
-const DJANGO_MESSENGER_AI_APPOINTMENT_CANCEL_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/appointment/cancel/"';
-const DJANGO_WIDGET_AI_APPOINTMENT_CANCEL_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/appointment/cancel/"';
-const DJANGO_MESSENGER_AI_APPOINTMENT_RESCHEDULE_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/appointment/reschedule/"';
-const DJANGO_WIDGET_AI_APPOINTMENT_RESCHEDULE_URL_EXPR = DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/appointment/reschedule/"';
 const DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/register/" }}');
 const DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/claim/" }}');
 const DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/complete/" }}');
@@ -224,115 +209,59 @@ const verifyMetaSignature = node({
   output: [{ verified: true, duplicate: false }],
 });
 
-const routeMetaSignature = switchCase({
-  version: 3.4,
+const prepareMetaWebhookResponse = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
   config: {
-    name: 'Route Meta Signature',
+    name: 'Prepare Meta Webhook Response',
     position: [912, 560],
     parameters: {
-      mode: 'rules',
-      rules: {
-        values: [
-          {
-            renameOutput: true,
-            outputKey: 'signature_verified',
-            conditions: {
-              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
-              conditions: [
-                { leftValue: expr('{{ $json.verified ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } },
-                { leftValue: expr('{{ $json.duplicate ? "true" : "false" }}'), rightValue: 'false', operator: { type: 'string', operation: 'equals' } },
-                { leftValue: expr('{{ $("Normalize Messenger Request").item.json.ignored_event ? "true" : "false" }}'), rightValue: 'false', operator: { type: 'string', operation: 'equals' } },
-              ],
-              combinator: 'and',
-            },
-          },
-          {
-            renameOutput: true,
-            outputKey: 'duplicate_message',
-            conditions: {
-              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
-              conditions: [
-                { leftValue: expr('{{ $json.verified ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } },
-                { leftValue: expr('{{ $json.duplicate ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } },
-              ],
-              combinator: 'and',
-            },
-          },
-          {
-            renameOutput: true,
-            outputKey: 'ignored_event',
-            conditions: {
-              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
-              conditions: [
-                { leftValue: expr('{{ $json.verified ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } },
-                { leftValue: expr('{{ $("Normalize Messenger Request").item.json.ignored_event ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } },
-              ],
-              combinator: 'and',
-            },
-          },
-          {
-            renameOutput: true,
-            outputKey: 'signature_invalid',
-            conditions: {
-              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
-              conditions: [{ leftValue: expr('{{ $json.verified ? "true" : "false" }}'), rightValue: 'false', operator: { type: 'string', operation: 'equals' } }],
-              combinator: 'and',
-            },
-          },
-        ],
-      },
-      options: { fallbackOutput: 'none' },
+      mode: 'runOnceForAllItems',
+      jsCode: `const normalizedItems = $items('Normalize Messenger Request');
+const verifiedItems = $input.all();
+let hasInvalidSignature = false;
+const processableEvents = [];
+for (const [itemIndex, verifiedItem] of verifiedItems.entries()) {
+  const verification = verifiedItem.json || {};
+  const source = normalizedItems[itemIndex]?.json || {};
+  const verified = verification.verified === true;
+  const duplicate = verification.duplicate === true;
+  const ignored_event = source.ignored_event === true;
+  if (!verified) { hasInvalidSignature = true; }
+  if (verified && !duplicate && !ignored_event) {
+    processableEvents.push({ ...source, ...verification, duplicate, ignored_event });
+  }
+}
+return [{ json: { response_route: hasInvalidSignature ? 'invalid_signature' : 'acknowledge', processable_events: processableEvents } }];`,
     },
   },
+  output: [{ response_route: 'acknowledge', processable_events: [] }],
 });
 
-const registerMessengerTurn = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.4,
-  config: {
-    name: 'Register Messenger Turn',
-    position: [1136, 560],
-    parameters: {
-      method: 'POST',
-      url: DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR,
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $("Normalize Messenger Request").item.json.page_id, psid: $("Normalize Messenger Request").item.json.psid, message_id: $("Normalize Messenger Request").item.json.message_id, message: $("Normalize Messenger Request").item.json.message, postback: $("Normalize Messenger Request").item.json.postback || "" } }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ registered: true, duplicate: false, process_now: true, superseded_previous: false, turn_token: 'turn-token', input_sequence: 1, messages: [{ sequence: 1, text: 'June 15', postback: '' }], message: 'New Messenger messages in order:\n- June 15' }],
-});
-
-const routeMessengerTurnRegistration = switchCase({
+const routeMetaWebhookResponse = switchCase({
   version: 3.4,
   config: {
-    name: 'Route Messenger Turn Registration',
-    position: [1360, 560],
+    name: 'Route Meta Webhook Response',
+    position: [1136, 560],
     parameters: {
       mode: 'rules',
       rules: {
         values: [
           {
             renameOutput: true,
-            outputKey: 'process_now',
+            outputKey: 'acknowledge',
             conditions: {
               options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
-              conditions: [{ leftValue: expr('{{ $json.process_now ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } }],
+              conditions: [{ leftValue: expr('{{ $json.response_route }}'), rightValue: 'acknowledge', operator: { type: 'string', operation: 'equals' } }],
               combinator: 'and',
             },
           },
           {
             renameOutput: true,
-            outputKey: 'queued_or_duplicate',
+            outputKey: 'invalid_signature',
             conditions: {
               options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
-              conditions: [{ leftValue: expr('{{ $json.process_now ? "true" : "false" }}'), rightValue: 'false', operator: { type: 'string', operation: 'equals' } }],
+              conditions: [{ leftValue: expr('{{ $json.response_route }}'), rightValue: 'invalid_signature', operator: { type: 'string', operation: 'equals' } }],
               combinator: 'and',
             },
           },
@@ -348,7 +277,7 @@ const acknowledgeMetaMessengerEvent = node({
   version: 1.5,
   config: {
     name: 'Acknowledge Meta Messenger Event',
-    position: [1584, 560],
+    position: [1360, 560],
     parameters: {
       respondWith: 'text',
       responseBody: 'EVENT_RECEIVED',
@@ -358,25 +287,122 @@ const acknowledgeMetaMessengerEvent = node({
       },
     },
   },
-  output: [{ verified: true, duplicate: false }],
+  output: [{ response_route: 'acknowledge', processable_events: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', message: 'Hello', postback: '', raw_body: '{}', signature: 'sha256=abc123', verified: true, duplicate: false, ignored_event: false }] }],
 });
 
-const acknowledgeQueuedMessengerTurn = node({
+const returnInvalidMetaSignature = node({
   type: 'n8n-nodes-base.respondToWebhook',
   version: 1.5,
   config: {
-    name: 'Acknowledge Queued Messenger Turn',
-    position: [1584, 720],
+    name: 'Return Invalid Meta Signature',
+    position: [1360, 432],
     parameters: {
       respondWith: 'text',
-      responseBody: 'EVENT_RECEIVED',
+      responseBody: 'Invalid signature',
       options: {
-        responseCode: 200,
+        responseCode: 403,
         responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/plain' }] },
       },
     },
   },
-  output: [{ registered: false, duplicate: true, process_now: false }],
+  output: [{ response_route: 'invalid_signature' }],
+});
+
+const expandMessengerProcessableEvents = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Expand Messenger Processable Events',
+    position: [1584, 560],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const input = $input.first().json || {};
+const events = Array.isArray(input.processable_events) ? input.processable_events : [];
+return events.map((event) => ({ json: event }));`,
+    },
+  },
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', message: 'Hello', postback: '', raw_body: '{}', signature: 'sha256=abc123', verified: true, duplicate: false, ignored_event: false }],
+});
+
+const registerMessengerTurn = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Register Messenger Turn',
+    position: [1808, 560],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, message_id: $json.message_id, message: $json.message, postback: $json.postback || "" } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ registered: true, duplicate: false, process_now: true, superseded_previous: false, turn_token: 'turn-token', input_sequence: 1, messages: [{ sequence: 1, text: 'June 15', postback: '' }], message: 'New Messenger messages in order:\n- June 15' }],
+});
+
+const attachMessengerTurnRegistration = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Attach Messenger Turn Registration',
+    position: [1968, 560],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const sourceItems = $items('Expand Messenger Processable Events');
+return $input.all().map((inputItem, itemIndex) => {
+  const source = sourceItems[itemIndex]?.json || {};
+  const registration = inputItem.json || {};
+  const messages = Array.isArray(registration.messages) ? registration.messages : [];
+  return { json: {
+    ...source,
+    raw_message: source.message || '',
+    raw_postback: source.postback || '',
+    registration,
+    registered: registration.registered === true,
+    duplicate: registration.duplicate === true,
+    process_now: registration.process_now === true,
+    superseded_previous: registration.superseded_previous === true,
+    turn_token: registration.turn_token || '',
+    input_sequence: registration.input_sequence || 0,
+    turn_messages: messages,
+    message: registration.message || source.message || ''
+  } };
+});`,
+    },
+  },
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message: 'New Messenger messages in order:\n- June 15', raw_message: 'June 15', raw_postback: '', turn_token: 'turn-token', input_sequence: 1, process_now: true }],
+});
+
+const routeMessengerTurnRegistration = switchCase({
+  version: 3.4,
+  config: {
+    name: 'Route Messenger Turn Registration',
+    position: [2192, 560],
+    parameters: {
+      mode: 'rules',
+      rules: {
+        values: [
+          {
+            renameOutput: true,
+            outputKey: 'process_now',
+            conditions: {
+              options: { caseSensitive: true, leftValue: '', typeValidation: 'strict', version: 2 },
+              conditions: [{ leftValue: expr('{{ $json.process_now ? "true" : "false" }}'), rightValue: 'true', operator: { type: 'string', operation: 'equals' } }],
+              combinator: 'and',
+            },
+          },
+        ],
+      },
+      options: { fallbackOutput: 'none' },
+    },
+  },
 });
 
 const claimMessengerTurn = node({
@@ -384,7 +410,7 @@ const claimMessengerTurn = node({
   version: 4.4,
   config: {
     name: 'Claim Messenger Turn',
-    position: [1808, 560],
+    position: [2416, 560],
     parameters: {
       method: 'POST',
       url: DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR,
@@ -394,7 +420,7 @@ const claimMessengerTurn = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $("Normalize Messenger Request").item.json.page_id, psid: $("Normalize Messenger Request").item.json.psid, turn_token: $("Register Messenger Turn").item.json.turn_token || "" } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token || "" } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
@@ -402,11 +428,45 @@ const claimMessengerTurn = node({
   output: [{ claimed: true, stale: false, turn_token: 'turn-token', input_sequence: 2, messages: [{ sequence: 1, text: 'June 15', postback: '' }, { sequence: 2, text: 'Cleaning', postback: '' }], message: 'New Messenger messages in order:\n- June 15\n- Cleaning', history: [] }],
 });
 
+const attachMessengerTurnClaim = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Attach Messenger Turn Claim',
+    position: [2640, 560],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const sourceItems = $items('Route Messenger Turn Registration', 0);
+return $input.all().map((inputItem, itemIndex) => {
+  const source = sourceItems[itemIndex]?.json || {};
+  const claim = inputItem.json || {};
+  const messages = Array.isArray(claim.messages) ? claim.messages : (Array.isArray(source.turn_messages) ? source.turn_messages : []);
+  const latestMessage = messages.length ? messages[messages.length - 1] : {};
+  return { json: {
+    ...source,
+    claim,
+    claimed: claim.claimed === true,
+    stale: claim.stale === true,
+    has_pending: claim.has_pending === true,
+    turn_token: claim.turn_token || source.turn_token || '',
+    input_sequence: claim.input_sequence || source.input_sequence || 0,
+    turn_messages: messages,
+    history: Array.isArray(claim.history) ? claim.history : [],
+    message: claim.message || source.message || '',
+    raw_message: source.raw_message || latestMessage.text || '',
+    raw_postback: source.raw_postback || latestMessage.postback || ''
+  } };
+});`,
+    },
+  },
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message: 'New Messenger messages in order:\n- June 15\n- Cleaning', raw_message: 'Cleaning', raw_postback: '', turn_token: 'turn-token', input_sequence: 2, claimed: true }],
+});
+
 const routeMessengerTurnClaim = switchCase({
   version: 3.4,
   config: {
     name: 'Route Messenger Turn Claim',
-    position: [2032, 560],
+    position: [2864, 560],
     parameters: {
       mode: 'rules',
       rules: {
@@ -425,60 +485,6 @@ const routeMessengerTurnClaim = switchCase({
       options: { fallbackOutput: 'none' },
     },
   },
-});
-
-const acknowledgeDuplicateMetaMessengerEvent = node({
-  type: 'n8n-nodes-base.respondToWebhook',
-  version: 1.5,
-  config: {
-    name: 'Acknowledge Duplicate Meta Messenger Event',
-    position: [1136, 720],
-    parameters: {
-      respondWith: 'text',
-      responseBody: 'EVENT_RECEIVED',
-      options: {
-        responseCode: 200,
-        responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/plain' }] },
-      },
-    },
-  },
-  output: [{ verified: true, duplicate: true }],
-});
-
-const acknowledgeIgnoredMetaMessengerEvent = node({
-  type: 'n8n-nodes-base.respondToWebhook',
-  version: 1.5,
-  config: {
-    name: 'Acknowledge Ignored Meta Messenger Event',
-    position: [1136, 816],
-    parameters: {
-      respondWith: 'text',
-      responseBody: 'EVENT_RECEIVED',
-      options: {
-        responseCode: 200,
-        responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/plain' }] },
-      },
-    },
-  },
-  output: [{ verified: true, ignored_event: true }],
-});
-
-const returnInvalidMetaSignature = node({
-  type: 'n8n-nodes-base.respondToWebhook',
-  version: 1.5,
-  config: {
-    name: 'Return Invalid Meta Signature',
-    position: [1136, 432],
-    parameters: {
-      respondWith: 'text',
-      responseBody: 'Invalid signature',
-      options: {
-        responseCode: 403,
-        responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/plain' }] },
-      },
-    },
-  },
-  output: [{ verified: false }],
 });
 
 const widgetAssistantWebhook = trigger({
@@ -534,7 +540,7 @@ const getMessengerClinicContext = node({
   version: 4.4,
   config: {
     name: 'Get Messenger Clinic Context',
-    position: [688, 560],
+    position: [3088, 560],
     parameters: {
       method: 'POST',
       url: DJANGO_MESSENGER_AI_CONTEXT_URL_EXPR,
@@ -544,12 +550,35 @@ const getMessengerClinicContext = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $("Normalize Messenger Request").item.json.page_id } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ found: true, page_id: 'PAGE123', page_token: 'PAGE_TOKEN', clinic: { id: 1, name: 'Demo Clinic', timezone: 'Asia/Manila' }, current_time: { timezone: 'Asia/Manila', now: '2026-06-01T09:00:00+08:00', today: '2026-06-01' }, ai: { is_ai_enabled: true, instructions: 'Be helpful.', fallback_message: MESSENGER_FALLBACK }, services: [], faqs: [] }],
+});
+
+const attachMessengerContext = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Attach Messenger Context',
+    position: [3312, 560],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const sourceItems = $items('Route Messenger Turn Claim', 0);
+return $input.all().map((inputItem, itemIndex) => {
+  const source = sourceItems[itemIndex]?.json || {};
+  const context = inputItem.json || {};
+  return { json: {
+    ...source,
+    context,
+    access_token: context.page_token || ''
+  } };
+});`,
+    },
+  },
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message: 'New Messenger messages in order:\n- June 15\n- Cleaning', raw_message: 'Cleaning', raw_postback: '', turn_token: 'turn-token', input_sequence: 2, access_token: 'PAGE_TOKEN', context: { found: true, ai: { is_ai_enabled: true } } }],
 });
 
 const getWidgetClinicContext = node({
@@ -580,18 +609,16 @@ const buildMessengerSharedInput = node({
   version: 2,
   config: {
     name: 'Build Messenger Shared Input',
-    position: [912, 560],
+    position: [3536, 560],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const sources = $items('Normalize Messenger Request');
-const claims = $items('Claim Messenger Turn');
-return $input.all().map((input, itemIndex) => {
-  const rawContext = input.json || {};
-  const { page_token: pageToken, ...safeContext } = rawContext;
-  const source = sources[itemIndex]?.json || {};
-  const claim = claims[itemIndex]?.json || {};
+      jsCode: `return $input.all().map((inputItem) => {
+  const input = inputItem.json || {};
+  const rawContext = input.context || {};
+  const { page_token: pageToken, page_token_available: pageTokenAvailable, ...safeContext } = rawContext;
+  const claim = input.claim || {};
   const aiVersion = safeContext.ai?.settings_updated_at || 'unversioned';
-  return { json: { ...source, raw_message: source.message, raw_postback: source.postback, message: claim.message || source.message, turn_token: claim.turn_token || '', input_sequence: claim.input_sequence || 0, turn_messages: claim.messages || [], history: claim.history || [], session_key: source.session_key + ':ai-settings:' + aiVersion + ':turn:' + (claim.turn_token || 'no-turn'), access_token: pageToken || '', context: safeContext, fallback_message: safeContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
+  return { json: { ...input, message: claim.message || input.message || '', turn_token: claim.turn_token || input.turn_token || '', input_sequence: claim.input_sequence || input.input_sequence || 0, turn_messages: claim.messages || input.turn_messages || [], history: claim.history || input.history || [], session_key: input.session_key + ':ai-settings:' + aiVersion + ':turn:' + (claim.turn_token || input.turn_token || 'no-turn'), access_token: pageToken || input.access_token || '', context: safeContext, fallback_message: safeContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
 });`,
     },
   },
@@ -695,232 +722,6 @@ const routeAssistantMode = switchCase({
   },
 });
 
-const sharedChatModel = languageModel({
-  type: '@n8n/n8n-nodes-langchain.lmChatOpenAi',
-  version: 1.3,
-  config: {
-    name: 'Shared Chat Model',
-    position: [1536, 1040],
-    parameters: {
-      model: { __rl: true, value: 'deepseek-ai/DeepSeek-V4-Flash', mode: 'list', cachedResultName: 'deepseek-ai/DeepSeek-V4-Flash' },
-      responsesApiEnabled: false,
-      options: { temperature: 0.2 },
-    },
-    credentials: { openAiApi: newCredential('OpenAI account', 's8YZSke1JLPd3A2x') },
-  },
-  output: [{ response: 'Assistant reply' }],
-});
-
-const sharedConversationMemory = memory({
-  type: '@n8n/n8n-nodes-langchain.memoryBufferWindow',
-  version: 1.4,
-  config: {
-    name: 'Shared Conversation Memory',
-    position: [1664, 1040],
-    parameters: {
-      sessionIdType: 'customKey',
-      sessionKey: expr('{{ $("Shared AI Input").item.json.session_key + ":shared:v4:" + ($("Shared AI Input").item.json.context?.ai?.settings_updated_at || "unversioned") }}'),
-      contextWindowLength: 8,
-    },
-  },
-  output: [{ messages: [] }],
-});
-
-const matchServicesTool = tool({
-  type: 'n8n-nodes-base.httpRequestTool',
-  version: 4.4,
-  config: {
-    name: 'match_services',
-    position: [1792, 1040],
-    parameters: {
-      method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? (' + DJANGO_MESSENGER_AI_SERVICES_URL_EXPR + ') : (' + DJANGO_WIDGET_AI_SERVICES_URL_EXPR + ') }}'),
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: {
-        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
-        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
-        query: fromAi('query', 'Service name or user phrase to match against clinic services'),
-      },
-      options: { timeout: 15000 },
-      optimizeResponse: true,
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ found: true, matches: [] }],
-});
-
-const checkAvailabilityTool = tool({
-  type: 'n8n-nodes-base.httpRequestTool',
-  version: 4.4,
-  config: {
-    name: 'check_availability',
-    position: [1920, 1040],
-    parameters: {
-      method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? (' + DJANGO_MESSENGER_AI_AVAILABILITY_URL_EXPR + ') : (' + DJANGO_WIDGET_AI_AVAILABILITY_URL_EXPR + ') }}'),
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: {
-        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
-        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
-        service_id: fromAi('service_id', 'Numeric service ID selected from clinic services'),
-        preferred_starts_at: fromAi('preferred_starts_at', 'Clinic-local ISO datetime with timezone offset when the user gives an exact time, otherwise blank'),
-        preferred_date: fromAi('preferred_date', 'Clinic-local requested appointment date as YYYY-MM-DD when the user asks about a date, otherwise blank'),
-      },
-      options: { timeout: 15000 },
-      optimizeResponse: true,
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ found: true, available: true, alternatives: [] }],
-});
-
-const bookConfirmedAppointmentTool = tool({
-  type: 'n8n-nodes-base.httpRequestTool',
-  version: 4.4,
-  config: {
-    name: 'book_confirmed_appointment',
-    position: [2048, 1040],
-    parameters: {
-      method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? (' + DJANGO_MESSENGER_AI_BOOK_URL_EXPR + ') : (' + DJANGO_WIDGET_AI_BOOK_URL_EXPR + ') }}'),
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: {
-        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
-        psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
-        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
-        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
-        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
-        service_id: fromAi('service_id', 'Numeric service ID selected from clinic services'),
-        starts_at: fromAi('starts_at', 'Confirmed appointment start time as clinic-local ISO 8601 datetime with timezone offset'),
-        full_name: fromAi('full_name', 'Patient full name'),
-        phone: fromAi('phone', 'Patient phone number'),
-        email: fromAi('email', 'Patient email required for booking'),
-        reason: fromAi('reason', 'Patient reason or notes if provided, otherwise blank'),
-        confirmed: fromAi('confirmed', 'Boolean true only after the user explicitly confirms the summarized appointment'),
-      },
-      options: { timeout: 15000 },
-      optimizeResponse: true,
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ created: false, error: 'Appointment creation requires explicit user confirmation.' }],
-});
-
-const findVerifiedAppointmentTool = tool({
-  type: 'n8n-nodes-base.httpRequestTool',
-  version: 4.4,
-  config: {
-    name: 'find_verified_appointment',
-    position: [2176, 1040],
-    parameters: {
-      method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? (' + DJANGO_MESSENGER_AI_APPOINTMENT_LOOKUP_URL_EXPR + ') : (' + DJANGO_WIDGET_AI_APPOINTMENT_LOOKUP_URL_EXPR + ') }}'),
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: {
-        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
-        psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
-        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
-        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
-        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
-        reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
-        phone: fromAi('phone', 'Patient phone number for verification'),
-      },
-      options: { timeout: 15000 },
-      optimizeResponse: true,
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ found: false, error: 'Appointment not found. Please check the reference code and phone number.' }],
-});
-
-const cancelVerifiedAppointmentTool = tool({
-  type: 'n8n-nodes-base.httpRequestTool',
-  version: 4.4,
-  config: {
-    name: 'cancel_verified_appointment',
-    position: [2304, 1040],
-    parameters: {
-      method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? (' + DJANGO_MESSENGER_AI_APPOINTMENT_CANCEL_URL_EXPR + ') : (' + DJANGO_WIDGET_AI_APPOINTMENT_CANCEL_URL_EXPR + ') }}'),
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: {
-        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
-        psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
-        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
-        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
-        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
-        reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
-        phone: fromAi('phone', 'Patient phone number for verification'),
-        confirmed: fromAi('confirmed', 'Boolean true only after the user explicitly confirms the cancellation summary'),
-        reason: fromAi('reason', 'Cancellation reason if the patient provided one, otherwise blank'),
-      },
-      options: { timeout: 15000 },
-      optimizeResponse: true,
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ cancelled: false, error: 'Appointment change requires explicit user confirmation.' }],
-});
-
-const rescheduleVerifiedAppointmentTool = tool({
-  type: 'n8n-nodes-base.httpRequestTool',
-  version: 4.4,
-  config: {
-    name: 'reschedule_verified_appointment',
-    position: [2432, 1040],
-    parameters: {
-      method: 'POST',
-      url: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? (' + DJANGO_MESSENGER_AI_APPOINTMENT_RESCHEDULE_URL_EXPR + ') : (' + DJANGO_WIDGET_AI_APPOINTMENT_RESCHEDULE_URL_EXPR + ') }}'),
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: {
-        page_id: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.page_id : "" }}'),
-        psid: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.psid : "" }}'),
-        turn_token: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.turn_token : "" }}'),
-        input_sequence: expr('{{ $("Shared AI Input").item.json.channel === "messenger" ? $("Shared AI Input").item.json.input_sequence : 0 }}'),
-        clinic_slug: expr('{{ $("Shared AI Input").item.json.channel === "widget" ? $("Shared AI Input").item.json.clinic_slug : "" }}'),
-        reference_code: fromAi('reference_code', 'Appointment reference code provided by the patient'),
-        phone: fromAi('phone', 'Patient phone number for verification'),
-        starts_at: fromAi('starts_at', 'Confirmed new appointment start time as clinic-local ISO 8601 datetime with timezone offset'),
-        confirmed: fromAi('confirmed', 'Boolean true only after the user explicitly confirms the reschedule summary'),
-      },
-      options: { timeout: 15000 },
-      optimizeResponse: true,
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ rescheduled: false, error: 'Appointment change requires explicit user confirmation.' }],
-});
-
 const getMessengerQuickReplies = node({
   type: 'n8n-nodes-base.httpRequest',
   version: 4.4,
@@ -944,6 +745,31 @@ const getMessengerQuickReplies = node({
   output: [{ replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }], page_token: 'PAGE_TOKEN' }],
 });
 
+const attachMessengerQuickRepliesInput = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Attach Messenger Quick Replies Input',
+    position: [1968, 520],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const sourceItems = $items('Route Assistant Mode', 1);
+return $input.all().map((inputItem, itemIndex) => {
+  const source = sourceItems[itemIndex]?.json || {};
+  const response = inputItem.json || {};
+  return { json: {
+    ...source,
+    quick_reply_response: response,
+    replies: Array.isArray(response.replies) ? response.replies : [],
+    page_token: response.page_token || source.access_token || '',
+    access_token: response.page_token || source.access_token || ''
+  } };
+});`,
+    },
+  },
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, page_token: 'PAGE_TOKEN', access_token: 'PAGE_TOKEN', replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }] }],
+});
+
 const prepareMessengerQuickReplies = node({
   type: 'n8n-nodes-base.code',
   version: 2,
@@ -953,13 +779,13 @@ const prepareMessengerQuickReplies = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const items = [];
-const replyItems = $items('Get Messenger Quick Replies');
+const replyItems = $items('Attach Messenger Quick Replies Input');
 for (const [itemIndex, inputItem] of $input.all().entries()) {
   const completion = inputItem.json || {};
   if (completion.send_reply === false) { continue; }
-  const input = replyItems[itemIndex]?.json || inputItem.json || {};
+  const input = replyItems[itemIndex]?.json || {};
   const actions = Array.isArray(input.replies) ? input.replies : [];
-  const pageToken = input.page_token || '';
+  const pageToken = input.page_token || input.access_token || '';
   const psid = input.psid || '';
   if (!pageToken || !psid) { continue; }
   for (const action of actions) {
@@ -984,51 +810,46 @@ return items;`,
   output: [{ access_token: 'PAGE_TOKEN', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } } }],
 });
 
-const kliniAssistSharedAiAgent = node({
-  type: '@n8n/n8n-nodes-langchain.agent',
-  version: 3.1,
+const callDjangoAiGateway = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
   config: {
-    name: 'KliniAssist Shared AI Agent',
+    name: 'Call Django AI Gateway',
     position: [1744, 720],
     parameters: {
-      promptType: 'define',
-      text: expr('{{ $("Shared AI Input").item.json.message }}'),
-      options: {
-        systemMessage: expr('KliniAssist shared Messenger and Widget assistant.\n\n' +
-          'Clinic instructions:\n{{ $("Shared AI Input").item.json.context?.ai?.instructions || "No custom clinic instructions configured." }}\n\n' +
-          'Communication tone:\n' +
-          '- Preset: {{ $("Shared AI Input").item.json.context?.ai?.communication_tone_label || "Professional" }}\n' +
-          '- Custom clinic tone notes: {{ $("Shared AI Input").item.json.context?.ai?.custom_tone_instructions || "None" }}\n' +
-          'Tone affects wording only and must not override clinic data, tool results, availability, booking confirmation, privacy, medical safety, or channel rules.\n\n' +
-          'Channel: {{ $("Shared AI Input").item.json.channel }}\n' +
-          'Clinic context JSON:\n{{ JSON.stringify($("Shared AI Input").item.json.context || {}) }}\n\n' +
-          'Current clinic date/time:\n' +
-          '- Timezone: {{ $("Shared AI Input").item.json.context?.current_time?.timezone || $("Shared AI Input").item.json.context?.clinic?.timezone || "UTC" }}\n' +
-          '- Now: {{ $("Shared AI Input").item.json.context?.current_time?.now || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISO() }}\n' +
-          '- Today: {{ $("Shared AI Input").item.json.context?.current_time?.today || $now.setZone($("Shared AI Input").item.json.context?.clinic?.timezone || "UTC").toISODate() }}\n\n' +
-          'Use business_hours and unavailable_dates from Clinic context JSON to answer general recurring schedule and clinic-closure questions. Do not answer specific appointment availability from business_hours alone. If requested booking or reschedule date is before Today, say previous dates are not available and appointments must use today or a future appointment date/time. Previous dates and past times are not available. Do not ask for a time, offer alternatives, or call availability for previous dates. Same-day bookings are valid only for future times. Use check_availability in the current turn for specific service/date/time slot availability, alternatives, or booking claims. Use match_services, check_availability, and book_confirmed_appointment for booking. Collect service, date/time, full name, phone, and email before booking. Ask for explicit confirmation before booking. Never expose secrets, invent clinic data, give medical diagnosis, or create appointments without tool validation. ' +
-          'Use find_verified_appointment before canceling or rescheduling. Ask for appointment reference code and phone number before appointment management lookup. Summarize the verified appointment and requested action before mutation. Ask for explicit confirmation before canceling or rescheduling. Use cancel_verified_appointment and reschedule_verified_appointment only after explicit confirmation. Do not use user-supplied appointment IDs, patient IDs, clinic IDs, or service IDs for appointment management. If appointment verification fails, use only the tool error and ask the user to re-enter the reference code and phone number. Never reveal, correct, infer, or confirm the stored appointment phone number, even if it appears in prior conversation, user messages, tool results, or memory. Never say booked under or similar wording with a phone number. Appointment summaries may show patient_phone_last4 only; do not display full patient phone numbers. ' +
-          'Use check_availability suggestion_type metadata: nearest_time means the requested time is unavailable; next_available_date means the requested date has no slots. ' +
-          'Use FAQ entries as clinic knowledge without citing the source. Do not say based on the FAQ, according to the FAQ, the FAQ says. ' +
-          'Messenger replies must be plain concise text. Widget replies must be concise and friendly.'),
-        maxIterations: 8,
-        returnIntermediateSteps: false,
-      },
+      method: 'POST',
+      url: DJANGO_AI_GATEWAY_REPLY_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { channel: $json.channel, page_id: $json.page_id || "", psid: $json.psid || "", turn_token: $json.turn_token || "", input_sequence: $json.input_sequence || 0, clinic_slug: $json.clinic_slug || "", message: $json.message || "", history: $json.history || [], context: $json.context || {} } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 30000 },
     },
-    subnodes: {
-      model: sharedChatModel,
-      memory: sharedConversationMemory,
-      tools: [
-        matchServicesTool,
-        checkAvailabilityTool,
-        bookConfirmedAppointmentTool,
-        findVerifiedAppointmentTool,
-        cancelVerifiedAppointmentTool,
-        rescheduleVerifiedAppointmentTool,
-      ],
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ reply: 'Assistant reply', fallback: false, error: '' }],
+});
+
+const attachDjangoAiGatewayInput = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Attach Django AI Gateway Input',
+    position: [1968, 720],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const sourceItems = $items('Route Assistant Mode', 0);
+return $input.all().map((inputItem, itemIndex) => {
+  const source = sourceItems[itemIndex]?.json || {};
+  const gateway = inputItem.json || {};
+  return { json: { ...source, gateway_response: gateway, ...gateway } };
+});`,
     },
   },
-  output: [{ output: 'Assistant reply' }],
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', access_token: 'PAGE_TOKEN', reply: 'Assistant reply', fallback: false, error: '' }],
 });
 
 const prepareSharedFallback = node({
@@ -1039,10 +860,10 @@ const prepareSharedFallback = node({
     position: [1600, 912],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `return $input.all().map((input) => {
-  const item = input.json || {};
+      jsCode: `return $input.all().map((inputItem) => {
+  const item = inputItem.json || {};
   const fallback = item.fallback_message || (item.channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}');
-  return { json: { output: fallback } };
+  return { json: { ...item, output: fallback } };
 });`,
     },
   },
@@ -1057,8 +878,7 @@ const prepareChannelReply = node({
     position: [2192, 800],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const sharedItems = $items('Shared AI Input');
-function redactPhoneLikeText(value) {
+      jsCode: `function redactPhoneLikeText(value) {
   return String(value || '').replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, (match) => {
     const digits = match.replace(/\\D/g, '');
     return digits.length >= 9 ? '[phone redacted]' : match;
@@ -1088,13 +908,12 @@ function stripAssistantReasoningText(value) {
   }
   return paragraphs.slice(firstPublicIndex).join('\\n\\n');
 }
-return $input.all().map((inputItem, itemIndex) => {
-  const input = inputItem.json || {};
-  const shared = sharedItems[itemIndex]?.json || {};
+return $input.all().map((inputItem) => {
+  const shared = inputItem.json || {};
   const context = shared.context || {};
   const channel = shared.channel || 'widget';
   const genericFallback = channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}';
-  let text = input.output || input.text || input.response || input.reply || shared.fallback_message || genericFallback;
+  let text = shared.output || shared.text || shared.response || shared.reply || shared.fallback_message || genericFallback;
   text = String(text).replace(/<think[\\s\\S]*?<\\/think>/gi, '').replace(/<\\/?think>/gi, '').trim();
   text = stripAssistantReasoningText(text);
   if (!text) {
@@ -1169,7 +988,7 @@ const completeMessengerTurn = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id || $("Shared AI Input").item.json.page_id, psid: $json.psid || $("Shared AI Input").item.json.psid, turn_token: $json.turn_token || $("Shared AI Input").item.json.turn_token, input_sequence: $json.input_sequence || $("Shared AI Input").item.json.input_sequence, reply_text: $json.reply_text || (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\n")) } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence, reply_text: $json.reply_text || "" } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
@@ -1192,7 +1011,7 @@ const completeMessengerQuickReplyTurn = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id || $("Shared AI Input").item.json.page_id, psid: $json.psid || $("Shared AI Input").item.json.psid, turn_token: $json.turn_token || $("Shared AI Input").item.json.turn_token, input_sequence: $json.input_sequence || $("Shared AI Input").item.json.input_sequence, reply_text: $json.reply_text || (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\n")) } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence || 0, reply_text: (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\n")) } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
@@ -1208,7 +1027,7 @@ const prepareCurrentMessengerReply = node({
     position: [2864, 640],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const replies = $items('Prepare Channel Reply');
+      jsCode: `const replies = $items('Route Channel Reply', 0);
 return $input.all().map((input, itemIndex) => {
   const completion = input.json || {};
   const reply = replies[itemIndex]?.json || {};
@@ -1264,11 +1083,13 @@ const sharedChannelReplyRoute = routeChannelReply
   .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
   .onCase(1, returnWidgetReply);
 
-const messengerAiReplyBranch = kliniAssistSharedAiAgent
+const messengerAiReplyBranch = callDjangoAiGateway
+  .to(attachDjangoAiGatewayInput)
   .to(prepareChannelReply)
   .to(sharedChannelReplyRoute);
 
 const messengerQuickReplyBranch = getMessengerQuickReplies
+  .to(attachMessengerQuickRepliesInput)
   .to(completeMessengerQuickReplyTurn)
   .to(prepareMessengerQuickReplies)
   .to(sendFacebookReply);
@@ -1283,24 +1104,24 @@ const assistantModeRoute = routeAssistantMode
   .onCase(2, sharedFallbackReplyBranch);
 
 const messengerAssistantBranch = getMessengerClinicContext
+  .to(attachMessengerContext)
   .to(buildMessengerSharedInput)
   .to(sharedAiInput)
   .to(resolveAssistantMode)
   .to(assistantModeRoute);
 
 const messengerClaimBranch = claimMessengerTurn
+  .to(attachMessengerTurnClaim)
   .to(routeMessengerTurnClaim.onCase(0, messengerAssistantBranch));
 
-const messengerRouteBranch = registerMessengerTurn
-  .to(routeMessengerTurnRegistration
-    .onCase(0, acknowledgeMetaMessengerEvent.to(messengerClaimBranch))
-    .onCase(1, acknowledgeQueuedMessengerTurn));
+const messengerRouteBranch = expandMessengerProcessableEvents
+  .to(registerMessengerTurn)
+  .to(attachMessengerTurnRegistration)
+  .to(routeMessengerTurnRegistration.onCase(0, messengerClaimBranch));
 
-const metaSignatureRoute = routeMetaSignature
-  .onCase(0, messengerRouteBranch)
-  .onCase(1, acknowledgeDuplicateMetaMessengerEvent)
-  .onCase(2, acknowledgeIgnoredMetaMessengerEvent)
-  .onCase(3, returnInvalidMetaSignature);
+const metaSignatureRoute = routeMetaWebhookResponse
+  .onCase(0, acknowledgeMetaMessengerEvent.to(messengerRouteBranch))
+  .onCase(1, returnInvalidMetaSignature);
 
 export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI Bridge')
   .add(metaWebhookVerification)
@@ -1309,6 +1130,7 @@ export default workflow('ZTBqwEzdll6TZsUU', 'KliniAssist Messenger + Widget AI B
   .add(metaMessengerEvents)
   .to(normalizeMessengerRequest)
   .to(verifyMetaSignature)
+  .to(prepareMetaWebhookResponse)
   .to(metaSignatureRoute)
   .add(widgetAssistantWebhook)
   .to(normalizeWidgetRequest)

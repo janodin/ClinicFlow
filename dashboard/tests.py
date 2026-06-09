@@ -911,7 +911,11 @@ def test_assistant_settings_page_shows_shared_ai_prompt_form(clinic_setup, clien
     assert b"Use a warm clinic tone." in response.content
     assert b"Use calm wording and avoid slang." in response.content
     assert b"Please call the clinic." in response.content
-    assert b"Website Booking Widget" in response.content
+    assert b"Website Booking Widget" not in response.content
+    assert b'name="widget_accent_color"' not in response.content
+    assert b'name="widget_welcome_message"' not in response.content
+    assert b"Recommended JavaScript launcher" not in response.content
+    assert b"Advanced iframe fallback" not in response.content
     assert b"widget_behavior_instructions" not in response.content
 
 
@@ -1037,23 +1041,32 @@ def test_assistant_settings_page_shows_messenger_response_mode_control(clinic_se
 
 
 @pytest.mark.django_db
-def test_assistant_settings_page_explains_launcher_first_embed_options(clinic_setup, client):
+def test_booking_widget_page_shows_full_configuration(clinic_setup, client):
     clinic, service, user = clinic_setup
+    clinic.widget_accent_color = "#0891b2"
+    clinic.widget_welcome_message = "Book online in a few steps."
+    clinic.save(update_fields=["widget_accent_color", "widget_welcome_message"])
     client.force_login(user)
 
-    response = client.get(reverse("dashboard:assistant_settings"))
+    response = client.get(reverse("dashboard:widget_embed"))
     content = response.content.decode()
 
     assert response.status_code == 200
+    assert ">Booking Widget</h1>" in content
+    assert "Customize your website booking widget appearance, preview, public link, and embed code." in content
+    assert 'name="widget_accent_color"' in content
+    assert 'name="widget_welcome_message"' in content
+    assert "Book online in a few steps." in content
     assert "previewOpen: false" in content
     assert "@click=\"previewOpen = true\"" in content
     assert "window.addEventListener('message'" in content
     assert "kliniassist-minimize" in content
     assert "x-show=\"previewOpen\" x-transition x-cloak" in content
-    assert "Minimize preview" not in content
     assert "Click the launcher to preview how patients open the widget." in content
     assert "aria-label=\"Open booking widget preview\"" in content
     assert "Book an appointment" in content
+    assert "Share Your Widget" in content
+    assert reverse("widget:home", args=[clinic.slug]) in content
     assert "Recommended JavaScript launcher" in content
     assert "Adds a small bottom-right booking button" in content
     assert "full widget opens after click" in content
@@ -1062,7 +1075,6 @@ def test_assistant_settings_page_explains_launcher_first_embed_options(clinic_se
     assert "Embeds the full panel directly" in content
     assert "visible immediately" in content
     assert "&lt;iframe src=" in content
-    assert "Preview shows the full widget after a visitor opens the bottom-right launcher." not in content
 
 
 @pytest.mark.django_db
@@ -1450,6 +1462,94 @@ def test_owner_can_save_assistant_ai_settings(clinic_setup, client):
 
 
 @pytest.mark.django_db
+def test_owner_can_save_booking_widget_settings_from_widget_page(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:widget_embed"),
+        {
+            "widget_accent_color": "#0e7490",
+            "widget_welcome_message": "Choose a service and time online.",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.url == reverse("dashboard:widget_embed")
+    clinic.refresh_from_db()
+    assert clinic.widget_accent_color == "#0e7490"
+    assert clinic.widget_welcome_message == "Choose a service and time online."
+
+
+@pytest.mark.django_db
+def test_staff_cannot_save_booking_widget_settings(clinic_setup, client):
+    User = get_user_model()
+    clinic, service, owner = clinic_setup
+    clinic.widget_accent_color = "#06b6d4"
+    clinic.widget_welcome_message = "Original widget welcome."
+    clinic.save(update_fields=["widget_accent_color", "widget_welcome_message"])
+    staff = User.objects.create_user(username="widget-staff@example.com", email="widget-staff@example.com", password="password123")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.post(
+        reverse("dashboard:widget_embed"),
+        {
+            "widget_accent_color": "#0e7490",
+            "widget_welcome_message": "Staff should not save this.",
+        },
+    )
+
+    assert response.status_code == 403
+    clinic.refresh_from_db()
+    assert clinic.widget_accent_color == "#06b6d4"
+    assert clinic.widget_welcome_message == "Original widget welcome."
+
+
+@pytest.mark.django_db
+def test_booking_widget_settings_save_is_scoped_to_current_clinic(client):
+    User = get_user_model()
+    owner_a = User.objects.create_user(username="widget-owner-a@example.com", email="widget-owner-a@example.com", password="password123")
+    group_a = ClinicGroup.objects.create(name="Widget A Group", owner=owner_a)
+    clinic_a = Clinic.objects.create(
+        group=group_a,
+        name="Widget A",
+        slug="widget-a",
+        widget_accent_color="#06b6d4",
+        widget_welcome_message="Clinic A original.",
+    )
+    ClinicMembership.objects.create(clinic=clinic_a, user=owner_a, role=ClinicMembership.ROLE_OWNER)
+
+    owner_b = User.objects.create_user(username="widget-owner-b@example.com", email="widget-owner-b@example.com", password="password123")
+    group_b = ClinicGroup.objects.create(name="Widget B Group", owner=owner_b)
+    clinic_b = Clinic.objects.create(
+        group=group_b,
+        name="Widget B",
+        slug="widget-b",
+        widget_accent_color="#0891b2",
+        widget_welcome_message="Clinic B original.",
+    )
+    ClinicMembership.objects.create(clinic=clinic_b, user=owner_b, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner_b)
+
+    response = client.post(
+        reverse("dashboard:widget_embed"),
+        {
+            "widget_accent_color": "#0e7490",
+            "widget_welcome_message": "Clinic B updated widget.",
+        },
+    )
+
+    assert response.status_code == 302
+    clinic_a.refresh_from_db()
+    clinic_b.refresh_from_db()
+    assert clinic_a.widget_accent_color == "#06b6d4"
+    assert clinic_a.widget_welcome_message == "Clinic A original."
+    assert clinic_b.widget_accent_color == "#0e7490"
+    assert clinic_b.widget_welcome_message == "Clinic B updated widget."
+
+
+@pytest.mark.django_db
 def test_owner_can_enable_assistant_ai_settings(clinic_setup, client):
     from clinics.models import ClinicAISettings
 
@@ -1636,6 +1736,199 @@ def test_owner_can_save_assistant_ai_settings_without_messenger_connection(clini
     assert settings.messenger_response_mode == ClinicAISettings.MESSENGER_MODE_AI
     assert settings.instructions == "Shared website and Messenger instructions."
     assert settings.fallback_message == "Shared fallback."
+
+
+@pytest.mark.django_db
+def test_assistant_settings_page_shows_ai_provider_form_without_secret(clinic_setup, client):
+    from clinics.models import ClinicAIProviderSettings
+
+    clinic, service, owner = clinic_setup
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
+        model="gpt-4o",
+        fallback_model="gpt-4o-mini",
+        api_key="sk-dashboard-secret",
+        is_enabled=True,
+    )
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:assistant_settings"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'data-section="ai-provider-settings"' in content
+    assert "AI Provider" in content
+    assert "Clinic-owned" in content
+    assert 'data-ai-provider-layout="responsive-grid"' in content
+    assert 'data-ai-provider-field="provider"' in content
+    assert 'data-ai-provider-field="base-url"' in content
+    assert 'data-ai-provider-field="api-key"' in content
+    assert 'data-ai-provider-field="primary-model"' in content
+    assert 'data-ai-provider-field="fallback-model"' in content
+    assert "cf-badge-active" in content
+    assert "OpenAI" in content
+    assert "Base URL" in content
+    assert "Primary model" in content
+    assert "Fallback model" in content
+    assert "API key" in content
+    assert 'name="openai_model"' in content
+    assert 'name="openai_fallback_model"' in content
+    assert "Custom model ID" not in content
+    assert "Custom fallback model ID" not in content
+    assert 'name="custom_model"' not in content
+    assert 'name="custom_fallback_model"' not in content
+    assert "retries only if the primary model fails" in content
+    assert "gpt-4o-mini" in content
+    assert "gpt-4o" in content
+    assert "sk-dashboard-secret" not in content
+    assert "************" in content
+
+
+@pytest.mark.django_db
+def test_owner_can_save_ai_provider_settings_from_assistant_page(clinic_setup, client):
+    from clinics.models import ClinicAIProviderSettings
+
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("dashboard:assistant_settings"),
+        {
+            "_form": "ai_provider_settings",
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI,
+            "base_url": "https://ignored.example/v1",
+            "openai_model": "gpt-4o",
+            "openai_fallback_model": "gpt-4o-mini",
+            "api_key": "sk-owner-provider-key",
+            "is_enabled": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    settings = ClinicAIProviderSettings.objects.get(clinic=clinic)
+    assert settings.provider == ClinicAIProviderSettings.PROVIDER_OPENAI
+    assert settings.base_url == ClinicAIProviderSettings.OPENAI_BASE_URL
+    assert settings.model == "gpt-4o"
+    assert settings.fallback_model == "gpt-4o-mini"
+    assert settings.api_key == "sk-owner-provider-key"
+    assert settings.is_enabled is True
+
+
+@pytest.mark.django_db
+def test_ai_provider_fallback_model_errors_render_on_assistant_page(client, monkeypatch, clinic_setup):
+    from clinics.models import ClinicAIProviderSettings
+
+    monkeypatch.setattr(
+            "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("dashboard:assistant_settings"),
+        {
+            "_form": "ai_provider_settings",
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "gpt-4o",
+            "openai_fallback_model": "",
+            "api_key": "sk-provider-key",
+            "is_enabled": "on",
+        },
+    )
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert "Fallback model is required when the AI provider is enabled." in content
+
+
+@pytest.mark.django_db
+def test_staff_cannot_save_ai_provider_settings(clinic_setup, client):
+    from clinics.models import ClinicAIProviderSettings
+
+    User = get_user_model()
+    clinic, service, owner = clinic_setup
+    staff = User.objects.create_user(username="staff-provider@example.com", email="staff-provider@example.com", password="password123")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    settings = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
+        model="gpt-4o-mini",
+        fallback_model="gpt-4o",
+        api_key="sk-original-key",
+        is_enabled=False,
+    )
+    client.force_login(staff)
+
+    response = client.post(
+        reverse("dashboard:assistant_settings"),
+        {
+            "_form": "ai_provider_settings",
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI,
+            "base_url": ClinicAIProviderSettings.OPENAI_BASE_URL,
+            "openai_model": "gpt-4o",
+            "openai_fallback_model": "gpt-4o-mini",
+            "api_key": "sk-staff-key",
+            "is_enabled": "on",
+        },
+    )
+
+    assert response.status_code == 403
+    settings.refresh_from_db()
+    assert settings.model == "gpt-4o-mini"
+    assert settings.fallback_model == "gpt-4o"
+    assert settings.api_key == "sk-original-key"
+    assert settings.is_enabled is False
+
+
+@pytest.mark.django_db
+def test_ai_provider_settings_save_is_scoped_to_current_clinic(client, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+
+    monkeypatch.setattr(
+            "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+
+    User = get_user_model()
+    owner_a = User.objects.create_user(username="provider-a@example.com", email="provider-a@example.com", password="password123")
+    group_a = ClinicGroup.objects.create(name="Provider A Group", owner=owner_a)
+    clinic_a = Clinic.objects.create(group=group_a, name="Provider A", slug="provider-a")
+    ClinicMembership.objects.create(clinic=clinic_a, user=owner_a, role=ClinicMembership.ROLE_OWNER)
+    settings_a = ClinicAIProviderSettings.objects.create(clinic=clinic_a, api_key="sk-a", model="gpt-4o-mini", fallback_model="gpt-4o")
+
+    owner_b = User.objects.create_user(username="provider-b@example.com", email="provider-b@example.com", password="password123")
+    group_b = ClinicGroup.objects.create(name="Provider B Group", owner=owner_b)
+    clinic_b = Clinic.objects.create(group=group_b, name="Provider B", slug="provider-b")
+    ClinicMembership.objects.create(clinic=clinic_b, user=owner_b, role=ClinicMembership.ROLE_OWNER)
+    settings_b = ClinicAIProviderSettings.objects.create(clinic=clinic_b, api_key="sk-b", model="gpt-4o-mini", fallback_model="gpt-4o")
+    client.force_login(owner_b)
+
+    response = client.post(
+        reverse("dashboard:assistant_settings"),
+        {
+            "_form": "ai_provider_settings",
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "gpt-4o",
+            "openai_fallback_model": "gpt-4o-mini",
+            "api_key": "sk-b-new",
+            "is_enabled": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    settings_a.refresh_from_db()
+    settings_b.refresh_from_db()
+    assert settings_a.api_key == "sk-a"
+    assert settings_a.model == "gpt-4o-mini"
+    assert settings_a.fallback_model == "gpt-4o"
+    assert settings_b.api_key == "sk-b-new"
+    assert settings_b.model == "gpt-4o"
+    assert settings_b.fallback_model == "gpt-4o-mini"
 
 
 @pytest.mark.django_db
@@ -1841,6 +2134,7 @@ def test_widget_embed_page_explains_recommended_launcher_and_advanced_iframe(cli
     content = response.content.decode()
 
     assert response.status_code == 200
+    assert ">Booking Widget</h1>" in content
     assert "Recommended JavaScript launcher" in content
     assert "Adds a small bottom-right booking button" in content
     assert "full widget opens after click" in content

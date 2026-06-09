@@ -28,7 +28,9 @@
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:services" icon="stethoscope" label="Services" %}
       <p class="px-3 pb-1.5 pt-4 text-xs font-semibold uppercase tracking-widest text-[var(--cf-faint)]">Setup</p>
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:assistant_settings" icon="message-circle" label="Assistant" %}
+      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:widget_embed" icon="panel-top-open" label="Booking Widget" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:messenger_settings" icon="messages-square" label="Messenger" %}
+      {% include "dashboard/partials/nav_link.html" with url_name="dashboard:yakap" icon="shield-check" label="YAKAP" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:settings" icon="settings" label="Settings" %}
       {% include "dashboard/partials/nav_link.html" with url_name="dashboard:billing" icon="credit-card" label="Billing" %}
     </nav>
@@ -115,7 +117,7 @@
         <i data-lucide="stethoscope" class="h-5 w-5"></i>
         <span>Services</span>
       </a>
-      <a href="{% url 'dashboard:settings' %}" @click.prevent="sidebarOpen = true" aria-label="Open setup navigation" class="flex min-w-0 flex-col items-center gap-0.5 rounded-2xl p-2 px-1 text-xs font-semibold {% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'assistant_settings' or request.resolver_match.url_name == 'messenger_settings' or request.resolver_match.url_name == 'billing' or request.resolver_match.url_name == 'profile' %}text-[var(--cf-brand)] bg-[var(--cf-brand-soft)]{% else %}text-[var(--cf-muted)]{% endif %}">
+      <a href="{% url 'dashboard:settings' %}" @click.prevent="sidebarOpen = true" aria-label="Open setup navigation" class="flex min-w-0 flex-col items-center gap-0.5 rounded-2xl p-2 px-1 text-xs font-semibold {% if request.resolver_match.url_name == 'settings' or request.resolver_match.url_name == 'assistant_settings' or request.resolver_match.url_name == 'widget_embed' or request.resolver_match.url_name == 'messenger_settings' or request.resolver_match.url_name == 'yakap' or request.resolver_match.url_name == 'billing' or request.resolver_match.url_name == 'profile' %}text-[var(--cf-brand)] bg-[var(--cf-brand-soft)]{% else %}text-[var(--cf-muted)]{% endif %}">
         <i data-lucide="ellipsis" class="h-5 w-5"></i>
         <span>More</span>
       </a>

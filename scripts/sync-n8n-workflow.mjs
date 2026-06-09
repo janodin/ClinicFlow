@@ -9,9 +9,16 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
 const defaultWorkflowPath = resolve(repoRoot, 'n8n_combined_messenger_widget_ai_bridge.ts');
 const defaultEnvPath = resolve(repoRoot, '.env');
-const REQUIRED_LIVE_PHRASES = [
-  'Previous dates and past times are not available',
-  'Do not ask for a time, offer alternatives, or call availability for previous dates',
+const REQUIRED_WORKFLOW_MARKERS = [
+  'Call Django AI Gateway',
+  '/messenger/ai/gateway/reply/',
+];
+const FORBIDDEN_WORKFLOW_MARKERS = [
+  'Shared Chat Model',
+  'Shared Conversation Memory',
+  'KliniAssist Shared AI Agent',
+  'OpenAI account',
+  'deepseek-ai/DeepSeek-V4-Flash',
 ];
 
 function parseArgs(argv) {
@@ -105,10 +112,15 @@ function buildWorkflowPayload(workflowJson) {
   };
 }
 
-function assertRequiredPhrases(value, context) {
-  for (const phrase of REQUIRED_LIVE_PHRASES) {
-    if (!value.includes(phrase)) {
-      throw new Error(`${context} is missing required phrase: ${phrase}`);
+function assertWorkflowMarkers(value, context) {
+  for (const marker of REQUIRED_WORKFLOW_MARKERS) {
+    if (!value.includes(marker)) {
+      throw new Error(`${context} is missing required marker: ${marker}`);
+    }
+  }
+  for (const marker of FORBIDDEN_WORKFLOW_MARKERS) {
+    if (value.includes(marker)) {
+      throw new Error(`${context} still includes forbidden marker: ${marker}`);
     }
   }
 }
@@ -141,7 +153,7 @@ async function main() {
   loadEnvFile(options.envPath);
 
   const workflowCode = readFileSync(options.workflowPath, 'utf-8');
-  assertRequiredPhrases(workflowCode, 'Workflow source');
+  assertWorkflowMarkers(workflowCode, 'Workflow source');
 
   const builder = parseWorkflowCodeToBuilder(stripSdkImportBlock(workflowCode));
   const validation = builder.validate();
@@ -153,7 +165,7 @@ async function main() {
   }
 
   const workflowJson = builder.toJSON();
-  assertRequiredPhrases(JSON.stringify(workflowJson), 'Compiled workflow JSON');
+  assertWorkflowMarkers(JSON.stringify(workflowJson), 'Compiled workflow JSON');
   const workflowId = process.env.N8N_WORKFLOW_ID?.trim() || workflowJson.id;
   if (!workflowId) {
     throw new Error('N8N_WORKFLOW_ID is required because the workflow source does not include an ID.');
@@ -182,7 +194,7 @@ async function main() {
   }
 
   const liveWorkflow = await n8nRequest(apiBase, apiKey, `api/v1/workflows/${workflowId}`);
-  assertRequiredPhrases(JSON.stringify(liveWorkflow), 'Live n8n workflow');
+  assertWorkflowMarkers(JSON.stringify(liveWorkflow), 'Live n8n workflow');
   console.log(`n8n workflow ${workflowId} is synced and verified.`);
 }
 

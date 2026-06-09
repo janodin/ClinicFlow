@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     "patients",
     "scheduling",
     "appointments",
+    "yakap",
     "dashboard",
     "widget",
     "messenger",
@@ -209,6 +210,8 @@ MESSENGER_SESSION_TIMEOUT_MINUTES = int(os.getenv("MESSENGER_SESSION_TIMEOUT_MIN
 N8N_WEBHOOK_SECRET = os.getenv("N8N_WEBHOOK_SECRET", "")
 ASSISTANT_N8N_WEBHOOK_URL = os.getenv("ASSISTANT_N8N_WEBHOOK_URL", "")
 ASSISTANT_N8N_TIMEOUT_SECONDS = int(os.getenv("ASSISTANT_N8N_TIMEOUT_SECONDS", "12"))
+AI_PROVIDER_TIMEOUT_SECONDS = int(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "20"))
+AI_GATEWAY_MAX_TOOL_ITERATIONS = int(os.getenv("AI_GATEWAY_MAX_TOOL_ITERATIONS", "5"))
 META_MESSENGER_N8N_WEBHOOK_URL = os.getenv("META_MESSENGER_N8N_WEBHOOK_URL", "")
 
 # Default primary key field type

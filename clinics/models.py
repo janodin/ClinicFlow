@@ -173,6 +173,54 @@ class ClinicAISettings(TimeStampedModel):
         return f"ClinicAISettings({self.clinic.name})"
 
 
+class ClinicAIProviderSettings(TimeStampedModel):
+    PROVIDER_OPENAI = "openai"
+    PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"
+    PROVIDER_CHOICES = [
+        (PROVIDER_OPENAI, "OpenAI"),
+        (PROVIDER_OPENAI_COMPATIBLE, "OpenAI-compatible"),
+    ]
+
+    OPENAI_BASE_URL = "https://api.openai.com/v1"
+    DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+    OPENAI_MODEL_GPT_4O_MINI = "gpt-4o-mini"
+    OPENAI_MODEL_GPT_4O = "gpt-4o"
+    OPENAI_MODEL_CHOICES = [
+        (OPENAI_MODEL_GPT_4O_MINI, "GPT-4o mini - recommended"),
+        (OPENAI_MODEL_GPT_4O, "GPT-4o - higher quality"),
+    ]
+
+    clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="ai_provider_settings")
+    provider = models.CharField(max_length=32, choices=PROVIDER_CHOICES, default=PROVIDER_OPENAI)
+    base_url = models.URLField(max_length=255, default=OPENAI_BASE_URL)
+    model = models.CharField(max_length=120, default=DEFAULT_OPENAI_MODEL)
+    fallback_model = models.CharField(max_length=120, default=DEFAULT_OPENAI_MODEL)
+    api_key = models.CharField(max_length=512, blank=True, default="")
+    is_enabled = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = "Clinic AI Provider Settings"
+        verbose_name_plural = "Clinic AI Provider Settings"
+
+    @property
+    def has_api_key(self):
+        return bool((self.api_key or "").strip())
+
+    @property
+    def is_configured(self):
+        return bool(
+            self.is_enabled
+            and self.provider in {self.PROVIDER_OPENAI, self.PROVIDER_OPENAI_COMPATIBLE}
+            and (self.base_url or "").strip()
+            and (self.model or "").strip()
+            and (self.fallback_model or "").strip()
+            and self.has_api_key
+        )
+
+    def __str__(self):
+        return f"ClinicAIProviderSettings({self.clinic.name})"
+
+
 class ClinicMembership(TimeStampedModel):
     ROLE_OWNER = "owner"
     ROLE_STAFF = "staff"
