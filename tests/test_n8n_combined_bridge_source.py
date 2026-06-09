@@ -1,8 +1,52 @@
+import json
+import subprocess
 from pathlib import Path
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "n8n_combined_messenger_widget_ai_bridge.ts"
 LEGACY_SOURCE = Path(__file__).resolve().parents[1] / "messenger-workflow.ts"
+
+
+def _extract_prepare_channel_reply_js(source):
+    prepare_start = source.index("name: 'Prepare Channel Reply'")
+    js_start = source.index("jsCode: `", prepare_start) + len("jsCode: `")
+    js_end = source.index("`,\n    },", js_start)
+    return source[js_start:js_end]
+
+
+def _run_prepare_channel_reply(agent_output, channel="messenger"):
+    source = SOURCE.read_text(encoding="utf-8")
+    js_code = _extract_prepare_channel_reply_js(source)
+    shared_items = json.dumps([
+        {
+            "json": {
+                "channel": channel,
+                "psid": "PSID123",
+                "access_token": "PAGE_TOKEN",
+                "context": {},
+            }
+        }
+    ])
+    input_items = json.dumps([{"json": {"output": agent_output}}])
+    wrapper = f"""
+const MESSENGER_FALLBACK = 'Messenger fallback';
+const WIDGET_FALLBACK = 'Widget fallback';
+const sharedItems = {shared_items};
+const inputItems = {input_items};
+const $items = (name) => name === 'Shared AI Input' ? sharedItems : [];
+const $input = {{ all: () => inputItems }};
+const code = `{js_code}`;
+const result = Function('$items', '$input', code)($items, $input);
+process.stdout.write(JSON.stringify(result));
+"""
+
+    result = subprocess.run(
+        ["node", "-e", wrapper],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(result.stdout)[0]["json"]["reply_text"]
 
 
 def test_combined_bridge_uses_one_shared_ai_core():
@@ -326,6 +370,42 @@ def test_channel_reply_code_preserves_regex_escapes_for_n8n():
     assert "jsCode: `const sharedItems = $items('Shared AI Input');" in source
     assert "<think[\\\\s\\\\S]*?<\\\\/think>" in source
     assert "<\\\\/?think>" in source
+
+
+def test_channel_reply_strips_plain_text_internal_reasoning_before_messenger_send():
+    reply = _run_prepare_channel_reply(
+        """
+Let me check the details. The user wants to book a Dental Cleaning appointment on January 2, 2026 at 10:00 AM.
+
+Wait - the current clinic date is June 9, 2026. January 2, 2026 is before today.
+
+January 2, 2026 is before June 9, 2026, so it is a previous date. I'll let the user know.
+
+I understand you'd like to book a Dental Cleaning appointment. However, January 2, 2026 is already past. Appointments can only be scheduled for today or a future date.
+
+Would you like to book for a different date?
+"""
+    )
+
+    assert reply.startswith("I understand you'd like to book")
+    assert "Appointments can only be scheduled for today or a future date" in reply
+    assert "Let me check" not in reply
+    assert "The user wants" not in reply
+    assert "Wait -" not in reply
+    assert "I'll let the user know" not in reply
+
+
+def test_channel_reply_keeps_user_facing_verification_instructions():
+    reply = _run_prepare_channel_reply(
+        """
+I need to verify your appointment before I can reschedule it.
+
+Please send the reference code and phone number used for the booking.
+"""
+    )
+
+    assert reply.startswith("I need to verify your appointment")
+    assert "Please send the reference code" in reply
 
 
 def test_channel_reply_redacts_failed_appointment_verification_phone_numbers():

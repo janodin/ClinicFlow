@@ -1070,6 +1070,24 @@ function isFailedAppointmentVerificationReply(value) {
   const identityContext = ['phone', 'number', 'verify', 'verification', 'unable to verify', "couldn't verify", 'could not verify', "doesn't match", 'does not match', 'not match', 'booked under', 'belongs to', 'provided', 'confirm', 'lookup', 'not found'].some((term) => text.includes(term));
   return appointmentContext && identityContext;
 }
+function stripAssistantReasoningText(value) {
+  const original = String(value || '').trim();
+  const paragraphs = original.split(/\\n\\s*\\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  if (paragraphs.length < 2) { return original; }
+  const reasoningPatterns = [
+    /^let me (check|think|look|analy[sz]e)\\b/i,
+    /\\bthe user (wants|is asking|asked|provided|needs)\\b/i,
+    /^wait\\b/i,
+    /\\bi.?ll let the user know\\b/i,
+    /\\bi need to (check|call|look)\\b.*\\b(availability|tool|details|first)\\b/i,
+    /\\bi should (check|call|look|ask)\\b.*\\b(user|tool|availability|details)\\b/i,
+  ];
+  let firstPublicIndex = 0;
+  while (firstPublicIndex < paragraphs.length - 1 && reasoningPatterns.some((pattern) => pattern.test(paragraphs[firstPublicIndex]))) {
+    firstPublicIndex += 1;
+  }
+  return paragraphs.slice(firstPublicIndex).join('\\n\\n');
+}
 return $input.all().map((inputItem, itemIndex) => {
   const input = inputItem.json || {};
   const shared = sharedItems[itemIndex]?.json || {};
@@ -1078,6 +1096,7 @@ return $input.all().map((inputItem, itemIndex) => {
   const genericFallback = channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}';
   let text = input.output || input.text || input.response || input.reply || shared.fallback_message || genericFallback;
   text = String(text).replace(/<think[\\s\\S]*?<\\/think>/gi, '').replace(/<\\/?think>/gi, '').trim();
+  text = stripAssistantReasoningText(text);
   if (!text) {
     text = shared.fallback_message || genericFallback;
   }
