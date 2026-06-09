@@ -34,8 +34,10 @@ def test_sync_script_compiles_sdk_source_and_updates_n8n_workflow():
     assert "method: 'PUT'" in source
     assert 'api/v1/workflows/${workflowId}' in source
     assert 'api/v1/workflows/${workflowId}/activate' in source
-    assert "Previous dates and past times are not available" in source
-    assert "Do not ask for a time, offer alternatives, or call availability for previous dates" in source
+    assert "Call Django AI Gateway" in source
+    assert "/messenger/ai/gateway/reply/" in source
+    assert "Previous dates and past times are not available" not in source
+    assert "Do not ask for a time, offer alternatives, or call availability for previous dates" not in source
 
 
 def test_sync_script_loads_vps_env_without_printing_secrets():
