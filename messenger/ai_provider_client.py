@@ -107,6 +107,62 @@ def _chat_completions_url(provider_settings):
     return f"{base_url}/chat/completions"
 
 
+def _models_url(base_url):
+    safe_base_url = validate_ai_provider_base_url(base_url)
+    return f"{safe_base_url}/models"
+
+
+def fetch_available_models(base_url, api_key, *, clinic_id=None, provider=""):
+    model_fetch_failed = False
+    try:
+        with _create_ai_provider_session() as session:
+            response = session.get(
+                _models_url(base_url),
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=getattr(settings, "AI_PROVIDER_TIMEOUT_SECONDS", 20),
+                allow_redirects=False,
+            )
+        if 300 <= response.status_code < 400:
+            raise requests.RequestException("AI provider redirect response.")
+        response.raise_for_status()
+        data = response.json()
+        raw_models = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(raw_models, list):
+            raise AIProviderError("AI provider model fetch failed.")
+        model_ids = sorted(
+            {
+                model.get("id").strip()
+                for model in raw_models
+                if isinstance(model, dict)
+                and isinstance(model.get("id"), str)
+                and model.get("id").strip()
+            }
+        )
+        if not model_ids:
+            raise AIProviderError("AI provider model fetch failed.")
+        return model_ids
+    except AIProviderError:
+        logger.warning(
+            "AI provider model fetch failed",
+            extra={
+                "clinic_id": clinic_id,
+                "provider": provider,
+            },
+        )
+        raise
+    except (requests.RequestException, ValidationError, ValueError, TypeError):
+        logger.warning(
+            "AI provider model fetch failed",
+            extra={
+                "clinic_id": clinic_id,
+                "provider": provider,
+            },
+        )
+        model_fetch_failed = True
+    if model_fetch_failed:
+        raise AIProviderError("AI provider model fetch failed.") from None
+
+
 def call_chat_completion(provider_settings, messages, tools=None, model=None, model_role="primary"):
     selected_model = (model or provider_settings.model or "").strip()
     payload = {

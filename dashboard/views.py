@@ -15,15 +15,25 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from django.views.decorators.http import require_POST
 from django.conf import settings as django_settings
 
 from appointments.forms import AppointmentNoteForm, AppointmentStatusForm, StaffAppointmentForm
 from appointments.models import Appointment
-from clinics.forms import AIProviderSettingsForm, ClinicFAQForm, ClinicSettingsForm, SharedAISettingsForm, WidgetSettingsForm
+from clinics.ai_provider_validation import validate_ai_provider_base_url
+from clinics.forms import (
+    AIProviderSettingsForm,
+    ClinicFAQForm,
+    ClinicSettingsForm,
+    SAVED_PROVIDER_SECRET_MASK,
+    SharedAISettingsForm,
+    WidgetSettingsForm,
+)
 from clinics.models import Clinic, ClinicAIProviderSettings, ClinicAISettings, ClinicMembership
 from clinics.tenant import current_clinic, get_active_membership, user_can_manage_daily_ops, user_can_manage_settings
 from messenger.defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
+from messenger.ai_provider_client import AIProviderError, fetch_available_models
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from scheduling.models import ClinicBusinessHour, UnavailableDate
 from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots, get_working_window, validate_slot
@@ -31,9 +41,23 @@ from patients.forms import PatientForm
 from patients.models import Patient
 from services.forms import ServiceForm
 from accounts.forms import AppPasswordChangeForm
-from yakap.forms import ClinicYakapSettingsForm, ServiceYakapRuleForm, YakapCoverageCategoryForm, YakapLedgerEntryForm
-from yakap.models import ServiceYakapRule
-from yakap.services import ensure_default_yakap_setup, estimated_remaining_for, yakap_profile_for_patient
+from yakap.forms import (
+    AppointmentYakapStatusForm,
+    ClinicYakapSettingsForm,
+    PatientYakapProfileForm,
+    ServiceYakapRuleForm,
+    YakapCoverageCategoryForm,
+    YakapLedgerEntryForm,
+)
+from yakap.models import AppointmentYakapSnapshot, PatientYakapProfile, ServiceYakapRule, YakapAuditEvent, YakapLedgerEntry
+from yakap.services import (
+    active_period_for_profile_category,
+    create_yakap_audit_event,
+    ensure_default_yakap_setup,
+    estimated_remaining_for,
+    ledger_entry_over_limit,
+    yakap_profile_for_patient,
+)
 
 
 def _clinic_or_redirect(request, allow_missing=False):
@@ -228,8 +252,20 @@ def _appointment_detail_context(
     source="",
     status_form=None,
     note_form=None,
+    yakap_status_form=None,
     yakap_ledger_form=None,
 ):
+    try:
+        yakap_snapshot = appointment.yakap_snapshot
+    except AppointmentYakapSnapshot.DoesNotExist:
+        yakap_snapshot = None
+    if yakap_status_form is None:
+        yakap_status_form = (
+            AppointmentYakapStatusForm(instance=yakap_snapshot)
+            if yakap_snapshot
+            else AppointmentYakapStatusForm()
+        )
+
     return {
         "clinic": clinic,
         "appointment": appointment,
@@ -237,7 +273,12 @@ def _appointment_detail_context(
         "note_form": note_form if note_form is not None else AppointmentNoteForm(),
         "init_mode": init_mode,
         "source": source,
-        "yakap_ledger_form": yakap_ledger_form if yakap_ledger_form is not None else YakapLedgerEntryForm(clinic),
+        "yakap_snapshot": yakap_snapshot,
+        "yakap_status_form": yakap_status_form,
+        "yakap_ledger_form": yakap_ledger_form if yakap_ledger_form is not None else YakapLedgerEntryForm(
+            clinic,
+            patient=appointment.patient,
+        ),
     }
 
 
@@ -259,6 +300,7 @@ def _patient_detail_context(clinic, patient):
             "appointment",
             "service",
         )[:5]
+    yakap_profile_form_instance = yakap_profile or PatientYakapProfile(clinic=clinic, patient=patient)
 
     return {
         "clinic": clinic,
@@ -269,6 +311,7 @@ def _patient_detail_context(clinic, patient):
         "kpi_cancelled": appointments.filter(status__in=["cancelled", "no_show"]).count(),
         "last_appointment": appointments.order_by("starts_at").last(),
         "yakap_profile": yakap_profile,
+        "yakap_profile_form": PatientYakapProfileForm(instance=yakap_profile_form_instance),
         "yakap_balances": yakap_balances,
         "yakap_ledger_entries": yakap_ledger_entries,
     }
@@ -852,6 +895,69 @@ def add_appointment_note(request, pk):
 
 @login_required
 @require_POST
+def update_appointment_yakap_status(request, pk):
+    clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
+
+    appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
+    try:
+        snapshot = appointment.yakap_snapshot
+    except AppointmentYakapSnapshot.DoesNotExist:
+        snapshot = AppointmentYakapSnapshot(
+            clinic=clinic,
+            requested=True,
+            coverage_status=AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION,
+        )
+
+    form = AppointmentYakapStatusForm(request.POST, instance=snapshot)
+    saved = form.is_valid()
+    if saved:
+        snapshot = form.save(commit=False)
+        snapshot.clinic = clinic
+        snapshot.appointment = appointment
+        snapshot.requested = snapshot.coverage_status != AppointmentYakapSnapshot.STATUS_NOT_REQUESTED
+        snapshot.verified_at = timezone.now()
+        snapshot.verified_by = request.user
+        snapshot.save()
+        create_yakap_audit_event(
+            clinic=clinic,
+            actor=request.user,
+            action=YakapAuditEvent.ACTION_APPOINTMENT_STATUS_CHANGED,
+            obj=snapshot,
+            summary=f"Updated appointment YAKAP status to {snapshot.get_coverage_status_display()}.",
+        )
+        messages.success(request, "YAKAP appointment status updated.")
+    else:
+        messages.error(request, form.errors.as_text())
+
+    if request.headers.get("HX-Request"):
+        response = render(
+            request,
+            "dashboard/partials/appointment_detail.html",
+            _appointment_detail_context(
+                clinic,
+                appointment,
+                source=request.POST.get("modal_source", ""),
+                yakap_status_form=AppointmentYakapStatusForm(instance=snapshot) if saved else form,
+            ),
+        )
+        if not saved:
+            return response
+        if request.POST.get("modal_source") == "calendar":
+            response["HX-Trigger"] = _calendar_modal_trigger("YAKAP appointment status updated.", refetch=False)
+        else:
+            response["HX-Trigger"] = json.dumps({
+                "toast-message": {"message": "YAKAP appointment status updated.", "type": "success"}
+            })
+        return response
+
+    return redirect("dashboard:appointments")
+
+
+@login_required
+@require_POST
 def appointment_yakap_ledger(request, pk):
     clinic = _clinic_or_redirect(request)
     membership = get_active_membership(request.user)
@@ -859,20 +965,72 @@ def appointment_yakap_ledger(request, pk):
         raise PermissionDenied
 
     appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
-    form = YakapLedgerEntryForm(clinic, request.POST)
+    if request.POST.get("entry_type") == YakapLedgerEntry.TYPE_REVERSAL and not user_can_manage_settings(membership):
+        raise PermissionDenied
+    submitted_category = None
+    try:
+        submitted_category = clinic.yakap_categories.filter(is_active=True, pk=request.POST.get("category")).first()
+    except (TypeError, ValueError):
+        submitted_category = None
+    form = YakapLedgerEntryForm(clinic, request.POST, patient=appointment.patient, category=submitted_category)
     saved = form.is_valid()
     if saved:
-        profile = yakap_profile_for_patient(appointment.patient)
         entry = form.save(commit=False)
         entry.clinic = clinic
         entry.patient = appointment.patient
-        entry.profile = profile
         entry.appointment = appointment
         entry.service = appointment.service
         entry.created_by = request.user
+        if entry.verification_status == YakapLedgerEntry.VERIFICATION_VERIFIED:
+            entry.verified_at = timezone.now()
+            entry.verified_by = request.user
         try:
-            entry.full_clean()
-            entry.save()
+            with transaction.atomic():
+                locked_patient = clinic.patients.select_for_update().get(pk=appointment.patient_id)
+                try:
+                    profile = locked_patient.yakap_profile
+                except Patient.yakap_profile.RelatedObjectDoesNotExist:
+                    profile = PatientYakapProfile(clinic=clinic, patient=locked_patient)
+                entry.patient = locked_patient
+                entry.profile = profile
+                is_over_limit, _remaining_after_entry = ledger_entry_over_limit(entry, create_period=False)
+                if is_over_limit:
+                    if clinic.yakap_settings.hard_block_exceeded:
+                        saved = False
+                        form.add_error(
+                            None,
+                            "This YAKAP usage is blocked by clinic YAKAP settings because it exceeds estimated remaining coverage.",
+                        )
+                    elif request.POST.get("confirm_over_limit") != "on":
+                        saved = False
+                        form.add_error(
+                            None,
+                            "This YAKAP usage exceeds estimated remaining coverage. Confirm over-limit posting to continue.",
+                        )
+                if saved:
+                    if profile.pk is None:
+                        profile.save()
+                    entry.profile = profile
+                    entry.full_clean()
+                    period = active_period_for_profile_category(profile, entry.category, when=entry.occurred_at)
+                    profile.credit_line_periods.select_for_update().get(pk=period.pk)
+                    entry.save()
+                    create_yakap_audit_event(
+                        clinic=clinic,
+                        actor=request.user,
+                        action=(
+                            YakapAuditEvent.ACTION_LEDGER_REVERSED
+                            if entry.entry_type == YakapLedgerEntry.TYPE_REVERSAL
+                            else YakapAuditEvent.ACTION_LEDGER_POSTED
+                        ),
+                        obj=entry,
+                        summary=f"Posted {entry.get_entry_type_display()} of {entry.amount} for {entry.category.name}.",
+                    )
+                    if hasattr(appointment, "yakap_snapshot"):
+                        snapshot = appointment.yakap_snapshot
+                        snapshot.coverage_status = AppointmentYakapSnapshot.STATUS_POSTED
+                        snapshot.full_clean()
+                        snapshot.save(update_fields=["coverage_status", "updated_at"])
         except ValidationError as exc:
             saved = False
             if hasattr(exc, "message_dict"):
@@ -885,7 +1043,10 @@ def appointment_yakap_ledger(request, pk):
                     form.add_error(None, error)
             messages.error(request, form.errors.as_text())
         else:
-            messages.success(request, "YAKAP usage added.")
+            if saved:
+                messages.success(request, "YAKAP usage added.")
+            else:
+                messages.error(request, form.errors.as_text())
     else:
         messages.error(request, form.errors.as_text())
 
@@ -946,6 +1107,40 @@ def patient_detail(request, pk):
     )
     context = _patient_detail_context(clinic, patient)
     return render(request, "dashboard/partials/patient_detail.html", context)
+
+
+@login_required
+@require_POST
+def update_patient_yakap_profile(request, pk):
+    clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
+
+    patient = get_object_or_404(clinic.patients, pk=pk)
+    try:
+        profile = patient.yakap_profile
+    except Patient.yakap_profile.RelatedObjectDoesNotExist:
+        profile = PatientYakapProfile(clinic=clinic, patient=patient)
+    form = PatientYakapProfileForm(request.POST, instance=profile)
+    if form.is_valid():
+        profile = form.save(commit=False)
+        profile.clinic = clinic
+        profile.patient = patient
+        profile.last_verified_at = timezone.now()
+        profile.last_verified_by = request.user
+        profile.save()
+        create_yakap_audit_event(
+            clinic=clinic,
+            actor=request.user,
+            action=YakapAuditEvent.ACTION_PROFILE_STATUS_CHANGED,
+            obj=profile,
+            summary=f"Updated patient YAKAP profile status to {profile.get_status_display()}.",
+        )
+        messages.success(request, "YAKAP profile updated.")
+    else:
+        messages.error(request, form.errors.as_text())
+    return redirect("dashboard:patient_detail", pk=patient.pk)
 
 
 @login_required
@@ -1460,6 +1655,7 @@ def _widget_embed_context(request, clinic, *, widget_form=None):
 
 
 @login_required
+@sensitive_post_parameters("api_key")
 def assistant_settings(request):
     clinic = _clinic_or_redirect(request)
     _require_settings_permission(request.user)
@@ -1491,6 +1687,55 @@ def assistant_settings(request):
 
 
 @login_required
+@sensitive_post_parameters("api_key")
+@require_POST
+@sensitive_variables("api_key")
+def ai_provider_models(request):
+    clinic = _clinic_or_redirect(request)
+    _require_settings_permission(request.user)
+    provider_settings, _ = ClinicAIProviderSettings.objects.get_or_create(clinic=clinic)
+
+    provider = (request.POST.get("provider") or provider_settings.provider or "").strip()
+    if provider not in {ClinicAIProviderSettings.PROVIDER_OPENAI, ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE}:
+        return JsonResponse({"success": False, "error": "Choose a supported AI provider."}, status=400)
+
+    if provider == ClinicAIProviderSettings.PROVIDER_OPENAI:
+        base_url = ClinicAIProviderSettings.OPENAI_BASE_URL
+    else:
+        try:
+            base_url = validate_ai_provider_base_url(request.POST.get("base_url") or "")
+        except ValidationError:
+            return JsonResponse({"success": False, "error": "Enter a valid provider base URL."}, status=400)
+
+    api_key = (request.POST.get("api_key") or "").strip()
+    if api_key in {"", SAVED_PROVIDER_SECRET_MASK}:
+        saved_base_url = ""
+        if provider_settings.provider == ClinicAIProviderSettings.PROVIDER_OPENAI:
+            saved_base_url = ClinicAIProviderSettings.OPENAI_BASE_URL
+        elif provider_settings.provider == ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE:
+            try:
+                saved_base_url = validate_ai_provider_base_url(provider_settings.base_url or "")
+            except ValidationError:
+                saved_base_url = ""
+        if provider_settings.provider == provider and saved_base_url == base_url:
+            api_key = provider_settings.api_key
+        else:
+            api_key = ""
+    if not (api_key or "").strip():
+        return JsonResponse({"success": False, "error": "Enter an API key before fetching models."}, status=400)
+
+    try:
+        model_ids = fetch_available_models(base_url, api_key, clinic_id=clinic.id, provider=provider)
+    except AIProviderError:
+        return JsonResponse(
+            {"success": False, "error": "Could not fetch models from this provider. Check the base URL and API key."},
+            status=400,
+        )
+
+    return JsonResponse({"success": True, "models": [{"id": model_id, "label": model_id} for model_id in model_ids]})
+
+
+@login_required
 def yakap(request):
     clinic = _clinic_or_redirect(request)
     _require_settings_permission(request.user)
@@ -1501,7 +1746,11 @@ def yakap(request):
     post_form = request.POST.get("_form")
     unverified_appointments = clinic.appointments.select_related("patient", "service", "yakap_snapshot").filter(
         yakap_snapshot__requested=True,
-        yakap_snapshot__coverage_status__in=["requested", "unverified"],
+        yakap_snapshot__coverage_status__in=[
+            AppointmentYakapSnapshot.STATUS_REQUESTED,
+            AppointmentYakapSnapshot.STATUS_UNVERIFIED,
+            AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION,
+        ],
     ).order_by("starts_at")[:10]
 
     if request.method == "POST" and post_form == "settings":

@@ -1,10 +1,13 @@
 import calendar
+from datetime import datetime, time, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 from clinics.models import Clinic, TimeStampedModel
 
@@ -18,6 +21,7 @@ class FullCleanOnSaveMixin:
 class ClinicYakapSettings(FullCleanOnSaveMixin, TimeStampedModel):
     clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="yakap_settings")
     is_enabled = models.BooleanField(default=False)
+    program_label = models.CharField(max_length=40, default="YAKAP")
     public_promo_headline = models.CharField(max_length=160, default="Use your PhilHealth YAKAP benefits")
     public_promo_body = models.TextField(
         default="Book eligible YAKAP primary care services, subject to PhilHealth and clinic verification."
@@ -38,6 +42,25 @@ class ClinicYakapSettings(FullCleanOnSaveMixin, TimeStampedModel):
         default=Decimal("20000.00"),
         validators=[MinValueValidator(Decimal("0.00"))],
     )
+    medicine_annual_limit_default = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("20000.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    default_non_medicine_limit = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    low_balance_threshold_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("1000.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    verification_stale_after_days = models.PositiveSmallIntegerField(default=30)
     reset_month = models.PositiveSmallIntegerField(default=1)
     reset_day = models.PositiveSmallIntegerField(default=1)
     hard_block_exceeded = models.BooleanField(default=False)
@@ -153,21 +176,25 @@ class ServiceYakapRule(FullCleanOnSaveMixin, TimeStampedModel):
 class PatientYakapProfile(FullCleanOnSaveMixin, TimeStampedModel):
     STATUS_NOT_ASKED = "not_asked"
     STATUS_INTERESTED = "interested"
+    STATUS_PENDING_VERIFICATION = "pending_verification"
     STATUS_REGISTERED_ELSEWHERE = "registered_elsewhere"
     STATUS_REGISTERED_TO_THIS_CLINIC = "registered_to_this_clinic"
     STATUS_FPE_COMPLETED = "fpe_completed"
     STATUS_YES_SIGNED = "yes_signed"
     STATUS_ACTIVE = "active"
     STATUS_INACTIVE = "inactive"
+    STATUS_TRANSFERRED = "transferred"
     STATUS_CHOICES = [
         (STATUS_NOT_ASKED, "Not asked"),
         (STATUS_INTERESTED, "Interested"),
+        (STATUS_PENDING_VERIFICATION, "Pending verification"),
         (STATUS_REGISTERED_ELSEWHERE, "Registered elsewhere"),
         (STATUS_REGISTERED_TO_THIS_CLINIC, "Registered to this clinic"),
         (STATUS_FPE_COMPLETED, "FPE completed"),
         (STATUS_YES_SIGNED, "YES signed"),
         (STATUS_ACTIVE, "Active"),
         (STATUS_INACTIVE, "Inactive"),
+        (STATUS_TRANSFERRED, "Transferred"),
     ]
 
     clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="yakap_patient_profiles")
@@ -181,6 +208,17 @@ class PatientYakapProfile(FullCleanOnSaveMixin, TimeStampedModel):
         validators=[MinValueValidator(Decimal("0.00"))],
     )
     last_verified_at = models.DateTimeField(blank=True, null=True)
+    registered_clinic_name = models.CharField(max_length=160, blank=True, default="")
+    last_verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="verified_yakap_profiles",
+    )
+    verification_method = models.CharField(max_length=160, blank=True, default="")
+    verification_reference = models.CharField(max_length=160, blank=True, default="")
+    consent_note = models.TextField(blank=True, default="")
     staff_notes = models.TextField(blank=True, default="")
 
     def clean(self):
@@ -197,6 +235,11 @@ class AppointmentYakapSnapshot(FullCleanOnSaveMixin, TimeStampedModel):
     STATUS_NOT_ELIGIBLE = "not_eligible"
     STATUS_EXCEEDED = "exceeded"
     STATUS_NOT_APPLICABLE = "not_applicable"
+    STATUS_NEEDS_VERIFICATION = "needs_verification"
+    STATUS_VERIFIED_FOR_VISIT = "verified_for_visit"
+    STATUS_EXCEEDED_ESTIMATE = "exceeded_estimate"
+    STATUS_POSTED = "posted"
+    STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = [
         (STATUS_NOT_REQUESTED, "Not requested"),
         (STATUS_REQUESTED, "Requested"),
@@ -205,6 +248,11 @@ class AppointmentYakapSnapshot(FullCleanOnSaveMixin, TimeStampedModel):
         (STATUS_NOT_ELIGIBLE, "Not eligible"),
         (STATUS_EXCEEDED, "Exceeded"),
         (STATUS_NOT_APPLICABLE, "Not applicable"),
+        (STATUS_NEEDS_VERIFICATION, "Needs verification"),
+        (STATUS_VERIFIED_FOR_VISIT, "Verified for visit"),
+        (STATUS_EXCEEDED_ESTIMATE, "Exceeded estimate"),
+        (STATUS_POSTED, "Posted"),
+        (STATUS_CANCELLED, "Cancelled"),
     ]
 
     clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="yakap_appointment_snapshots")
@@ -218,6 +266,22 @@ class AppointmentYakapSnapshot(FullCleanOnSaveMixin, TimeStampedModel):
     category_name = models.CharField(max_length=120, blank=True, default="")
     service_rule_status = models.CharField(max_length=32, blank=True, default="")
     estimated_remaining_at_booking = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    estimated_covered_amount_at_booking = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        blank=True,
+        null=True,
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    verified_at = models.DateTimeField(blank=True, null=True)
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="verified_yakap_appointments",
+    )
+    verification_note = models.TextField(blank=True, default="")
 
     def clean(self):
         super().clean()
@@ -228,14 +292,20 @@ class AppointmentYakapSnapshot(FullCleanOnSaveMixin, TimeStampedModel):
 class YakapLedgerEntry(FullCleanOnSaveMixin, TimeStampedModel):
     TYPE_SERVICE_USAGE = "service_usage"
     TYPE_MEDICINE_USAGE = "medicine_usage"
+    TYPE_LABORATORY_USAGE = "laboratory_usage"
+    TYPE_SCREENING_USAGE = "screening_usage"
     TYPE_ADJUSTMENT = "adjustment"
     TYPE_REVERSAL = "reversal"
     TYPE_CHOICES = [
         (TYPE_SERVICE_USAGE, "Service usage"),
         (TYPE_MEDICINE_USAGE, "Medicine usage"),
+        (TYPE_LABORATORY_USAGE, "Laboratory usage"),
+        (TYPE_SCREENING_USAGE, "Screening usage"),
         (TYPE_ADJUSTMENT, "Adjustment"),
         (TYPE_REVERSAL, "Reversal"),
     ]
+
+    SOURCE_MANUAL_DASHBOARD = "manual_dashboard"
 
     VERIFICATION_UNVERIFIED = "unverified"
     VERIFICATION_VERIFIED = "verified"
@@ -262,6 +332,7 @@ class YakapLedgerEntry(FullCleanOnSaveMixin, TimeStampedModel):
         null=True,
         related_name="yakap_ledger_entries",
     )
+    occurred_at = models.DateTimeField(default=timezone.now)
     entry_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     amount = models.DecimalField(
         max_digits=10,
@@ -272,6 +343,23 @@ class YakapLedgerEntry(FullCleanOnSaveMixin, TimeStampedModel):
         max_length=32,
         choices=VERIFICATION_CHOICES,
         default=VERIFICATION_UNVERIFIED,
+    )
+    verified_at = models.DateTimeField(blank=True, null=True)
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="verified_yakap_ledger_entries",
+    )
+    source = models.CharField(max_length=40, default=SOURCE_MANUAL_DASHBOARD)
+    external_reference = models.CharField(max_length=160, blank=True, default="")
+    reversal_of = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="reversals",
     )
     note = models.TextField()
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, blank=True, null=True)
@@ -298,6 +386,25 @@ class YakapLedgerEntry(FullCleanOnSaveMixin, TimeStampedModel):
             errors["service"] = "Service must belong to the ledger entry clinic."
         if self.service_id and self.appointment_id and self.appointment.service_id != self.service_id:
             errors["service"] = "Service must match the appointment service."
+        if self.reversal_of_id:
+            original_entry = self.reversal_of
+            if self.clinic_id and original_entry.clinic_id != self.clinic_id:
+                errors["reversal_of"] = "Reversal entry must belong to the same clinic."
+            if self.patient_id and original_entry.patient_id != self.patient_id:
+                errors["reversal_of"] = "Reversal entry must belong to the same patient."
+            if self.category_id and original_entry.category_id != self.category_id:
+                errors["reversal_of"] = "Reversal entry must belong to the same category."
+            if self.entry_type == self.TYPE_REVERSAL:
+                if self._period_bounds_for(self.occurred_at, clinic=original_entry.clinic) != self._period_bounds_for(
+                    original_entry.occurred_at,
+                    clinic=original_entry.clinic,
+                ):
+                    errors["reversal_of"] = "Reversal must be in the same benefit period as the original entry."
+                reversed_total = original_entry.reversals.filter(entry_type=self.TYPE_REVERSAL).exclude(pk=self.pk).aggregate(
+                    total=models.Sum("amount")
+                )["total"] or Decimal("0.00")
+                if self.amount is not None and reversed_total + self.amount > original_entry.amount:
+                    errors["amount"] = "Reversal cannot exceed the remaining amount on the original entry."
         if self.entry_type == self.TYPE_REVERSAL and self.profile_id and self.category_id and self.amount is not None:
             current_used = self._estimated_used_excluding_self()
             if self.amount > current_used:
@@ -306,16 +413,137 @@ class YakapLedgerEntry(FullCleanOnSaveMixin, TimeStampedModel):
             raise ValidationError(errors)
 
     def _estimated_used_excluding_self(self):
+        period_start, period_end = self._period_bounds_for_occurred_at()
+        clinic_timezone = ZoneInfo(self.clinic.timezone)
+        start_at = timezone.make_aware(datetime.combine(period_start, time.min), clinic_timezone)
+        end_at = timezone.make_aware(datetime.combine(period_end + timedelta(days=1), time.min), clinic_timezone)
         total = Decimal("0.00")
-        entries = self.profile.ledger_entries.filter(category=self.category)
+        entries = self.profile.ledger_entries.filter(
+            category=self.category,
+            occurred_at__gte=start_at,
+            occurred_at__lt=end_at,
+        )
         if self.pk:
             entries = entries.exclude(pk=self.pk)
         for entry in entries:
             total += entry.signed_amount
         return total
 
+    def _period_bounds_for_occurred_at(self):
+        return self._period_bounds_for(self.occurred_at)
+
+    def _period_bounds_for(self, when, *, clinic=None):
+        clinic = clinic or self.clinic
+        clinic_timezone = ZoneInfo(clinic.timezone)
+        when = when or timezone.now()
+        if timezone.is_naive(when):
+            when = timezone.make_aware(when, clinic_timezone)
+        when = when.astimezone(clinic_timezone).date()
+        try:
+            yakap_settings = clinic.yakap_settings
+            reset_month = yakap_settings.reset_month
+            reset_day = yakap_settings.reset_day
+        except ClinicYakapSettings.DoesNotExist:
+            reset_month = 1
+            reset_day = 1
+        reset_day = min(reset_day, calendar.monthrange(when.year, reset_month)[1])
+        reset_date = when.replace(month=reset_month, day=reset_day)
+        period_start_year = when.year if when >= reset_date else when.year - 1
+        period_start_day = min(reset_day, calendar.monthrange(period_start_year, reset_month)[1])
+        period_start = datetime(period_start_year, reset_month, period_start_day).date()
+        next_period_start_day = min(reset_day, calendar.monthrange(period_start_year + 1, reset_month)[1])
+        next_period_start = datetime(period_start_year + 1, reset_month, next_period_start_day).date()
+        return period_start, next_period_start - timedelta(days=1)
+
     @property
     def signed_amount(self):
         if self.entry_type == self.TYPE_REVERSAL:
             return -self.amount
         return self.amount
+
+
+class YakapCreditLinePeriod(FullCleanOnSaveMixin, TimeStampedModel):
+    STATUS_OPEN = "open"
+    STATUS_CLOSED = "closed"
+    STATUS_SUPERSEDED = "superseded"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"),
+        (STATUS_CLOSED, "Closed"),
+        (STATUS_SUPERSEDED, "Superseded"),
+    ]
+
+    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="yakap_credit_line_periods")
+    patient = models.ForeignKey("patients.Patient", on_delete=models.CASCADE, related_name="yakap_credit_line_periods")
+    profile = models.ForeignKey(PatientYakapProfile, on_delete=models.CASCADE, related_name="credit_line_periods")
+    category = models.ForeignKey(YakapCoverageCategory, on_delete=models.PROTECT, related_name="credit_line_periods")
+    period_start = models.DateField()
+    period_end = models.DateField()
+    limit_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN)
+
+    class Meta:
+        ordering = ["-period_start", "-period_end", "category__name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile", "category", "period_start", "period_end"],
+                name="unique_yakap_credit_period_per_profile_category",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.limit_snapshot is None and self.category_id:
+            self.limit_snapshot = self.category.annual_limit
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.clinic_id and self.patient_id and self.patient.clinic_id != self.clinic_id:
+            errors["patient"] = "Patient must belong to the credit line period clinic."
+        if self.clinic_id and self.profile_id and self.profile.clinic_id != self.clinic_id:
+            errors["profile"] = "Profile must belong to the credit line period clinic."
+        if self.patient_id and self.profile_id and self.profile.patient_id != self.patient_id:
+            errors["profile"] = "Profile must belong to the credit line period patient."
+        if self.clinic_id and self.category_id and self.category.clinic_id != self.clinic_id:
+            errors["category"] = "Category must belong to the credit line period clinic."
+        if self.period_start and self.period_end and self.period_end < self.period_start:
+            errors["period_end"] = "Period end must be on or after period start."
+        if errors:
+            raise ValidationError(errors)
+
+
+class YakapAuditEvent(FullCleanOnSaveMixin, TimeStampedModel):
+    ACTION_SETTINGS_CHANGED = "settings_changed"
+    ACTION_PROFILE_STATUS_CHANGED = "profile_status_changed"
+    ACTION_APPOINTMENT_STATUS_CHANGED = "appointment_status_changed"
+    ACTION_LEDGER_POSTED = "ledger_posted"
+    ACTION_LEDGER_REVERSED = "ledger_reversed"
+    ACTION_EXPORT_CREATED = "export_created"
+    ACTION_CHOICES = [
+        (ACTION_SETTINGS_CHANGED, "Settings changed"),
+        (ACTION_PROFILE_STATUS_CHANGED, "Profile status changed"),
+        (ACTION_APPOINTMENT_STATUS_CHANGED, "Appointment status changed"),
+        (ACTION_LEDGER_POSTED, "Ledger posted"),
+        (ACTION_LEDGER_REVERSED, "Ledger reversed"),
+        (ACTION_EXPORT_CREATED, "Export created"),
+    ]
+
+    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="yakap_audit_events")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="yakap_audit_events",
+    )
+    action = models.CharField(max_length=40, choices=ACTION_CHOICES)
+    object_type = models.CharField(max_length=80)
+    object_id = models.CharField(max_length=80)
+    summary = models.TextField()
+
+    class Meta:
+        ordering = ["-created_at"]

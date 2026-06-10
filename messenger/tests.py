@@ -1391,6 +1391,130 @@ def test_ai_provider_client_rejects_provider_redirect_response(mock_post, monkey
     assert mock_post.call_args.kwargs["allow_redirects"] is False
 
 
+def test_fetch_available_models_returns_sorted_unique_ids(monkeypatch):
+    from messenger.ai_provider_client import fetch_available_models
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": [
+                    {"id": "provider/model-b"},
+                    {"id": "provider/model-a"},
+                    {"id": "provider/model-a"},
+                    {"id": ""},
+                    {"id": 123},
+                    {},
+                ]
+            }
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, headers, timeout, allow_redirects):
+            assert url == "https://api.example.com/v1/models"
+            assert headers == {"Authorization": "Bearer sk-model-key"}
+            assert timeout > 0
+            assert allow_redirects is False
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "messenger.ai_provider_client.validate_ai_provider_base_url",
+        lambda value: value.rstrip("/"),
+    )
+    monkeypatch.setattr(
+        "messenger.ai_provider_client._create_ai_provider_session",
+        lambda: FakeSession(),
+    )
+
+    models = fetch_available_models(
+        "https://api.example.com/v1/",
+        "sk-model-key",
+        clinic_id=7,
+        provider="openai_compatible",
+    )
+
+    assert models == ["provider/model-a", "provider/model-b"]
+
+
+def test_fetch_available_models_rejects_invalid_response_without_leaking_key(monkeypatch):
+    from messenger.ai_provider_client import AIProviderError, fetch_available_models
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"unexpected": []}
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, headers, timeout, allow_redirects):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "messenger.ai_provider_client.validate_ai_provider_base_url",
+        lambda value: value.rstrip("/"),
+    )
+    monkeypatch.setattr(
+        "messenger.ai_provider_client._create_ai_provider_session",
+        lambda: FakeSession(),
+    )
+
+    with pytest.raises(AIProviderError) as exc:
+        fetch_available_models("https://api.example.com/v1", "sk-secret-value", clinic_id=7, provider="openai_compatible")
+
+    assert "sk-secret-value" not in str(exc.value)
+    assert str(exc.value) == "AI provider model fetch failed."
+
+
+def test_fetch_available_models_suppresses_provider_exception_context(monkeypatch):
+    import requests
+    from messenger.ai_provider_client import AIProviderError, fetch_available_models
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, headers, timeout, allow_redirects):
+            raise requests.Timeout("timeout with sk-secret-value")
+
+    monkeypatch.setattr(
+        "messenger.ai_provider_client.validate_ai_provider_base_url",
+        lambda value: value.rstrip("/"),
+    )
+    monkeypatch.setattr(
+        "messenger.ai_provider_client._create_ai_provider_session",
+        lambda: FakeSession(),
+    )
+
+    with pytest.raises(AIProviderError) as exc:
+        fetch_available_models("https://api.example.com/v1", "sk-secret-value", clinic_id=7, provider="openai_compatible")
+
+    assert str(exc.value) == "AI provider model fetch failed."
+    assert "sk-secret-value" not in str(exc.value)
+    if exc.value.__context__ is not None:
+        raise AssertionError("AIProviderError should suppress provider exception context")
+
+
 def test_ai_provider_safe_socket_connection_rejects_rebound_private_dns(monkeypatch):
     import socket
     from messenger.ai_provider_client import _create_safe_provider_connection

@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% block title %}YAKAP{% endblock %}
 {% block content %}
-<div class="cf-page">
+<div x-data="{detailOpen:false, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" @keydown.escape.window="detailOpen=false" class="cf-page">
   <div class="cf-page-header">
     <div>
       <h1 class="cf-page-title ui-page-title">YAKAP</h1>
@@ -241,6 +241,7 @@
                 <th class="p-4">Service</th>
                 <th class="p-4">Date and time</th>
                 <th class="p-4">Status</th>
+                <th class="p-4">Action</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-[var(--cf-line-soft)]">
@@ -250,6 +251,9 @@
                   <td class="p-4 text-[var(--cf-muted)]">{{ appointment.service.name }}</td>
                   <td class="p-4 tabular-nums text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</td>
                   <td class="p-4"><span class="cf-badge cf-badge-warning cf-status-pending">Needs verification</span></td>
+                  <td class="p-4">
+                    <a href="#" @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}?source=yakap" hx-target="#detail-modal-body" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Review</a>
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -263,5 +267,10 @@
       </div>
     {% endif %}
   </section>
+  <div x-show="detailOpen" class="cf-modal-backdrop" x-cloak @click.self="detailOpen=false" @keydown.tab="trapModalFocus($event, $el)" tabindex="-1" x-effect="if (detailOpen) $nextTick(() => $el.querySelector('button, [href], input, select, textarea')?.focus())">
+    <div class="cf-modal cf-modal-lg" role="dialog" aria-modal="true" aria-labelledby="appointment-detail-title" @click.stop>
+      <div id="detail-modal-body"></div>
+    </div>
+  </div>
 </div>
 {% endblock %}

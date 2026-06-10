@@ -33,7 +33,7 @@
       </div>
     </div>
 
-    <form method="post" action="{% url 'dashboard:assistant_settings' %}" class="mt-5 grid gap-5">
+    <form method="post" action="{% url 'dashboard:assistant_settings' %}" class="mt-5 grid gap-5" data-ai-provider-models-url="{% url 'dashboard:ai_provider_models' %}">
       {% csrf_token %}
       <input type="hidden" name="_form" value="ai_provider_settings">
 
@@ -60,6 +60,13 @@
       </div>
 
       <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none">
+        <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-[var(--cf-ink)]">Provider details</p>
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Models refresh automatically from the selected provider.</p>
+          </div>
+          <span class="cf-badge cf-badge-info self-start max-w-full overflow-hidden text-ellipsis sm:ml-auto" data-ai-provider-model-status role="status" aria-live="polite">Models will load after provider details are entered.</span>
+        </div>
         <div data-ai-provider-layout="responsive-grid" class="grid gap-4 lg:grid-cols-2">
           <div data-ai-provider-field="provider" class="cf-field order-1 lg:order-1">
             <label class="cf-label" for="{{ ai_provider_form.provider.id_for_label }}">{{ ai_provider_form.provider.label }}</label>
@@ -83,15 +90,23 @@
           </div>
 
           <div data-ai-provider-field="primary-model" class="cf-field order-4 lg:order-2">
-            <label class="cf-label" for="{{ ai_provider_form.openai_model.id_for_label }}">{{ ai_provider_form.openai_model.label }}</label>
-            {{ ai_provider_form.openai_model }}
+            <label class="cf-label" for="ai-provider-primary-model-search">{{ ai_provider_form.openai_model.label }}</label>
+            <div class="relative" data-model-combobox="primary">
+              <input id="ai-provider-primary-model-search" type="search" class="cf-input" placeholder="Models will load after provider details are entered." autocomplete="off" data-model-search="primary" value="{{ ai_provider_form.openai_model.value|default_if_none:'' }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ai-provider-primary-model-options" aria-activedescendant="">
+              <input type="hidden" name="openai_model" value="{{ ai_provider_form.openai_model.value|default_if_none:'' }}" data-model-value="primary">
+              <div id="ai-provider-primary-model-options" class="absolute left-0 right-0 top-full z-30 mt-2 hidden max-h-56 overflow-y-auto rounded-xl border border-[var(--cf-line)] bg-[var(--cf-surface)] p-1 shadow-sm" data-model-options="primary" role="listbox" aria-label="Primary model options"></div>
+            </div>
             <p class="mt-1 text-xs text-[var(--cf-muted)]">Primary model used first for the selected provider.</p>
             {% if ai_provider_form.openai_model.errors %}<p class="cf-error">{{ ai_provider_form.openai_model.errors.0 }}</p>{% endif %}
           </div>
 
           <div data-ai-provider-field="fallback-model" class="cf-field order-5 lg:order-4">
-            <label class="cf-label" for="{{ ai_provider_form.openai_fallback_model.id_for_label }}">{{ ai_provider_form.openai_fallback_model.label }}</label>
-            {{ ai_provider_form.openai_fallback_model }}
+            <label class="cf-label" for="ai-provider-fallback-model-search">{{ ai_provider_form.openai_fallback_model.label }}</label>
+            <div class="relative" data-model-combobox="fallback">
+              <input id="ai-provider-fallback-model-search" type="search" class="cf-input" placeholder="Models will load after provider details are entered." autocomplete="off" data-model-search="fallback" value="{{ ai_provider_form.openai_fallback_model.value|default_if_none:'' }}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ai-provider-fallback-model-options" aria-activedescendant="">
+              <input type="hidden" name="openai_fallback_model" value="{{ ai_provider_form.openai_fallback_model.value|default_if_none:'' }}" data-model-value="fallback">
+              <div id="ai-provider-fallback-model-options" class="absolute left-0 right-0 top-full z-30 mt-2 hidden max-h-56 overflow-y-auto rounded-xl border border-[var(--cf-line)] bg-[var(--cf-surface)] p-1 shadow-sm" data-model-options="fallback" role="listbox" aria-label="Fallback model options"></div>
+            </div>
             <p class="mt-1 text-xs text-[var(--cf-muted)]">Fallback model retries only if the primary model fails or returns no usable reply.</p>
             {% if ai_provider_form.openai_fallback_model.errors %}<p class="cf-error">{{ ai_provider_form.openai_fallback_model.errors.0 }}</p>{% endif %}
           </div>
@@ -320,4 +335,301 @@
     </div>
   </section>
 </div>
+<script>
+  (function() {
+    const form = document.querySelector('[data-ai-provider-models-url]');
+    if (!form) return;
+
+    const statusEl = form.querySelector('[data-ai-provider-model-status]');
+    const providerEl = form.querySelector('[name="provider"]');
+    const baseUrlEl = form.querySelector('[name="base_url"]');
+    const apiKeyEl = form.querySelector('[name="api_key"]');
+    const csrfEl = form.querySelector('[name="csrfmiddlewaretoken"]');
+    const genericFetchError = 'Could not fetch models from this provider. Check the base URL and API key.';
+    const modelFetchDebounceMs = 500;
+    let isFetchingModels = false;
+    let modelFetchTimer = null;
+    let fetchedModels = [];
+    let activeOptionIndexes = { primary: -1, fallback: -1 };
+    let lastProviderDetailsSignature = null;
+
+    const controls = {
+      primary: {
+        search: form.querySelector('[data-model-search="primary"]'),
+        value: form.querySelector('[data-model-value="primary"]'),
+        options: form.querySelector('[data-model-options="primary"]'),
+      },
+      fallback: {
+        search: form.querySelector('[data-model-search="fallback"]'),
+        value: form.querySelector('[data-model-value="fallback"]'),
+        options: form.querySelector('[data-model-options="fallback"]'),
+      },
+    };
+
+    if (!statusEl || !providerEl || !baseUrlEl || !apiKeyEl || !csrfEl || !controls.primary.search || !controls.primary.value || !controls.primary.options || !controls.fallback.search || !controls.fallback.value || !controls.fallback.options) return;
+
+    const initialModelValues = {
+      primary: controls.primary.value.value,
+      fallback: controls.fallback.value.value,
+    };
+
+    function setStatus(message, isError) {
+      statusEl.textContent = message || '';
+      statusEl.classList.toggle('cf-badge-info', !isError);
+      statusEl.classList.toggle('cf-badge-inactive', Boolean(isError));
+    }
+
+    function hasFetchInputs() {
+      const provider = providerEl.value;
+      const apiKey = apiKeyEl.value.trim();
+      const baseUrl = baseUrlEl.value.trim();
+      if (!provider || !apiKey) return false;
+      if (provider === 'openai_compatible' && !baseUrl) return false;
+      return true;
+    }
+
+    function currentFetchSignature() {
+      return [providerEl.value, baseUrlEl.value.trim(), apiKeyEl.value.trim()].join('\n');
+    }
+
+    function filteredModels(role) {
+      const query = controls[role].search.value.trim().toLowerCase();
+      if (!query) return fetchedModels.slice(0, 50);
+      return fetchedModels.filter((model) => model.id.toLowerCase().includes(query)).slice(0, 50);
+    }
+
+    function modelOptionId(role, index) {
+      return `ai-provider-${role}-model-option-${index}`;
+    }
+
+    function setActiveOption(role, index) {
+      const models = filteredModels(role);
+      if (!models.length) {
+        activeOptionIndexes[role] = -1;
+        controls[role].search.setAttribute('aria-activedescendant', '');
+        return;
+      }
+      const boundedIndex = Math.max(0, Math.min(index, models.length - 1));
+      activeOptionIndexes[role] = boundedIndex;
+      controls[role].search.setAttribute('aria-activedescendant', modelOptionId(role, boundedIndex));
+      Array.from(controls[role].options.querySelectorAll('[data-model-option]')).forEach((button, buttonIndex) => {
+        const isActive = buttonIndex === boundedIndex;
+        button.setAttribute('aria-selected', String(isActive));
+        button.classList.toggle('bg-[var(--cf-surface-muted)]', isActive);
+      });
+    }
+
+    function hideOptions(role) {
+      controls[role].options.classList.add('hidden');
+      controls[role].search.setAttribute('aria-expanded', 'false');
+      controls[role].search.setAttribute('aria-activedescendant', '');
+      activeOptionIndexes[role] = -1;
+    }
+
+    function selectModel(role, modelId) {
+      controls[role].value.value = modelId;
+      controls[role].search.value = modelId;
+      hideOptions(role);
+    }
+
+    function renderModelOptions(role) {
+      const optionsEl = controls[role].options;
+      const models = filteredModels(role);
+      const activeIndex = activeOptionIndexes[role];
+      optionsEl.innerHTML = '';
+      controls[role].search.setAttribute('aria-expanded', 'true');
+      if (!models.length) {
+        const empty = document.createElement('div');
+        empty.className = 'px-3 py-2 text-xs text-[var(--cf-muted)]';
+        empty.textContent = fetchedModels.length ? 'No matching models.' : 'Models will load after provider details are entered.';
+        optionsEl.appendChild(empty);
+      } else {
+        models.forEach((model, index) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.tabIndex = -1;
+          button.id = modelOptionId(role, index);
+          button.className = 'block w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--cf-ink)] hover:bg-[var(--cf-surface-muted)]';
+          button.setAttribute('data-model-option', model.id);
+          button.setAttribute('role', 'option');
+          button.setAttribute('aria-selected', String(controls[role].value.value === model.id));
+          button.textContent = model.label || model.id;
+          button.addEventListener('mousedown', function(event) {
+            event.preventDefault();
+            selectModel(role, model.id);
+          });
+          button.addEventListener('click', function() {
+            selectModel(role, model.id);
+          });
+          optionsEl.appendChild(button);
+        });
+      }
+      optionsEl.classList.remove('hidden');
+      if (models.length && activeIndex >= 0) {
+        setActiveOption(role, activeIndex);
+      } else {
+        controls[role].search.setAttribute('aria-activedescendant', '');
+      }
+    }
+
+    function clearModelSelections() {
+      fetchedModels = [];
+      ['primary', 'fallback'].forEach((role) => {
+        controls[role].value.value = '';
+        controls[role].search.value = '';
+        hideOptions(role);
+      });
+    }
+
+    function syncSelectionsWithFetchedModels() {
+      ['primary', 'fallback'].forEach((role) => {
+        const selected = controls[role].value.value;
+        if (selected && fetchedModels.some((model) => model.id === selected)) {
+          controls[role].search.value = selected;
+          return;
+        }
+        if (selected && !fetchedModels.some((model) => model.id === selected)) {
+          if (selected === initialModelValues[role]) {
+            controls[role].search.value = selected;
+            return;
+          }
+          controls[role].value.value = '';
+          controls[role].search.value = '';
+        }
+      });
+    }
+
+    async function fetchProviderModels() {
+      window.clearTimeout(modelFetchTimer);
+      modelFetchTimer = null;
+      if (!hasFetchInputs() || isFetchingModels) return;
+      const requestSignature = currentFetchSignature();
+      isFetchingModels = true;
+      setStatus('Fetching provider models...', false);
+
+      const body = new FormData();
+      body.append('csrfmiddlewaretoken', csrfEl.value);
+      body.append('provider', providerEl.value);
+      body.append('base_url', baseUrlEl.value);
+      body.append('api_key', apiKeyEl.value);
+
+      try {
+        const response = await fetch(form.dataset.aiProviderModelsUrl, {
+          method: 'POST',
+          body: body,
+          headers: {
+            'X-CSRFToken': csrfEl.value,
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        });
+        const payload = await response.json();
+        if (requestSignature !== currentFetchSignature()) {
+          setStatus('Provider details changed. Fetching latest models...', false);
+          scheduleModelFetch();
+          return;
+        }
+        if (!response.ok || !payload.success) {
+          fetchedModels = [];
+          setStatus(payload.error || genericFetchError, true);
+          return;
+        }
+        fetchedModels = Array.isArray(payload.models) ? payload.models : [];
+        syncSelectionsWithFetchedModels();
+        renderModelOptions('primary');
+        renderModelOptions('fallback');
+        hideOptions('primary');
+        hideOptions('fallback');
+        setStatus(`Fetched ${fetchedModels.length} model${fetchedModels.length === 1 ? '' : 's'}.`, false);
+      } catch (error) {
+        if (requestSignature !== currentFetchSignature()) {
+          setStatus('Provider details changed. Fetching latest models...', false);
+          scheduleModelFetch();
+          return;
+        }
+        fetchedModels = [];
+        setStatus(genericFetchError, true);
+      } finally {
+        isFetchingModels = false;
+      }
+    }
+
+    function scheduleModelFetch() {
+      window.clearTimeout(modelFetchTimer);
+      if (!hasFetchInputs()) {
+        setStatus('Models will load after provider details are entered.', false);
+        return;
+      }
+      modelFetchTimer = window.setTimeout(fetchProviderModels, modelFetchDebounceMs);
+    }
+
+    function handleProviderDetailsChange() {
+      const signature = currentFetchSignature();
+      if (signature === lastProviderDetailsSignature) return;
+      lastProviderDetailsSignature = signature;
+      clearModelSelections();
+      scheduleModelFetch();
+    }
+
+    [providerEl, baseUrlEl, apiKeyEl].forEach((field) => {
+      field.addEventListener('input', handleProviderDetailsChange);
+      field.addEventListener('change', handleProviderDetailsChange);
+    });
+
+    ['primary', 'fallback'].forEach((role) => {
+      controls[role].search.addEventListener('keydown', function(event) {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          const models = filteredModels(role);
+          renderModelOptions(role);
+          if (models.length) {
+            setActiveOption(role, activeOptionIndexes[role] < 0 ? 0 : activeOptionIndexes[role] + 1);
+          }
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          const models = filteredModels(role);
+          renderModelOptions(role);
+          if (models.length) {
+            setActiveOption(role, activeOptionIndexes[role] < 0 ? models.length - 1 : activeOptionIndexes[role] - 1);
+          }
+          return;
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          const models = filteredModels(role);
+          if (models.length) {
+            const activeIndex = activeOptionIndexes[role];
+            if (activeIndex >= 0 && activeIndex < models.length) {
+              selectModel(role, models[activeIndex].id);
+            } else {
+              selectModel(role, models[0].id);
+            }
+          }
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          hideOptions(role);
+        }
+      });
+      controls[role].search.addEventListener('input', function() {
+        if (controls[role].search.value !== controls[role].value.value) {
+          controls[role].value.value = '';
+        }
+        activeOptionIndexes[role] = -1;
+        renderModelOptions(role);
+      });
+      controls[role].search.addEventListener('focus', function() {
+        renderModelOptions(role);
+      });
+      controls[role].search.addEventListener('blur', function() {
+        window.setTimeout(function() { hideOptions(role); }, 150);
+      });
+    });
+
+    lastProviderDetailsSignature = currentFetchSignature();
+    scheduleModelFetch();
+  })();
+</script>
 {% endblock %}

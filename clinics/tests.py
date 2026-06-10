@@ -195,6 +195,103 @@ def test_ai_provider_form_custom_provider_accepts_https_base_url_and_dropdown_mo
 
 
 @pytest.mark.django_db
+def test_ai_provider_form_requires_new_key_when_saved_secret_when_provider_base_url_changes(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-key-provider-change")
+    settings = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
+        base_url=ClinicAIProviderSettings.OPENAI_BASE_URL,
+        model="gpt-4o-mini",
+        fallback_model="gpt-4o-mini",
+        api_key="sk-openai-key",
+        is_enabled=False,
+    )
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "gpt-4o-mini",
+            "openai_fallback_model": "gpt-4o-mini",
+            "api_key": SAVED_PROVIDER_SECRET_MASK,
+        },
+        instance=settings,
+    )
+
+    assert not form.is_valid()
+    assert "api_key" in form.errors
+    assert "Enter a new API key when changing provider or base URL." in form.errors["api_key"]
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_requires_new_key_when_blank_key_changes_provider_base_url(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-blank-key-provider-change")
+    settings = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
+        base_url=ClinicAIProviderSettings.OPENAI_BASE_URL,
+        model="gpt-4o-mini",
+        fallback_model="gpt-4o-mini",
+        api_key="sk-openai-key",
+        is_enabled=False,
+    )
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "gpt-4o-mini",
+            "openai_fallback_model": "gpt-4o-mini",
+            "api_key": "",
+        },
+        instance=settings,
+    )
+
+    assert not form.is_valid()
+    assert "api_key" in form.errors
+    assert "Enter a new API key when changing provider or base URL." in form.errors["api_key"]
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_keeps_saved_secret_when_provider_base_url_unchanged(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-key-provider-unchanged")
+    settings = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="https://openrouter.ai/api/v1",
+        model="openrouter/auto",
+        fallback_model="openrouter/fallback",
+        api_key="sk-openrouter-key",
+        is_enabled=False,
+    )
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1/",
+            "openai_model": "openrouter/auto",
+            "openai_fallback_model": "openrouter/fallback",
+            "api_key": SAVED_PROVIDER_SECRET_MASK,
+        },
+        instance=settings,
+    )
+
+    assert form.is_valid(), form.errors
+    saved = form.save()
+    assert saved.api_key == "sk-openrouter-key"
+    assert saved.base_url == "https://openrouter.ai/api/v1"
+
+
+@pytest.mark.django_db
 def test_ai_provider_form_requires_dropdown_fallback_model_when_enabled(monkeypatch):
     monkeypatch.setattr(
         "clinics.ai_provider_validation.socket.getaddrinfo",
@@ -388,3 +485,170 @@ def test_ai_provider_form_does_not_render_saved_api_key():
 
     assert "sk-secret-value" not in html
     assert SAVED_PROVIDER_SECRET_MASK in html
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_empty_settings_do_not_render_static_default_model_options():
+    clinic = _create_clinic("form-empty-model-options")
+    settings = ClinicAIProviderSettings.objects.create(clinic=clinic, model="", fallback_model="")
+
+    html = AIProviderSettingsForm(instance=settings).as_p()
+
+    assert 'value="gpt-4o-mini"' not in html
+    assert 'value="gpt-4o"' not in html
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_unconfigured_default_settings_do_not_render_static_default_model_options():
+    clinic = _create_clinic("form-unconfigured-default-model-options")
+    settings = ClinicAIProviderSettings.objects.create(clinic=clinic)
+
+    html = AIProviderSettingsForm(instance=settings).as_p()
+
+    assert settings.model == ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
+    assert settings.fallback_model == ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
+    assert 'value="gpt-4o-mini"' not in html
+    assert 'value="gpt-4o"' not in html
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_bound_empty_settings_keep_submitted_fetched_model_options(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-bound-fetched-model-options")
+    settings = ClinicAIProviderSettings.objects.create(clinic=clinic, model="", fallback_model="")
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "openrouter/auto",
+            "openai_fallback_model": "anthropic/claude-3.5-sonnet",
+            "api_key": "sk-custom-key",
+            "is_enabled": "on",
+        },
+        instance=settings,
+    )
+
+    assert form.is_valid(), form.errors
+    html = form.as_p()
+    assert 'value="openrouter/auto"' in html
+    assert 'value="anthropic/claude-3.5-sonnet"' in html
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_accepts_fetched_model_ids_for_dropdown_fields(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-fetched-models")
+    settings = ClinicAIProviderSettings.objects.create(clinic=clinic)
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "openrouter/auto",
+            "openai_fallback_model": "anthropic/claude-3.5-sonnet",
+            "api_key": "sk-custom-key",
+            "is_enabled": "on",
+        },
+        instance=settings,
+    )
+
+    assert form.is_valid(), form.errors
+    saved = form.save()
+
+    assert saved.model == "openrouter/auto"
+    assert saved.fallback_model == "anthropic/claude-3.5-sonnet"
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_renders_saved_fetched_model_values_as_options():
+    clinic = _create_clinic("form-saved-fetched-models")
+    settings = ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        model="openrouter/auto",
+        fallback_model="anthropic/claude-3.5-sonnet",
+    )
+
+    html = AIProviderSettingsForm(instance=settings).as_p()
+
+    assert 'value="openrouter/auto"' in html
+    assert 'value="anthropic/claude-3.5-sonnet"' in html
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_rejects_control_characters_in_model_ids(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-invalid-model-id")
+    settings = ClinicAIProviderSettings.objects.create(clinic=clinic)
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "openrouter/\nauto",
+            "openai_fallback_model": "anthropic/claude-3.5-sonnet",
+            "api_key": "sk-custom-key",
+            "is_enabled": "on",
+        },
+        instance=settings,
+    )
+
+    assert not form.is_valid()
+    assert "openai_model" in form.errors
+    assert "Enter a valid model ID." in form.errors["openai_model"]
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_rejects_c1_control_characters_in_model_ids(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-invalid-c1-model-id")
+    settings = ClinicAIProviderSettings.objects.create(clinic=clinic)
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "openrouter/\x85auto",
+            "openai_fallback_model": "anthropic/claude-3.5-sonnet",
+            "api_key": "sk-custom-key",
+            "is_enabled": "on",
+        },
+        instance=settings,
+    )
+
+    assert not form.is_valid()
+    assert "openai_model" in form.errors
+    assert "Enter a valid model ID." in form.errors["openai_model"]
+
+
+@pytest.mark.django_db
+def test_ai_provider_form_rejects_surrounding_c1_control_characters_in_model_ids(monkeypatch):
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic = _create_clinic("form-leading-c1-model-id")
+    settings = ClinicAIProviderSettings.objects.create(clinic=clinic)
+    form = AIProviderSettingsForm(
+        data={
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "openai_model": "\x85openrouter/auto",
+            "openai_fallback_model": "anthropic/claude-3.5-sonnet",
+            "api_key": "sk-custom-key",
+            "is_enabled": "on",
+        },
+        instance=settings,
+    )
+
+    assert not form.is_valid()
+    assert "openai_model" in form.errors
+    assert "Enter a valid model ID." in form.errors["openai_model"]

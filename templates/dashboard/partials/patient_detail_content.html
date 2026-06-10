@@ -105,6 +105,50 @@
       </div>
       <span class="cf-badge cf-badge-info">Estimated</span>
     </div>
+    {% if yakap_profile_form %}
+      <form method="post" action="{% url 'dashboard:update_patient_yakap_profile' patient.id %}" class="mt-4 grid gap-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
+        {% csrf_token %}
+        {% for error in yakap_profile_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+        <div class="grid gap-3 lg:grid-cols-2">
+          <div class="cf-field">
+            <label for="{{ yakap_profile_form.status.id_for_label }}" class="cf-label">{{ yakap_profile_form.status.label }}</label>
+            {{ yakap_profile_form.status }}
+            {% if yakap_profile_form.status.errors %}<p class="cf-error">{{ yakap_profile_form.status.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ yakap_profile_form.registered_clinic_name.id_for_label }}" class="cf-label">{{ yakap_profile_form.registered_clinic_name.label }}</label>
+            {{ yakap_profile_form.registered_clinic_name }}
+            {% if yakap_profile_form.registered_clinic_name.errors %}<p class="cf-error">{{ yakap_profile_form.registered_clinic_name.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ yakap_profile_form.verification_method.id_for_label }}" class="cf-label">{{ yakap_profile_form.verification_method.label }}</label>
+            {{ yakap_profile_form.verification_method }}
+            {% if yakap_profile_form.verification_method.errors %}<p class="cf-error">{{ yakap_profile_form.verification_method.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ yakap_profile_form.verification_reference.id_for_label }}" class="cf-label">{{ yakap_profile_form.verification_reference.label }}</label>
+            {{ yakap_profile_form.verification_reference }}
+            {% if yakap_profile_form.verification_reference.errors %}<p class="cf-error">{{ yakap_profile_form.verification_reference.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+        <div class="grid gap-3 lg:grid-cols-2">
+          <div class="cf-field">
+            <label for="{{ yakap_profile_form.consent_note.id_for_label }}" class="cf-label">{{ yakap_profile_form.consent_note.label }}</label>
+            {{ yakap_profile_form.consent_note }}
+            {% if yakap_profile_form.consent_note.errors %}<p class="cf-error">{{ yakap_profile_form.consent_note.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ yakap_profile_form.staff_notes.id_for_label }}" class="cf-label">{{ yakap_profile_form.staff_notes.label }}</label>
+            {{ yakap_profile_form.staff_notes }}
+            {% if yakap_profile_form.staff_notes.errors %}<p class="cf-error">{{ yakap_profile_form.staff_notes.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-xs text-[var(--cf-muted)]">Saving marks this profile as verified by the current staff user.</p>
+          <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="shield-check" class="h-4 w-4"></i>Update YAKAP Profile</button>
+        </div>
+      </form>
+    {% endif %}
     {% if yakap_profile %}
       {% if yakap_balances %}
         <div class="mt-4 grid gap-3 lg:grid-cols-2">
@@ -144,7 +188,7 @@
         </div>
       {% endif %}
     {% else %}
-      <p class="mt-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-sm text-[var(--cf-muted)]">No YAKAP profile exists for this patient yet. A profile is created when staff record YAKAP usage.</p>
+      <p class="mt-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-sm text-[var(--cf-muted)]">No YAKAP profile exists for this patient yet. Use the form above to start staff verification.</p>
     {% endif %}
   </div>
 

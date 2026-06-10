@@ -108,6 +108,35 @@ class SharedAISettingsForm(forms.ModelForm):
         }
 
 
+class ProviderModelChoiceField(forms.ChoiceField):
+    def valid_value(self, value):
+        return True
+
+
+def _provider_model_choices(*values):
+    choices = []
+    existing = set()
+    for value in values:
+        model_id = (value or "").strip()
+        if model_id and model_id not in existing:
+            choices.append((model_id, model_id))
+            existing.add(model_id)
+    return choices
+
+
+def _clean_provider_model_id(value):
+    raw_model_id = value or ""
+    if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in raw_model_id):
+        raise forms.ValidationError("Enter a valid model ID.")
+    model_id = raw_model_id.strip()
+    if not model_id:
+        return ""
+    max_length = ClinicAIProviderSettings._meta.get_field("model").max_length
+    if len(model_id) > max_length:
+        raise forms.ValidationError("Model ID is too long.")
+    return model_id
+
+
 class AIProviderSettingsForm(forms.ModelForm):
     base_url = forms.CharField(
         required=False,
@@ -115,14 +144,14 @@ class AIProviderSettingsForm(forms.ModelForm):
         widget=forms.URLInput(attrs={"class": _INPUT, "placeholder": "https://api.openai.com/v1"}),
         label="Base URL",
     )
-    openai_model = forms.ChoiceField(
-        choices=ClinicAIProviderSettings.OPENAI_MODEL_CHOICES,
+    openai_model = ProviderModelChoiceField(
+        choices=[],
         required=False,
         widget=forms.Select(attrs={"class": _SELECT}),
         label="Primary model",
     )
-    openai_fallback_model = forms.ChoiceField(
-        choices=ClinicAIProviderSettings.OPENAI_MODEL_CHOICES,
+    openai_fallback_model = ProviderModelChoiceField(
+        choices=[],
         required=False,
         widget=forms.Select(attrs={"class": _SELECT}),
         label="Fallback model",
@@ -151,15 +180,34 @@ class AIProviderSettingsForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._uses_saved_provider_secret = False
+        submitted_model = self.data.get("openai_model") if self.is_bound else ""
+        submitted_fallback_model = self.data.get("openai_fallback_model") if self.is_bound else ""
+        instance_model = ""
+        instance_fallback_model = ""
         if self.instance and self.instance.pk:
             if self.instance.api_key:
                 self.initial["api_key"] = SAVED_PROVIDER_SECRET_MASK
-            self.initial["openai_model"] = self.instance.model or ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
-            self.initial["openai_fallback_model"] = self.instance.fallback_model or ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
+            instance_model = self.instance.model or ""
+            instance_fallback_model = self.instance.fallback_model or ""
+            if (
+                not self.instance.is_enabled
+                and not self.instance.has_api_key
+                and instance_model == ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
+                and instance_fallback_model == ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
+            ):
+                instance_model = ""
+                instance_fallback_model = ""
+            self.initial["openai_model"] = instance_model
+            self.initial["openai_fallback_model"] = instance_fallback_model
+        model_choices = _provider_model_choices(instance_model, instance_fallback_model, submitted_model, submitted_fallback_model)
+        self.fields["openai_model"].choices = model_choices
+        self.fields["openai_fallback_model"].choices = model_choices
 
     def clean_api_key(self):
         api_key = self.cleaned_data.get("api_key", "")
         if api_key in {"", SAVED_PROVIDER_SECRET_MASK} and self.instance and self.instance.pk:
+            self._uses_saved_provider_secret = True
             return self.instance.api_key
         return api_key
 
@@ -168,8 +216,16 @@ class AIProviderSettingsForm(forms.ModelForm):
         provider = cleaned.get("provider")
         enabled = cleaned.get("is_enabled")
         base_url_invalid = False
-        selected_model = cleaned.get("openai_model") or ""
-        selected_fallback_model = cleaned.get("openai_fallback_model") or ""
+        try:
+            selected_model = _clean_provider_model_id(cleaned.get("openai_model"))
+        except forms.ValidationError as exc:
+            selected_model = ""
+            self.add_error("openai_model", exc)
+        try:
+            selected_fallback_model = _clean_provider_model_id(cleaned.get("openai_fallback_model"))
+        except forms.ValidationError as exc:
+            selected_fallback_model = ""
+            self.add_error("openai_fallback_model", exc)
         if provider == ClinicAIProviderSettings.PROVIDER_OPENAI:
             cleaned["base_url"] = ClinicAIProviderSettings.OPENAI_BASE_URL
             cleaned["model"] = selected_model
@@ -186,6 +242,20 @@ class AIProviderSettingsForm(forms.ModelForm):
             cleaned["fallback_model"] = selected_fallback_model
         else:
             self.add_error("provider", "Choose a supported AI provider.")
+
+        if self._uses_saved_provider_secret and self.instance and self.instance.pk and (self.instance.api_key or "").strip():
+            saved_provider = self.instance.provider or ""
+            saved_base_url = ""
+            if saved_provider == ClinicAIProviderSettings.PROVIDER_OPENAI:
+                saved_base_url = ClinicAIProviderSettings.OPENAI_BASE_URL
+            elif saved_provider == ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE:
+                try:
+                    saved_base_url = validate_ai_provider_base_url(self.instance.base_url or "")
+                except forms.ValidationError:
+                    saved_base_url = ""
+            if saved_provider != provider or saved_base_url != (cleaned.get("base_url") or ""):
+                cleaned["api_key"] = ""
+                self.add_error("api_key", "Enter a new API key when changing provider or base URL.")
 
         if enabled:
             if not (cleaned.get("api_key") or "").strip():

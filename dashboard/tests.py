@@ -1774,15 +1774,598 @@ def test_assistant_settings_page_shows_ai_provider_form_without_secret(clinic_se
     assert "API key" in content
     assert 'name="openai_model"' in content
     assert 'name="openai_fallback_model"' in content
+    assert 'data-ai-provider-models-url="' in content
+    assert reverse("dashboard:ai_provider_models") in content
+    assert 'data-ai-provider-model-status' in content
+    assert 'data-ai-provider-model-status role="status" aria-live="polite"' in content
+    assert content.index('data-ai-provider-model-status') < content.index('data-ai-provider-layout="responsive-grid"')
+    assert re.search(
+        r'<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">.*?'
+        r'<span class="cf-badge cf-badge-info self-start[^"]*" data-ai-provider-model-status role="status" aria-live="polite">',
+        content,
+        re.DOTALL,
+    )
+    assert 'data-model-combobox="primary"' in content
+    assert 'data-model-combobox="fallback"' in content
+    assert 'data-model-search="primary"' in content
+    assert 'data-model-search="fallback"' in content
+    assert 'data-model-options="primary"' in content
+    assert 'data-model-options="fallback"' in content
+    assert 'type="hidden" name="openai_model"' in content
+    assert 'type="hidden" name="openai_fallback_model"' in content
+    assert 'data-model-value="primary"' in content
+    assert 'data-model-value="fallback"' in content
+    assert 'id="ai-provider-primary-model-search"' in content
+    assert 'data-model-search="primary" value="gpt-4o"' in content
+    assert 'name="openai_model" value="gpt-4o"' in content
+    assert 'id="ai-provider-fallback-model-search"' in content
+    assert 'data-model-search="fallback" value="gpt-4o-mini"' in content
+    assert 'name="openai_fallback_model" value="gpt-4o-mini"' in content
+    assert "Provider model discovery" not in content
+    assert 'data-ai-provider-model-fetch' not in content
+    assert "Fetch models" not in content
+    assert "setStatus(error.message" not in content
+    assert "error.message ||" not in content
     assert "Custom model ID" not in content
     assert "Custom fallback model ID" not in content
     assert 'name="custom_model"' not in content
     assert 'name="custom_fallback_model"' not in content
+    assert "const modelFetchDebounceMs = 500;" in content
+    assert "let modelFetchTimer = null;" in content
+    assert "scheduleModelFetch()" in content
+    assert "window.setTimeout(fetchProviderModels" in content
+    assert "renderModelOptions('primary')" in content
+    assert "renderModelOptions('fallback')" in content
+    assert "selectModel(role, modelId)" in content
+    assert "data-model-option" in content
+    assert "clearModelSelections()" in content
+    assert "fetchedModels = [];" in content
+    assert "initialModelValues" in content
+    assert 'role="combobox"' in content
+    assert 'aria-autocomplete="list"' in content
+    assert 'aria-controls="ai-provider-primary-model-options"' in content
+    assert 'aria-controls="ai-provider-fallback-model-options"' in content
+    assert "button.setAttribute('role', 'option')" in content
+    assert "button.addEventListener('click'" in content
+    assert "button.setAttribute('aria-selected'" in content
+    assert "button.tabIndex = -1" in content or "button.setAttribute('tabindex', '-1')" in content
+    assert "aria-activedescendant" in content
+    assert "let activeOptionIndexes" in content
+    assert "event.key === 'ArrowDown'" in content
+    assert "event.key === 'ArrowUp'" in content
+    assert "setActiveOption(role" in content
+    assert "event.key === 'Enter'" in content
+    assert "event.preventDefault()" in content
+    assert "selectModel(role, models[0].id)" in content
+    assert "event.key === 'Escape'" in content
+    assert 'aria-expanded="false"' in content
+    assert "setAttribute('aria-expanded', 'false')" in content
+    assert "controls[role].value.value = controls[role].search.value" not in content
+    assert "setStatus(error.message" not in content
+    assert "error.message ||" not in content
     assert "retries only if the primary model fails" in content
     assert "gpt-4o-mini" in content
     assert "gpt-4o" in content
     assert "sk-dashboard-secret" not in content
     assert "************" in content
+
+
+@pytest.mark.django_db
+def test_ai_provider_model_search_executes_keyboard_selection_and_clears_stale_values(clinic_setup, client):
+    from playwright.sync_api import sync_playwright
+
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+    response = client.get(reverse("dashboard:assistant_settings"))
+    content = response.content.decode()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.route(
+                f"**{reverse('dashboard:ai_provider_models')}",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "success": True,
+                            "models": [
+                                {"id": "provider/model-a", "label": "provider/model-a"},
+                                {"id": "provider/model-b", "label": "provider/model-b"},
+                                {"id": "anthropic/claude", "label": "anthropic/claude"},
+                            ],
+                        }
+                    ),
+                ),
+            )
+            page.set_content(content.replace("<head>", '<head><base href="http://testserver/">', 1))
+            page.locator('[name="api_key"]').fill("sk-playwright-key")
+            page.wait_for_function("document.querySelector('[data-ai-provider-model-status]').textContent.includes('Fetched 3 models')")
+            assert page.locator('[data-ai-provider-model-status]').text_content() == "Fetched 3 models."
+
+            primary = page.locator('[data-model-search="primary"]')
+            primary.fill("model")
+            primary.press("ArrowDown")
+            primary.press("ArrowDown")
+            primary.press("Enter")
+            assert page.locator('[data-model-value="primary"]').input_value() == "provider/model-b"
+            assert primary.input_value() == "provider/model-b"
+
+            primary.fill("not-a-real-model")
+            assert page.locator('[data-model-value="primary"]').input_value() == ""
+
+            primary.fill("model")
+            primary.press("ArrowDown")
+            primary.press("Enter")
+            assert page.locator('[data-model-value="primary"]').input_value() == "provider/model-a"
+
+            page.locator('[name="api_key"]').fill("sk-changed-key")
+            assert page.locator('[data-model-value="primary"]').input_value() == ""
+        finally:
+            browser.close()
+
+
+@pytest.mark.django_db
+def test_ai_provider_model_search_preserves_saved_values_missing_from_fetched_models(clinic_setup, client):
+    from clinics.models import ClinicAIProviderSettings
+    from playwright.sync_api import sync_playwright
+
+    clinic, service, owner = clinic_setup
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
+        model="legacy/primary",
+        fallback_model="legacy/fallback",
+        api_key="sk-saved-key",
+        is_enabled=True,
+    )
+    client.force_login(owner)
+    response = client.get(reverse("dashboard:assistant_settings"))
+    content = response.content.decode()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.route(
+                f"**{reverse('dashboard:ai_provider_models')}",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "success": True,
+                            "models": [{"id": "provider/model-a", "label": "provider/model-a"}],
+                        }
+                    ),
+                ),
+            )
+            page.set_content(content.replace("<head>", '<head><base href="http://testserver/">', 1))
+            page.wait_for_function("document.querySelector('[data-ai-provider-model-status]').textContent.includes('Fetched 1 model')")
+
+            assert page.locator('[data-model-value="primary"]').input_value() == "legacy/primary"
+            assert page.locator('[data-model-search="primary"]').input_value() == "legacy/primary"
+            assert page.locator('[data-model-value="fallback"]').input_value() == "legacy/fallback"
+            assert page.locator('[data-model-search="fallback"]').input_value() == "legacy/fallback"
+        finally:
+            browser.close()
+
+
+@pytest.mark.django_db
+def test_ai_provider_model_options_overlay_does_not_stretch_provider_column(clinic_setup, client):
+    from playwright.sync_api import sync_playwright
+
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+    response = client.get(reverse("dashboard:assistant_settings"))
+    content = response.content.decode()
+    models = [{"id": f"provider/model-{index:02d}", "label": f"provider/model-{index:02d}"} for index in range(30)]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 1400, "height": 900})
+            page.route(
+                f"**{reverse('dashboard:ai_provider_models')}",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"success": True, "models": models}),
+                ),
+            )
+            page.set_content(content.replace("<head>", '<head><base href="http://testserver/">', 1))
+            page.add_style_tag(content="""
+                [data-ai-provider-layout] { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+                [data-ai-provider-field="provider"] { order: 1; }
+                [data-ai-provider-field="primary-model"] { order: 2; }
+                [data-ai-provider-field="base-url"] { order: 3; }
+                [data-ai-provider-field="fallback-model"] { order: 4; }
+                [data-ai-provider-field="api-key"] { order: 5; }
+                [data-ai-provider-field] { min-height: 0; }
+                .hidden { display: none !important; }
+                .relative { position: relative; }
+                .absolute { position: absolute; }
+                .left-0 { left: 0; }
+                .right-0 { right: 0; }
+                .top-full { top: 100%; }
+                .z-30 { z-index: 30; }
+                .max-h-56 { max-height: 224px; }
+                .overflow-y-auto { overflow-y: auto; }
+                .block { display: block; }
+                .w-full { width: 100%; }
+                .cf-input, .cf-select { box-sizing: border-box; display: block; height: 40px; width: 100%; }
+            """)
+            page.locator('[name="api_key"]').fill("sk-playwright-key")
+            page.wait_for_function("document.querySelector('[data-ai-provider-model-status]').textContent.includes('Fetched 30 models')")
+
+            provider_height_before = page.locator('[data-ai-provider-field="provider"]').evaluate("element => element.getBoundingClientRect().height")
+            primary = page.locator('[data-model-search="primary"]')
+            primary.fill("model")
+            page.wait_for_function('!document.querySelector(\'[data-model-options="primary"]\').classList.contains("hidden")')
+            provider_height_after = page.locator('[data-ai-provider-field="provider"]').evaluate("element => element.getBoundingClientRect().height")
+
+            assert provider_height_after <= provider_height_before + 8
+        finally:
+            browser.close()
+
+
+@pytest.mark.django_db
+def test_assistant_settings_empty_ai_provider_does_not_render_static_default_models(clinic_setup, client):
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:assistant_settings"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert "Provider model discovery" not in content
+    assert "Fetch models" not in content
+    assert 'data-model-combobox="primary"' in content
+    assert 'data-model-combobox="fallback"' in content
+    assert 'value="gpt-4o-mini"' not in content
+    assert 'value="gpt-4o"' not in content
+    assert "Models will load after provider details are entered." in content
+
+
+@pytest.mark.django_db
+def test_assistant_settings_marks_api_key_post_parameter_sensitive(clinic_setup, monkeypatch):
+    from dashboard import views
+
+    clinic, service, owner = clinic_setup
+    request = RequestFactory().post(
+        "/dashboard/assistant/",
+        {
+            "_form": "unused",
+            "api_key": "sk-dashboard-secret",
+        },
+    )
+    request.user = owner
+
+    def checked_clinic(request, allow_missing=False):
+        assert getattr(request, "sensitive_post_parameters", None) == ("api_key",)
+        return clinic
+
+    def fake_render(request, template_name, context, *args, **kwargs):
+        return HttpResponse("ok")
+
+    monkeypatch.setattr(views, "_clinic_or_redirect", checked_clinic)
+    monkeypatch.setattr(views, "render", fake_render)
+
+    response = views.assistant_settings(request)
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_marks_api_key_sensitive(clinic_setup, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+    from dashboard import views
+
+    clinic, service, owner = clinic_setup
+    request = RequestFactory().post(
+        "/dashboard/assistant/provider-models/",
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI,
+            "api_key": "sk-live-key",
+        },
+    )
+    request.user = owner
+
+    def checked_clinic(request, allow_missing=False):
+        assert getattr(request, "sensitive_post_parameters", None) == ("api_key",)
+        return clinic
+
+    def fake_fetch(base_url, api_key, *, clinic_id=None, provider=""):
+        return ["gpt-4o"]
+
+    monkeypatch.setattr(views, "_clinic_or_redirect", checked_clinic)
+    monkeypatch.setattr(views, "fetch_available_models", fake_fetch)
+
+    response = views.ai_provider_models(request)
+
+    has_sensitive_api_key_marker = False
+    wrapped = views.ai_provider_models
+    while wrapped is not None:
+        if getattr(wrapped, "sensitive_variables", None) == ("api_key",):
+            has_sensitive_api_key_marker = True
+            break
+        wrapped = getattr(wrapped, "__wrapped__", None)
+
+    assert response.status_code == 200
+    assert has_sensitive_api_key_marker
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_requires_login(client):
+    response = client.post(reverse("dashboard:ai_provider_models"), {"provider": "openai", "api_key": "sk-key"})
+
+    assert response.status_code == 302
+    assert reverse("accounts:login") in response["Location"] or "/login" in response["Location"]
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_rejects_get(clinic_setup, client):
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:ai_provider_models"))
+
+    assert response.status_code == 405
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_rejects_unsupported_provider(clinic_setup, client):
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {"provider": "unsupported", "api_key": "sk-key"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "Choose a supported AI provider."}
+
+
+@pytest.mark.django_db
+def test_owner_can_fetch_ai_provider_models_from_entered_key(clinic_setup, client, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    def fake_fetch(base_url, api_key, *, clinic_id=None, provider=""):
+        assert base_url == ClinicAIProviderSettings.OPENAI_BASE_URL
+        assert api_key == "sk-live-key"
+        assert clinic_id == clinic.id
+        assert provider == ClinicAIProviderSettings.PROVIDER_OPENAI
+        return ["gpt-4o", "gpt-4o-mini"]
+
+    monkeypatch.setattr("dashboard.views.fetch_available_models", fake_fetch)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI,
+            "base_url": "https://ignored.example/v1",
+            "api_key": "sk-live-key",
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload == {
+        "success": True,
+        "models": [
+            {"id": "gpt-4o", "label": "gpt-4o"},
+            {"id": "gpt-4o-mini", "label": "gpt-4o-mini"},
+        ],
+    }
+    assert "sk-live-key" not in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_staff_cannot_fetch_ai_provider_models(clinic_setup, client):
+    from clinics.models import ClinicAIProviderSettings
+
+    User = get_user_model()
+    clinic, service, owner = clinic_setup
+    staff = User.objects.create_user(username="staff-models@example.com", email="staff-models@example.com", password="password123")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI,
+            "api_key": "sk-live-key",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_rejects_unsafe_base_url_before_network(clinic_setup, client, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    def fail_fetch(*args, **kwargs):
+        pytest.fail("fetch_available_models should not run for unsafe base URLs")
+
+    monkeypatch.setattr("dashboard.views.fetch_available_models", fail_fetch)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://127.0.0.1/v1",
+            "api_key": "sk-live-key",
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 400
+    assert payload == {"success": False, "error": "Enter a valid provider base URL."}
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_mask_uses_only_active_clinic_saved_key(client, monkeypatch):
+    from clinics.forms import SAVED_PROVIDER_SECRET_MASK
+    from clinics.models import ClinicAIProviderSettings
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    User = get_user_model()
+    owner_a = User.objects.create_user(username="models-a@example.com", email="models-a@example.com", password="password123")
+    group_a = ClinicGroup.objects.create(name="Models A Group", owner=owner_a)
+    clinic_a = Clinic.objects.create(group=group_a, name="Models A", slug="models-a")
+    ClinicMembership.objects.create(clinic=clinic_a, user=owner_a, role=ClinicMembership.ROLE_OWNER)
+    ClinicAIProviderSettings.objects.create(clinic=clinic_a, api_key="sk-a")
+
+    owner_b = User.objects.create_user(username="models-b@example.com", email="models-b@example.com", password="password123")
+    group_b = ClinicGroup.objects.create(name="Models B Group", owner=owner_b)
+    clinic_b = Clinic.objects.create(group=group_b, name="Models B", slug="models-b")
+    ClinicMembership.objects.create(clinic=clinic_b, user=owner_b, role=ClinicMembership.ROLE_OWNER)
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic_b,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="https://openrouter.ai/api/v1",
+        api_key="sk-b",
+    )
+    client.force_login(owner_b)
+
+    def fake_fetch(base_url, api_key, *, clinic_id=None, provider=""):
+        assert api_key == "sk-b"
+        assert clinic_id == clinic_b.id
+        return ["provider/model"]
+
+    monkeypatch.setattr("dashboard.views.fetch_available_models", fake_fetch)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": SAVED_PROVIDER_SECRET_MASK,
+        },
+    )
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "provider/model" in content
+    assert "sk-a" not in content
+    assert "sk-b" not in content
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_mask_rejects_changed_compatible_base_url(clinic_setup, client, monkeypatch):
+    from clinics.forms import SAVED_PROVIDER_SECRET_MASK
+    from clinics.models import ClinicAIProviderSettings
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic, service, owner = clinic_setup
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="https://openrouter.ai/api/v1",
+        api_key="sk-openrouter",
+    )
+    client.force_login(owner)
+
+    def fail_fetch(*args, **kwargs):
+        pytest.fail("fetch_available_models should not run when masked key changes provider base URL")
+
+    monkeypatch.setattr("dashboard.views.fetch_available_models", fail_fetch)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://api.other-provider.example/v1",
+            "api_key": SAVED_PROVIDER_SECRET_MASK,
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 400
+    assert payload == {"success": False, "error": "Enter an API key before fetching models."}
+    assert "sk-openrouter" not in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_blank_key_uses_saved_key_when_provider_base_url_match(clinic_setup, client, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+
+    monkeypatch.setattr(
+        "clinics.ai_provider_validation.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
+    )
+    clinic, service, owner = clinic_setup
+    ClinicAIProviderSettings.objects.create(
+        clinic=clinic,
+        provider=ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+        base_url="https://openrouter.ai/api/v1",
+        api_key="sk-openrouter-key",
+    )
+    client.force_login(owner)
+
+    def fake_fetch(base_url, api_key, *, clinic_id=None, provider=""):
+        assert base_url == "https://openrouter.ai/api/v1"
+        assert api_key == "sk-openrouter-key"
+        assert clinic_id == clinic.id
+        return ["provider/model"]
+
+    monkeypatch.setattr("dashboard.views.fetch_available_models", fake_fetch)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI_COMPATIBLE,
+            "base_url": "https://openrouter.ai/api/v1/",
+            "api_key": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["models"] == [{"id": "provider/model", "label": "provider/model"}]
+    assert "sk-openrouter-key" not in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_ai_provider_models_returns_generic_error_without_secret(clinic_setup, client, monkeypatch):
+    from clinics.models import ClinicAIProviderSettings
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, service, owner = clinic_setup
+    client.force_login(owner)
+
+    def fake_fetch(base_url, api_key, *, clinic_id=None, provider=""):
+        raise AIProviderError("AI provider model fetch failed.")
+
+    monkeypatch.setattr("dashboard.views.fetch_available_models", fake_fetch)
+
+    response = client.post(
+        reverse("dashboard:ai_provider_models"),
+        {
+            "provider": ClinicAIProviderSettings.PROVIDER_OPENAI,
+            "api_key": "sk-bad-key",
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 400
+    assert payload == {"success": False, "error": "Could not fetch models from this provider. Check the base URL and API key."}
+    assert "sk-bad-key" not in response.content.decode()
 
 
 @pytest.mark.django_db
