@@ -1749,7 +1749,6 @@ def test_assistant_settings_page_shows_ai_provider_form_without_secret(clinic_se
         model="gpt-4o",
         fallback_model="gpt-4o-mini",
         api_key="sk-dashboard-secret",
-        is_enabled=True,
     )
     client.force_login(owner)
 
@@ -1766,7 +1765,6 @@ def test_assistant_settings_page_shows_ai_provider_form_without_secret(clinic_se
     assert 'data-ai-provider-field="api-key"' in content
     assert 'data-ai-provider-field="primary-model"' in content
     assert 'data-ai-provider-field="fallback-model"' in content
-    assert "cf-badge-active" in content
     assert "OpenAI" in content
     assert "Base URL" in content
     assert "Primary model" in content
@@ -1804,6 +1802,11 @@ def test_assistant_settings_page_shows_ai_provider_form_without_secret(clinic_se
     assert "Provider model discovery" not in content
     assert 'data-ai-provider-model-fetch' not in content
     assert "Fetch models" not in content
+    assert "Enable clinic-owned AI provider" not in content
+    assert "When disabled, the Assistant falls back to the platform default behavior." not in content
+    assert "Fallback routing" not in content
+    assert "Active routing" not in content
+    assert 'name="is_enabled"' not in content
     assert "setStatus(error.message" not in content
     assert "error.message ||" not in content
     assert "Custom model ID" not in content
@@ -1919,7 +1922,6 @@ def test_ai_provider_model_search_preserves_saved_values_missing_from_fetched_mo
         model="legacy/primary",
         fallback_model="legacy/fallback",
         api_key="sk-saved-key",
-        is_enabled=True,
     )
     client.force_login(owner)
     response = client.get(reverse("dashboard:assistant_settings"))
@@ -2384,7 +2386,6 @@ def test_owner_can_save_ai_provider_settings_from_assistant_page(clinic_setup, c
             "openai_model": "gpt-4o",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": "sk-owner-provider-key",
-            "is_enabled": "on",
         },
     )
 
@@ -2395,7 +2396,7 @@ def test_owner_can_save_ai_provider_settings_from_assistant_page(clinic_setup, c
     assert settings.model == "gpt-4o"
     assert settings.fallback_model == "gpt-4o-mini"
     assert settings.api_key == "sk-owner-provider-key"
-    assert settings.is_enabled is True
+    assert settings.is_configured is True
 
 
 @pytest.mark.django_db
@@ -2419,13 +2420,12 @@ def test_ai_provider_fallback_model_errors_render_on_assistant_page(client, monk
             "openai_model": "gpt-4o",
             "openai_fallback_model": "",
             "api_key": "sk-provider-key",
-            "is_enabled": "on",
         },
     )
     content = response.content.decode()
 
     assert response.status_code == 200
-    assert "Fallback model is required when the AI provider is enabled." in content
+    assert "Fallback model is required." in content
 
 
 @pytest.mark.django_db
@@ -2442,7 +2442,6 @@ def test_staff_cannot_save_ai_provider_settings(clinic_setup, client):
         model="gpt-4o-mini",
         fallback_model="gpt-4o",
         api_key="sk-original-key",
-        is_enabled=False,
     )
     client.force_login(staff)
 
@@ -2455,7 +2454,6 @@ def test_staff_cannot_save_ai_provider_settings(clinic_setup, client):
             "openai_model": "gpt-4o",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": "sk-staff-key",
-            "is_enabled": "on",
         },
     )
 
@@ -2464,7 +2462,6 @@ def test_staff_cannot_save_ai_provider_settings(clinic_setup, client):
     assert settings.model == "gpt-4o-mini"
     assert settings.fallback_model == "gpt-4o"
     assert settings.api_key == "sk-original-key"
-    assert settings.is_enabled is False
 
 
 @pytest.mark.django_db
@@ -2499,7 +2496,6 @@ def test_ai_provider_settings_save_is_scoped_to_current_clinic(client, monkeypat
             "openai_model": "gpt-4o",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": "sk-b-new",
-            "is_enabled": "on",
         },
     )
 

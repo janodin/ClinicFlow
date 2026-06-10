@@ -44,6 +44,7 @@ urlpatterns = [
     path("assistant/faqs/<int:pk>/toggle/", views.toggle_faq, name="toggle_faq"),
     path("assistant/faqs/<int:pk>/delete/", views.delete_faq, name="delete_faq"),
     path("yakap/", views.yakap, name="yakap"),
+    path("yakap/export/", views.yakap_export, name="yakap_export"),
     path("widget/embed/", views.widget_embed, name="widget_embed"),
     path("settings/", views.settings, name="settings"),
     path("settings/hours/", views.business_hours, name="business_hours"),

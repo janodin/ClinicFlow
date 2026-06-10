@@ -1293,7 +1293,6 @@ def test_ai_provider_client_calls_openai_compatible_chat_completions(mock_post, 
         base_url="https://openrouter.ai/api/v1/",
         model="openai/gpt-4o-mini",
         api_key="sk-provider-secret",
-        is_enabled=True,
     )
     mock_post.return_value.status_code = 200
     mock_post.return_value.json.return_value = {
@@ -1326,7 +1325,6 @@ def test_ai_provider_client_rejects_unsafe_persisted_base_url_before_request(moc
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-4o-mini",
         api_key="sk-provider-secret",
-        is_enabled=True,
     )
 
     with pytest.raises(AIProviderError) as exc:
@@ -1349,7 +1347,6 @@ def test_ai_provider_client_rejects_https_internal_persisted_base_url_before_req
         base_url="https://10.0.0.1/v1",
         model="gpt-4o-mini",
         api_key="sk-provider-secret",
-        is_enabled=True,
     )
 
     with pytest.raises(AIProviderError) as exc:
@@ -1376,7 +1373,6 @@ def test_ai_provider_client_rejects_provider_redirect_response(mock_post, monkey
         base_url="https://openrouter.ai/api/v1",
         model="gpt-4o-mini",
         api_key="sk-provider-secret",
-        is_enabled=True,
     )
     mock_post.return_value.status_code = 302
     mock_post.return_value.headers = {"Location": "https://127.0.0.1/internal"}
@@ -1557,7 +1553,6 @@ def test_ai_provider_client_uses_model_override_without_mutating_settings(mock_p
         model="gpt-4o",
         fallback_model="gpt-4o-mini",
         api_key="sk-provider-secret",
-        is_enabled=True,
     )
     mock_post.return_value.status_code = 200
     mock_post.return_value.json.return_value = {
@@ -1595,7 +1590,6 @@ def test_ai_provider_client_supports_tool_calls(mock_post, monkeypatch):
         provider=ClinicAIProviderSettings.PROVIDER_OPENAI,
         model="gpt-4o-mini",
         api_key="sk-provider-secret",
-        is_enabled=True,
     )
     tool = {
         "type": "function",
@@ -1647,7 +1641,6 @@ def test_ai_provider_client_logs_provider_errors_without_provider_or_model_metad
         clinic=clinic,
         model="gpt-4o-mini",
         api_key="sk-provider-secret",
-        is_enabled=True,
     )
     mock_post.side_effect = requests.Timeout("timeout with sk-provider-secret")
     caplog.set_level("WARNING", logger="messenger.ai_provider_client")
@@ -2038,7 +2031,6 @@ def test_ai_gateway_calls_provider_for_widget_clinic(mock_call):
         clinic=clinic,
         model="gpt-4o-mini",
         api_key="sk-widget-key",
-        is_enabled=True,
     )
     mock_call.return_value = {"role": "assistant", "content": "Gateway reply"}
 
@@ -2066,7 +2058,6 @@ def test_ai_gateway_retries_fallback_model_when_primary_provider_errors(mock_cal
         model="gpt-4o",
         fallback_model="gpt-4o-mini",
         api_key="sk-fallback-error",
-        is_enabled=True,
     )
     mock_call.side_effect = [
         AIProviderError("AI provider request failed."),
@@ -2101,7 +2092,6 @@ def test_ai_gateway_retries_fallback_model_when_primary_reply_is_empty(mock_call
         model="gpt-4o",
         fallback_model="gpt-4o-mini",
         api_key="sk-fallback-empty",
-        is_enabled=True,
     )
     mock_call.side_effect = [
         {"role": "assistant", "content": ""},
@@ -2135,7 +2125,6 @@ def test_ai_gateway_returns_clinic_fallback_when_primary_and_fallback_models_fai
         model="gpt-4o",
         fallback_model="gpt-4o-mini",
         api_key="sk-both-fail",
-        is_enabled=True,
     )
     mock_call.side_effect = [
         AIProviderError("AI provider request failed."),
@@ -2158,7 +2147,7 @@ def test_ai_gateway_system_prompt_does_not_include_page_token(mock_call):
     connection.page_access_token = "PAGE-TOKEN-SHOULD-NOT-ENTER-PROMPT"
     connection.save(update_fields=["page_access_token"])
     ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-provider-prompt-secret", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-provider-prompt-secret")
     mock_call.return_value = {"role": "assistant", "content": "Safe reply"}
 
     result = build_gateway_reply({"channel": "messenger", "page_id": connection.page_id, "message": "Hello"})
@@ -2191,7 +2180,7 @@ def test_ai_gateway_endpoint_returns_provider_reply_without_secret(mock_call, cl
     from clinics.models import ClinicAIProviderSettings
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_endpoint", "PAGE-GATEWAY-ENDPOINT")
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-endpoint-secret", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-endpoint-secret")
     mock_call.return_value = {"role": "assistant", "content": "Endpoint reply"}
 
     response = client.post(
@@ -2214,7 +2203,7 @@ def test_ai_gateway_does_not_call_provider_when_widget_ai_disabled(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_widget_disabled", "PAGE-GATEWAY-WIDGET-DISABLED")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=False, fallback_message="Widget fallback.")
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-widget-disabled", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-widget-disabled")
 
     result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
 
@@ -2235,7 +2224,7 @@ def test_ai_gateway_does_not_call_provider_when_messenger_not_in_ai_mode(mock_ca
         messenger_response_mode=ClinicAISettings.MESSENGER_MODE_QUICK_REPLIES,
         fallback_message="Messenger fallback.",
     )
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-messenger-disabled", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-messenger-disabled")
 
     result = build_gateway_reply({"channel": "messenger", "page_id": connection.page_id, "message": "Hello"})
 
@@ -2252,7 +2241,7 @@ def test_ai_gateway_prompt_sanitizes_hyphenated_secret_keys(mock_call, mock_cont
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_hyphen_secret", "PAGE-GATEWAY-HYPHEN-SECRET")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-hyphen-provider-secret", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-hyphen-provider-secret")
     mock_context.return_value = {
         "found": True,
         "api-key": "SHOULD-NOT-ENTER-PROMPT",
@@ -2278,7 +2267,7 @@ def test_ai_gateway_limits_history_entries_sent_to_provider(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_history_limit", "PAGE-GATEWAY-HISTORY-LIMIT")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-history-limit", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-history-limit")
     history = [{"role": "user", "content": f"history-{index}"} for index in range(20)]
     mock_call.return_value = {"role": "assistant", "content": "Limited reply"}
 
@@ -2301,7 +2290,7 @@ def test_ai_gateway_executes_match_services_tool_with_server_side_widget_clinic(
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_tools", "PAGE-GATEWAY-TOOLS")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-tool-key", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-tool-key")
     Service.objects.create(clinic=clinic, name="Dental Cleaning", description="Routine cleaning", duration_minutes=30, price=0)
     other_clinic, _other_connection = _create_messenger_clinic("owner_gateway_tools_other", "PAGE-GATEWAY-TOOLS-OTHER")
     Service.objects.create(clinic=other_clinic, name="Other Cleaning", duration_minutes=30, price=0)
@@ -2330,7 +2319,7 @@ def test_ai_gateway_booking_tool_preserves_confirmation_and_messenger_identity(m
 
     clinic, connection = _create_messenger_clinic("owner_gateway_booking", "PAGE-GATEWAY-BOOKING")
     ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-tool-key", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-tool-key")
     service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
     target_date = timezone.localdate() + timedelta(days=1)
     ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
@@ -2360,7 +2349,7 @@ def test_ai_gateway_returns_fallback_when_tool_loop_exceeds_cap(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_loop", "PAGE-GATEWAY-LOOP")
     ClinicAISettings.objects.create(clinic=clinic, fallback_message="Please call us.")
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-loop-key", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-loop-key")
     mock_call.return_value = {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "match_services", "arguments": "{}"}}]}
 
     result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Services?"})
@@ -2385,7 +2374,7 @@ def test_ai_gateway_booking_tool_rejects_string_confirmation(mock_call):
 
     clinic, connection = _create_messenger_clinic("owner_gateway_string_confirm", "PAGE-GATEWAY-STRING-CONFIRM")
     ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-string-confirm", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-string-confirm")
     service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
     target_date = timezone.localdate() + timedelta(days=1)
     ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
@@ -2414,7 +2403,7 @@ def test_ai_gateway_rejects_multiple_mutation_tools_in_one_response(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_multi_mutation", "PAGE-GATEWAY-MULTI-MUTATION")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-multi-mutation", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-multi-mutation")
     service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
     target_start = (timezone.now() + timedelta(days=1)).isoformat()
     tool_call = {"type": "function", "function": {"name": "book_confirmed_appointment", "arguments": json.dumps({"service_id": service.id, "starts_at": target_start, "full_name": "Maria Santos", "phone": "09175551234", "email": "maria@example.com", "confirmed": True})}}
@@ -2434,7 +2423,7 @@ def test_ai_gateway_rejects_too_many_tool_calls_in_one_response(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_many_tools", "PAGE-GATEWAY-MANY-TOOLS")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-many-tools", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-many-tools")
     mock_call.return_value = {
         "role": "assistant",
         "content": "",
@@ -2457,7 +2446,7 @@ def test_ai_gateway_contains_malformed_tool_execution_errors(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_bad_tool_args", "PAGE-GATEWAY-BAD-TOOL-ARGS")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-bad-tool-args", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-bad-tool-args")
     mock_call.side_effect = [
         {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "check_availability", "arguments": json.dumps({"service_id": {"bad": "type"}})}}]},
         {"role": "assistant", "content": "Please choose a valid service."},
@@ -2479,7 +2468,7 @@ def test_ai_gateway_rejects_unknown_tool_calls(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_unknown_tool", "PAGE-GATEWAY-UNKNOWN-TOOL")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-unknown-tool", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-unknown-tool")
     mock_call.return_value = {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "delete_clinic", "arguments": "{}"}}]}
 
     result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Bad tool"})
@@ -2504,7 +2493,7 @@ def test_ai_gateway_rejects_second_mutation_across_tool_iterations(mock_call):
 
     clinic, _connection = _create_messenger_clinic("owner_gateway_second_mutation", "PAGE-GATEWAY-SECOND-MUTATION")
     ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please call us.")
-    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-second-mutation", is_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-second-mutation")
     service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
     target_date = timezone.localdate() + timedelta(days=1)
     ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))

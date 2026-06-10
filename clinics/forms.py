@@ -165,17 +165,14 @@ class AIProviderSettingsForm(forms.ModelForm):
             "openai_model",
             "openai_fallback_model",
             "api_key",
-            "is_enabled",
         ]
         widgets = {
             "provider": forms.Select(attrs={"class": _SELECT}),
             "api_key": SavedProviderSecretInput(attrs={"class": f"{_INPUT} pr-12", "placeholder": "Leave blank to keep saved API key"}),
-            "is_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
         }
         labels = {
             "provider": "AI provider",
             "api_key": "API key",
-            "is_enabled": "Enable clinic-owned AI provider",
         }
 
     def __init__(self, *args, **kwargs):
@@ -191,8 +188,7 @@ class AIProviderSettingsForm(forms.ModelForm):
             instance_model = self.instance.model or ""
             instance_fallback_model = self.instance.fallback_model or ""
             if (
-                not self.instance.is_enabled
-                and not self.instance.has_api_key
+                not self.instance.has_api_key
                 and instance_model == ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
                 and instance_fallback_model == ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
             ):
@@ -214,7 +210,6 @@ class AIProviderSettingsForm(forms.ModelForm):
     def clean(self):
         cleaned = super().clean()
         provider = cleaned.get("provider")
-        enabled = cleaned.get("is_enabled")
         base_url_invalid = False
         try:
             selected_model = _clean_provider_model_id(cleaned.get("openai_model"))
@@ -257,15 +252,14 @@ class AIProviderSettingsForm(forms.ModelForm):
                 cleaned["api_key"] = ""
                 self.add_error("api_key", "Enter a new API key when changing provider or base URL.")
 
-        if enabled:
-            if not (cleaned.get("api_key") or "").strip():
-                self.add_error("api_key", "API key is required when the AI provider is enabled.")
-            if not (cleaned.get("model") or "").strip():
-                self.add_error("openai_model", "Model is required when the AI provider is enabled.")
-            if not (cleaned.get("fallback_model") or "").strip():
-                self.add_error("openai_fallback_model", "Fallback model is required when the AI provider is enabled.")
-            if not base_url_invalid and not (cleaned.get("base_url") or "").strip():
-                self.add_error("base_url", "Base URL is required when the AI provider is enabled.")
+        if not (cleaned.get("api_key") or "").strip():
+            self.add_error("api_key", "API key is required.")
+        if not (cleaned.get("model") or "").strip():
+            self.add_error("openai_model", "Model is required.")
+        if not (cleaned.get("fallback_model") or "").strip():
+            self.add_error("openai_fallback_model", "Fallback model is required.")
+        if not base_url_invalid and not (cleaned.get("base_url") or "").strip():
+            self.add_error("base_url", "Base URL is required.")
         return cleaned
 
     def save(self, commit=True):

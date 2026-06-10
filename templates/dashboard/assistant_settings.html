@@ -26,10 +26,6 @@
           <i data-lucide="shield-check" class="h-3 w-3" aria-hidden="true"></i>
           Clinic-owned
         </span>
-        <span class="cf-badge {% if ai_provider_settings.is_enabled %}cf-badge-active{% else %}cf-badge-inactive{% endif %}">
-          <i data-lucide="{% if ai_provider_settings.is_enabled %}check-circle{% else %}x-circle{% endif %}" class="h-3 w-3" aria-hidden="true"></i>
-          {% if ai_provider_settings.is_enabled %}Enabled{% else %}Disabled{% endif %}
-        </span>
       </div>
     </div>
 
@@ -42,22 +38,6 @@
           {% for error in ai_provider_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
         </div>
       {% endif %}
-
-      <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <label class="flex cursor-pointer items-start gap-3 normal-case tracking-normal">
-            {{ ai_provider_form.is_enabled }}
-            <span class="min-w-0">
-              <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ ai_provider_form.is_enabled.label }}</span>
-              <span class="mt-1 block text-xs font-normal leading-5 text-[var(--cf-muted)]">When disabled, the Assistant falls back to the platform default behavior.</span>
-            </span>
-          </label>
-          <span class="cf-badge {% if ai_provider_settings.is_enabled %}cf-badge-active{% else %}cf-badge-inactive{% endif %} self-start">
-            {% if ai_provider_settings.is_enabled %}Active routing{% else %}Fallback routing{% endif %}
-          </span>
-        </div>
-        {% if ai_provider_form.is_enabled.errors %}<p class="cf-error">{{ ai_provider_form.is_enabled.errors.0 }}</p>{% endif %}
-      </div>
 
       <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none">
         <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

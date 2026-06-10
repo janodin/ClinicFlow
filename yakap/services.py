@@ -68,8 +68,14 @@ def _reset_date_for_year(yakap_settings, year):
     return date(year, yakap_settings.reset_month, reset_day)
 
 
-def period_bounds_for(clinic, when=None):
-    yakap_settings, _created = ClinicYakapSettings.objects.get_or_create(clinic=clinic)
+def period_bounds_for(clinic, when=None, *, create_settings=True):
+    if create_settings:
+        yakap_settings, _created = ClinicYakapSettings.objects.get_or_create(clinic=clinic)
+    else:
+        try:
+            yakap_settings = clinic.yakap_settings
+        except ClinicYakapSettings.DoesNotExist:
+            yakap_settings = ClinicYakapSettings(clinic=clinic)
     when = _as_local_date(clinic, when)
     reset_date = _reset_date_for_year(yakap_settings, when.year)
     period_start_year = when.year if when >= reset_date else when.year - 1
@@ -155,7 +161,7 @@ def estimated_remaining_for(profile, category, when=None, *, create_period=True)
         used = _estimated_used_for_period(profile, category, period)
         limit = period.limit_snapshot
     else:
-        period_start, period_end = period_bounds_for(profile.clinic, when=when)
+        period_start, period_end = period_bounds_for(profile.clinic, when=when, create_settings=False)
         period = None
         if profile.pk:
             period = YakapCreditLinePeriod.objects.filter(

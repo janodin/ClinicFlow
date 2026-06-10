@@ -1,5 +1,7 @@
+import csv
 from decimal import Decimal
 from datetime import timedelta
+from io import StringIO
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -204,6 +206,147 @@ def test_yakap_dashboard_queue_includes_unverified_requests(client, clinic_setup
     assert reverse("dashboard:appointment_detail", args=[appointment.id]).encode() in response.content
     snapshot.refresh_from_db()
     assert snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_UNVERIFIED
+
+
+@pytest.mark.django_db
+def test_yakap_dashboard_shows_operational_risk_sections(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    settings, categories = ensure_default_yakap_setup(clinic)
+    settings.low_balance_threshold_amount = Decimal("100.00")
+    settings.save(update_fields=["low_balance_threshold_amount", "updated_at"])
+    category = next(item for item in categories if item.name == "Medicines")
+    category.annual_limit = Decimal("1000.00")
+    category.save(update_fields=["annual_limit", "updated_at"])
+    _request_patient, request_appointment, _snapshot = _create_yakap_requested_appointment(
+        clinic,
+        service,
+        full_name="Upcoming YAKAP Patient",
+    )
+    low_patient = Patient.objects.create(clinic=clinic, full_name="Low Balance Patient", phone="0917-555-0201")
+    low_profile = yakap_profile_for_patient(low_patient)
+    YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=low_patient,
+        profile=low_profile,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE,
+        amount=Decimal("950.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        note="Low estimated balance.",
+        created_by=clinic.group.owner,
+    )
+    over_patient = Patient.objects.create(clinic=clinic, full_name="Over Limit Patient", phone="0917-555-0202")
+    over_profile = yakap_profile_for_patient(over_patient)
+    YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=over_patient,
+        profile=over_profile,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE,
+        amount=Decimal("1200.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        note="Over estimated limit.",
+        created_by=clinic.group.owner,
+    )
+
+    response = client.get(reverse("dashboard:yakap"))
+
+    assert response.status_code == 200
+    assert b"Upcoming YAKAP appointments" in response.content
+    assert b"Upcoming YAKAP Patient" in response.content
+    assert b"Low estimated balance" in response.content
+    assert b"Low Balance Patient" in response.content
+    assert b"Over estimated limit" in response.content
+    assert b"Over Limit Patient" in response.content
+    assert b"Services missing YAKAP rules" in response.content
+    assert service.name.encode() in response.content
+    assert b"Recent YAKAP ledger entries" in response.content
+    assert b"Low estimated balance." in response.content
+    assert reverse("dashboard:appointment_detail", args=[request_appointment.id]).encode() in response.content
+
+
+@pytest.mark.django_db
+def test_yakap_export_is_clinic_scoped_and_audited(client, clinic_setup):
+    clinic, service = clinic_setup
+    settings, categories = ensure_default_yakap_setup(clinic)
+    category = next(item for item in categories if item.name == "Primary Care")
+    patient, appointment = _create_patient_appointment(clinic, service, full_name="Export Included Patient")
+    profile = yakap_profile_for_patient(patient)
+    YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=patient,
+        profile=profile,
+        appointment=appointment,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("300.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        external_reference="YAKAP-EXPORT-1",
+        note="Included in export.",
+        created_by=clinic.group.owner,
+    )
+    YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=patient,
+        profile=profile,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("400.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        occurred_at=timezone.now() - timedelta(days=40),
+        note="Outside export window.",
+        created_by=clinic.group.owner,
+    )
+    other_group = ClinicGroup.objects.create(name="Other YAKAP Export Group", owner=clinic.group.owner)
+    other_clinic = Clinic.objects.create(group=other_group, name="Other YAKAP Export Clinic", slug="other-yakap-export")
+    other_category = YakapCoverageCategory.objects.create(
+        clinic=other_clinic,
+        name="Other Primary Care",
+        category_type=YakapCoverageCategory.TYPE_PRIMARY_CARE,
+        annual_limit=Decimal("20000.00"),
+    )
+    other_patient = Patient.objects.create(clinic=other_clinic, full_name="Other Clinic Patient", phone="0917-555-0999")
+    other_profile = yakap_profile_for_patient(other_patient)
+    YakapLedgerEntry.objects.create(
+        clinic=other_clinic,
+        patient=other_patient,
+        profile=other_profile,
+        category=other_category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("900.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        note="Other clinic export row.",
+        created_by=clinic.group.owner,
+    )
+    client.force_login(clinic.group.owner)
+
+    response = client.get(
+        "/yakap/export/",
+        {
+            "started_at": timezone.localdate().isoformat(),
+            "ended_at": timezone.localdate().isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response["Content-Type"] == "text/csv"
+    rows = list(csv.DictReader(StringIO(response.content.decode())))
+    assert [row["patient"] for row in rows] == ["Export Included Patient"]
+    assert rows[0]["appointment_id"] == str(appointment.id)
+    assert rows[0]["service"] == service.name
+    assert rows[0]["category"] == category.name
+    assert rows[0]["amount"] == "300.00"
+    assert rows[0]["external_reference"] == "YAKAP-EXPORT-1"
+    assert rows[0]["note"] == "Included in export."
+    assert "Outside export window." not in response.content.decode()
+    assert "Other Clinic Patient" not in response.content.decode()
+    event = YakapAuditEvent.objects.get(action=YakapAuditEvent.ACTION_EXPORT_CREATED)
+    assert event.clinic == clinic
+    assert event.actor == clinic.group.owner
+    assert event.object_id == str(settings.pk)
 
 
 @pytest.mark.django_db
@@ -898,6 +1041,34 @@ def test_ledger_over_limit_is_blocked_when_hard_block_enabled(client, clinic_set
 
 
 @pytest.mark.django_db
+def test_rejected_over_limit_does_not_create_yakap_settings_when_missing(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    category = YakapCoverageCategory.objects.create(
+        clinic=clinic,
+        name="Manual Medicines",
+        category_type=YakapCoverageCategory.TYPE_MEDICINES,
+        annual_limit=Decimal("100.00"),
+        sort_order=1,
+    )
+    patient, appointment = _create_patient_appointment(clinic, service)
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category, entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE, amount="300.00"),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"exceeds estimated remaining" in response.content
+    assert not ClinicYakapSettings.objects.filter(clinic=clinic).exists()
+    assert not PatientYakapProfile.objects.filter(patient=patient).exists()
+    assert not YakapCreditLinePeriod.objects.filter(patient=patient, category=category).exists()
+    assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
+    assert not YakapAuditEvent.objects.exists()
+
+
+@pytest.mark.django_db
 def test_ledger_over_limit_uses_entry_period_not_current_period(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
@@ -937,6 +1108,38 @@ def test_ledger_over_limit_uses_entry_period_not_current_period(client, clinic_s
     assert response.status_code == 200
     assert b"exceeds estimated remaining" in response.content
     assert not YakapLedgerEntry.objects.filter(appointment=appointment, amount=Decimal("15000.00")).exists()
+
+
+@pytest.mark.django_db
+def test_htmx_successful_ledger_post_keeps_patient_reversal_choices(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    _settings, categories = ensure_default_yakap_setup(clinic)
+    category = next(item for item in categories if item.name == "Medicines")
+    patient, appointment = _create_patient_appointment(clinic, service)
+    profile = yakap_profile_for_patient(patient)
+    original_entry = YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=patient,
+        profile=profile,
+        appointment=appointment,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE,
+        amount=Decimal("300.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        note="Original verified usage.",
+        created_by=clinic.group.owner,
+    )
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category, entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE, amount="100.00"),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert f'<option value="{original_entry.pk}">YakapLedgerEntry object ({original_entry.pk})</option>'.encode() in response.content
 
 
 @pytest.mark.django_db

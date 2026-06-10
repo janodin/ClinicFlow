@@ -12,6 +12,26 @@
     </span>
   </div>
 
+  <section class="cf-card p-4">
+    <form method="get" action="{% url 'dashboard:yakap_export' %}" class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <p class="cf-eyebrow">Manual ledger export</p>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Download clinic-scoped estimated YAKAP usage for the selected date range.</p>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_auto] sm:items-end">
+        <div class="cf-field">
+          <label class="cf-label" for="{{ export_form.started_at.id_for_label }}">Start</label>
+          {{ export_form.started_at }}
+        </div>
+        <div class="cf-field">
+          <label class="cf-label" for="{{ export_form.ended_at.id_for_label }}">End</label>
+          {{ export_form.ended_at }}
+        </div>
+        <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="download" class="h-4 w-4"></i>Export CSV</button>
+      </div>
+    </form>
+  </section>
+
   <section class="cf-card p-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
@@ -25,6 +45,249 @@
       </div>
     </div>
     <p class="mt-4 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] px-4 py-3 text-sm text-[var(--cf-ink)]">YAKAP coverage shown in KliniAssist is public guidance only. Estimated remaining balances are not official PhilHealth balances and must be verified through the clinic's PhilHealth workflow before service.</p>
+  </section>
+
+  <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <div class="cf-card p-4">
+      <p class="cf-kpi-label">Unverified</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ unverified_appointments|length }}</p>
+      <p class="mt-1 text-xs text-[var(--cf-muted)]">Requests needing review</p>
+    </div>
+    <div class="cf-card p-4">
+      <p class="cf-kpi-label">Upcoming YAKAP appointments</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ upcoming_yakap_appointments|length }}</p>
+      <p class="mt-1 text-xs text-[var(--cf-muted)]">Future visits with YAKAP intent</p>
+    </div>
+    <div class="cf-card p-4">
+      <p class="cf-kpi-label">Low estimated balance</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ low_balance_patients|length }}</p>
+      <p class="mt-1 text-xs text-[var(--cf-muted)]">At or below threshold</p>
+    </div>
+    <div class="cf-card p-4">
+      <p class="cf-kpi-label">Over estimated limit</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ over_limit_patients|length }}</p>
+      <p class="mt-1 text-xs text-[var(--cf-muted)]">Negative estimated remaining</p>
+    </div>
+    <div class="cf-card p-4">
+      <p class="cf-kpi-label">Services missing YAKAP rules</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ services_missing_rules|length }}</p>
+      <p class="mt-1 text-xs text-[var(--cf-muted)]">Active services to classify</p>
+    </div>
+  </section>
+
+  <div class="grid gap-6 xl:grid-cols-2">
+    <section class="cf-card p-6">
+      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="cf-section-title">Upcoming YAKAP appointments</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Future visits where patients requested estimated YAKAP coverage.</p>
+        </div>
+        <span class="cf-badge cf-badge-info">{{ upcoming_yakap_appointments|length }} upcoming</span>
+      </div>
+      {% if upcoming_yakap_appointments %}
+        <div class="cf-table-wrap">
+          <div class="cf-table-scroll" tabindex="0" aria-label="Upcoming YAKAP appointments table">
+            <table class="cf-table cf-table-compact">
+              <thead>
+                <tr>
+                  <th class="p-4">Patient</th>
+                  <th class="p-4">Service</th>
+                  <th class="p-4">Date</th>
+                  <th class="p-4">YAKAP status</th>
+                  <th class="p-4">Action</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--cf-line-soft)]">
+                {% for appointment in upcoming_yakap_appointments %}
+                  <tr>
+                    <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</td>
+                    <td class="p-4 text-[var(--cf-muted)]">{{ appointment.service.name }}</td>
+                    <td class="p-4 tabular-nums text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y g:i A" }}</td>
+                    <td class="p-4"><span class="cf-badge cf-badge-warning cf-status-pending">{{ appointment.yakap_snapshot.get_coverage_status_display }}</span></td>
+                    <td class="p-4">
+                      <a href="#" @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}?source=yakap" hx-target="#detail-modal-body" class="cf-btn cf-btn-xs cf-appointment-view-action"><i data-lucide="eye" class="h-3 w-3 shrink-0" aria-hidden="true"></i>Review</a>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <div class="cf-empty-state">
+          <div class="cf-icon-box mb-4 p-4"><i data-lucide="calendar-check" class="h-6 w-6"></i></div>
+          <p class="cf-section-title">No upcoming YAKAP appointments.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="cf-card p-6">
+      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="cf-section-title">Services missing YAKAP rules</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Classify active services so staff and booking flows show consistent estimates.</p>
+        </div>
+        <span class="cf-badge cf-badge-info">{{ services_missing_rules|length }} services</span>
+      </div>
+      {% if services_missing_rules %}
+        <div class="cf-table-wrap">
+          <div class="cf-table-scroll" tabindex="0" aria-label="Services missing YAKAP rules table">
+            <table class="cf-table cf-table-compact">
+              <thead>
+                <tr>
+                  <th class="p-4">Service</th>
+                  <th class="p-4">Duration</th>
+                  <th class="p-4">Price</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--cf-line-soft)]">
+                {% for service in services_missing_rules %}
+                  <tr>
+                    <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ service.name }}</td>
+                    <td class="p-4 tabular-nums text-[var(--cf-muted)]">{{ service.effective_duration }} min</td>
+                    <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ service.price }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <div class="cf-empty-state">
+          <div class="cf-icon-box mb-4 p-4"><i data-lucide="list-checks" class="h-6 w-6"></i></div>
+          <p class="cf-section-title">All active services have YAKAP rules.</p>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-2">
+    <section class="cf-card p-6">
+      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="cf-section-title">Low estimated balance</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Patients with remaining estimates at or below the clinic threshold.</p>
+        </div>
+        <span class="cf-badge cf-badge-warning cf-status-pending">{{ low_balance_patients|length }} low</span>
+      </div>
+      {% if low_balance_patients %}
+        <div class="cf-table-wrap">
+          <div class="cf-table-scroll" tabindex="0" aria-label="Low estimated YAKAP balances table">
+            <table class="cf-table cf-table-compact">
+              <thead>
+                <tr>
+                  <th class="p-4">Patient</th>
+                  <th class="p-4">Category</th>
+                  <th class="p-4">Used</th>
+                  <th class="p-4">Remaining</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--cf-line-soft)]">
+                {% for item in low_balance_patients %}
+                  <tr>
+                    <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ item.patient.full_name }}</td>
+                    <td class="p-4 text-[var(--cf-muted)]">{{ item.category.name }}</td>
+                    <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ item.balance.used }}</td>
+                    <td class="p-4 tabular-nums text-[var(--cf-status-pending-text)]">PHP {{ item.balance.remaining }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <div class="cf-empty-state">
+          <div class="cf-icon-box mb-4 p-4"><i data-lucide="wallet-cards" class="h-6 w-6"></i></div>
+          <p class="cf-section-title">No low estimated balances.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="cf-card p-6">
+      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="cf-section-title">Over estimated limit</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Patients whose manual ledger usage exceeds the current estimated period limit.</p>
+        </div>
+        <span class="cf-badge bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]">{{ over_limit_patients|length }} over</span>
+      </div>
+      {% if over_limit_patients %}
+        <div class="cf-table-wrap">
+          <div class="cf-table-scroll" tabindex="0" aria-label="Over estimated YAKAP limits table">
+            <table class="cf-table cf-table-compact">
+              <thead>
+                <tr>
+                  <th class="p-4">Patient</th>
+                  <th class="p-4">Category</th>
+                  <th class="p-4">Used</th>
+                  <th class="p-4">Remaining</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--cf-line-soft)]">
+                {% for item in over_limit_patients %}
+                  <tr>
+                    <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ item.patient.full_name }}</td>
+                    <td class="p-4 text-[var(--cf-muted)]">{{ item.category.name }}</td>
+                    <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ item.balance.used }}</td>
+                    <td class="p-4 tabular-nums text-[var(--cf-status-cancelled-text)]">PHP {{ item.balance.remaining }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <div class="cf-empty-state">
+          <div class="cf-icon-box mb-4 p-4"><i data-lucide="shield-check" class="h-6 w-6"></i></div>
+          <p class="cf-section-title">No patients over estimated limits.</p>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="cf-card p-6">
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="cf-section-title">Recent YAKAP ledger entries</h2>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Latest manual estimated usage and reversals for this clinic.</p>
+      </div>
+      <span class="cf-badge cf-badge-info">{{ recent_ledger_entries|length }} recent</span>
+    </div>
+    {% if recent_ledger_entries %}
+      <div class="cf-table-wrap">
+        <div class="cf-table-scroll" tabindex="0" aria-label="Recent YAKAP ledger entries table">
+          <table class="cf-table cf-table-compact">
+            <thead>
+              <tr>
+                <th class="p-4">Occurred</th>
+                <th class="p-4">Patient</th>
+                <th class="p-4">Category</th>
+                <th class="p-4">Amount</th>
+                <th class="p-4">Status</th>
+                <th class="p-4">Note</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[var(--cf-line-soft)]">
+              {% for entry in recent_ledger_entries %}
+                <tr>
+                  <td class="p-4 tabular-nums text-[var(--cf-ink)]">{{ entry.occurred_at|date:"M j, Y g:i A" }}</td>
+                  <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ entry.patient.full_name }}</td>
+                  <td class="p-4 text-[var(--cf-muted)]">{{ entry.category.name }}</td>
+                  <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ entry.amount }}</td>
+                  <td class="p-4"><span class="cf-badge {% if entry.verification_status == 'verified' %}cf-badge-active{% else %}cf-badge-warning cf-status-pending{% endif %}">{{ entry.get_verification_status_display }}</span></td>
+                  <td class="p-4 text-[var(--cf-muted)]">{{ entry.note|default:"-" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="cf-empty-state">
+        <div class="cf-icon-box mb-4 p-4"><i data-lucide="receipt-text" class="h-6 w-6"></i></div>
+        <p class="cf-section-title">No YAKAP ledger entries yet.</p>
+      </div>
+    {% endif %}
   </section>
 
   <div class="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,.9fr)]">

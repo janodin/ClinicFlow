@@ -30,7 +30,7 @@ def test_ai_provider_settings_defaults_and_unique_clinic():
     assert settings.base_url == ClinicAIProviderSettings.OPENAI_BASE_URL
     assert settings.model == ClinicAIProviderSettings.DEFAULT_OPENAI_MODEL
     assert settings.api_key == ""
-    assert settings.is_enabled is False
+    assert not hasattr(settings, "is_enabled")
     assert settings.has_api_key is False
     assert settings.is_configured is False
     assert str(settings) == f"ClinicAIProviderSettings({clinic.name})"
@@ -74,7 +74,7 @@ def test_fallback_model_migration_copies_existing_model_and_keeps_new_default():
 
 
 @pytest.mark.django_db
-def test_ai_provider_settings_configured_requires_enabled_model_base_url_and_key():
+def test_ai_provider_settings_configured_requires_model_base_url_and_key():
     clinic = _create_clinic("configured-provider")
     settings = ClinicAIProviderSettings.objects.create(
         clinic=clinic,
@@ -82,7 +82,6 @@ def test_ai_provider_settings_configured_requires_enabled_model_base_url_and_key
         base_url=ClinicAIProviderSettings.OPENAI_BASE_URL,
         model="gpt-4o-mini",
         api_key="sk-test-key",
-        is_enabled=True,
     )
 
     assert settings.has_api_key is True
@@ -99,15 +98,10 @@ def test_ai_provider_settings_configured_requires_enabled_model_base_url_and_key
     settings.base_url = ""
     assert settings.is_configured is False
 
-    settings.base_url = ClinicAIProviderSettings.OPENAI_BASE_URL
-    settings.is_enabled = False
-    assert settings.is_configured is False
-
     settings.provider = "unsupported"
     settings.base_url = ClinicAIProviderSettings.OPENAI_BASE_URL
     settings.model = "gpt-4o-mini"
     settings.api_key = "sk-test-key"
-    settings.is_enabled = True
     assert settings.is_configured is False
 
 
@@ -121,7 +115,6 @@ def test_ai_provider_settings_configured_requires_fallback_model():
         model="gpt-4o",
         fallback_model="gpt-4o-mini",
         api_key="sk-test-key",
-        is_enabled=True,
     )
 
     assert settings.is_configured is True
@@ -139,7 +132,6 @@ def test_ai_provider_form_openai_preset_normalizes_base_url_and_keeps_saved_key(
         base_url="https://malicious.example/v1",
         model="gpt-4o-mini",
         api_key="sk-saved-key",
-        is_enabled=True,
     )
     form = AIProviderSettingsForm(
         data={
@@ -148,7 +140,6 @@ def test_ai_provider_form_openai_preset_normalizes_base_url_and_keeps_saved_key(
             "openai_model": "gpt-4o",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": SAVED_PROVIDER_SECRET_MASK,
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -161,7 +152,6 @@ def test_ai_provider_form_openai_preset_normalizes_base_url_and_keeps_saved_key(
     assert saved.model == "gpt-4o"
     assert saved.fallback_model == "gpt-4o-mini"
     assert saved.api_key == "sk-saved-key"
-    assert saved.is_enabled is True
 
 
 @pytest.mark.django_db
@@ -179,7 +169,6 @@ def test_ai_provider_form_custom_provider_accepts_https_base_url_and_dropdown_mo
             "openai_model": "gpt-4o",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -208,7 +197,6 @@ def test_ai_provider_form_requires_new_key_when_saved_secret_when_provider_base_
         model="gpt-4o-mini",
         fallback_model="gpt-4o-mini",
         api_key="sk-openai-key",
-        is_enabled=False,
     )
     form = AIProviderSettingsForm(
         data={
@@ -240,7 +228,6 @@ def test_ai_provider_form_requires_new_key_when_blank_key_changes_provider_base_
         model="gpt-4o-mini",
         fallback_model="gpt-4o-mini",
         api_key="sk-openai-key",
-        is_enabled=False,
     )
     form = AIProviderSettingsForm(
         data={
@@ -272,7 +259,6 @@ def test_ai_provider_form_keeps_saved_secret_when_provider_base_url_unchanged(mo
         model="openrouter/auto",
         fallback_model="openrouter/fallback",
         api_key="sk-openrouter-key",
-        is_enabled=False,
     )
     form = AIProviderSettingsForm(
         data={
@@ -292,7 +278,7 @@ def test_ai_provider_form_keeps_saved_secret_when_provider_base_url_unchanged(mo
 
 
 @pytest.mark.django_db
-def test_ai_provider_form_requires_dropdown_fallback_model_when_enabled(monkeypatch):
+def test_ai_provider_form_requires_dropdown_fallback_model(monkeypatch):
     monkeypatch.setattr(
         "clinics.ai_provider_validation.socket.getaddrinfo",
         lambda *args, **kwargs: [(None, None, None, None, ("8.8.8.8", 0))],
@@ -306,7 +292,6 @@ def test_ai_provider_form_requires_dropdown_fallback_model_when_enabled(monkeypa
             "openai_model": "gpt-4o",
             "openai_fallback_model": "",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -363,7 +348,6 @@ def test_ai_provider_form_rejects_unsafe_custom_base_urls(unsafe_url):
             "openai_model": "gpt-4o-mini",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -383,7 +367,6 @@ def test_ai_provider_form_invalid_base_url_reports_only_base_url_error():
             "openai_model": "gpt-4o-mini",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -404,7 +387,6 @@ def test_ai_provider_form_rejects_base_url_without_scheme():
             "openai_model": "gpt-4o-mini",
             "openai_fallback_model": "gpt-4o-mini",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -526,7 +508,6 @@ def test_ai_provider_form_bound_empty_settings_keep_submitted_fetched_model_opti
             "openai_model": "openrouter/auto",
             "openai_fallback_model": "anthropic/claude-3.5-sonnet",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -552,7 +533,6 @@ def test_ai_provider_form_accepts_fetched_model_ids_for_dropdown_fields(monkeypa
             "openai_model": "openrouter/auto",
             "openai_fallback_model": "anthropic/claude-3.5-sonnet",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -594,7 +574,6 @@ def test_ai_provider_form_rejects_control_characters_in_model_ids(monkeypatch):
             "openai_model": "openrouter/\nauto",
             "openai_fallback_model": "anthropic/claude-3.5-sonnet",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -619,7 +598,6 @@ def test_ai_provider_form_rejects_c1_control_characters_in_model_ids(monkeypatch
             "openai_model": "openrouter/\x85auto",
             "openai_fallback_model": "anthropic/claude-3.5-sonnet",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )
@@ -644,7 +622,6 @@ def test_ai_provider_form_rejects_surrounding_c1_control_characters_in_model_ids
             "openai_model": "\x85openrouter/auto",
             "openai_fallback_model": "anthropic/claude-3.5-sonnet",
             "api_key": "sk-custom-key",
-            "is_enabled": "on",
         },
         instance=settings,
     )

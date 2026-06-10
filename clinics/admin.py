@@ -19,8 +19,8 @@ class ClinicAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
 
 @admin.register(ClinicAIProviderSettings)
 class ClinicAIProviderSettingsAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ("clinic", "provider", "model", "is_enabled", "has_api_key")
-    list_filter = ("provider", "is_enabled")
+    list_display = ("clinic", "provider", "model", "has_api_key")
+    list_filter = ("provider",)
     search_fields = ("clinic__name", "clinic__slug", "model")
     readonly_fields = ("has_api_key",)
     exclude = ("api_key",)

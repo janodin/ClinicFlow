@@ -196,7 +196,6 @@ class ClinicAIProviderSettings(TimeStampedModel):
     model = models.CharField(max_length=120, default=DEFAULT_OPENAI_MODEL)
     fallback_model = models.CharField(max_length=120, default=DEFAULT_OPENAI_MODEL)
     api_key = models.CharField(max_length=512, blank=True, default="")
-    is_enabled = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Clinic AI Provider Settings"
@@ -209,8 +208,7 @@ class ClinicAIProviderSettings(TimeStampedModel):
     @property
     def is_configured(self):
         return bool(
-            self.is_enabled
-            and self.provider in {self.PROVIDER_OPENAI, self.PROVIDER_OPENAI_COMPATIBLE}
+            self.provider in {self.PROVIDER_OPENAI, self.PROVIDER_OPENAI_COMPATIBLE}
             and (self.base_url or "").strip()
             and (self.model or "").strip()
             and (self.fallback_model or "").strip()

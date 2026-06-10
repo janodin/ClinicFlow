@@ -1,3 +1,4 @@
+import csv
 import json
 from datetime import datetime, time, timedelta
 from urllib.parse import urlparse
@@ -47,11 +48,20 @@ from yakap.forms import (
     PatientYakapProfileForm,
     ServiceYakapRuleForm,
     YakapCoverageCategoryForm,
+    YakapExportForm,
     YakapLedgerEntryForm,
 )
-from yakap.models import AppointmentYakapSnapshot, PatientYakapProfile, ServiceYakapRule, YakapAuditEvent, YakapLedgerEntry
+from yakap.models import (
+    AppointmentYakapSnapshot,
+    ClinicYakapSettings,
+    PatientYakapProfile,
+    ServiceYakapRule,
+    YakapAuditEvent,
+    YakapLedgerEntry,
+)
 from yakap.services import (
     active_period_for_profile_category,
+    balance_state_for,
     create_yakap_audit_event,
     ensure_default_yakap_setup,
     estimated_remaining_for,
@@ -995,7 +1005,11 @@ def appointment_yakap_ledger(request, pk):
                 entry.profile = profile
                 is_over_limit, _remaining_after_entry = ledger_entry_over_limit(entry, create_period=False)
                 if is_over_limit:
-                    if clinic.yakap_settings.hard_block_exceeded:
+                    try:
+                        hard_block_exceeded = clinic.yakap_settings.hard_block_exceeded
+                    except ClinicYakapSettings.DoesNotExist:
+                        hard_block_exceeded = False
+                    if hard_block_exceeded:
                         saved = False
                         form.add_error(
                             None,
@@ -1058,7 +1072,7 @@ def appointment_yakap_ledger(request, pk):
                 clinic,
                 appointment,
                 source=request.POST.get("modal_source", ""),
-                yakap_ledger_form=YakapLedgerEntryForm(clinic) if saved else form,
+                yakap_ledger_form=YakapLedgerEntryForm(clinic, patient=appointment.patient) if saved else form,
             ),
         )
         if not saved:
@@ -1741,6 +1755,8 @@ def yakap(request):
     _require_settings_permission(request.user)
 
     settings_obj, _categories = ensure_default_yakap_setup(clinic)
+    clinic_tz = ZoneInfo(clinic.timezone)
+    today = timezone.localdate(timezone.now(), clinic_tz)
     settings_form = ClinicYakapSettingsForm(instance=settings_obj)
     category_form = YakapCoverageCategoryForm(clinic=clinic)
     post_form = request.POST.get("_form")
@@ -1752,6 +1768,35 @@ def yakap(request):
             AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION,
         ],
     ).order_by("starts_at")[:10]
+    upcoming_yakap_appointments = clinic.appointments.select_related("patient", "service", "yakap_snapshot").filter(
+        starts_at__gte=timezone.now(),
+        yakap_snapshot__requested=True,
+    ).exclude(status=Appointment.STATUS_CANCELLED).order_by("starts_at")[:10]
+    recent_ledger_entries = clinic.yakap_ledger_entries.select_related(
+        "patient",
+        "category",
+        "service",
+        "appointment",
+    ).order_by("-occurred_at", "-created_at")[:10]
+    services_missing_rules = clinic.services.filter(
+        is_active=True,
+        is_archived=False,
+        yakap_rule__isnull=True,
+    ).order_by("name")[:10]
+    low_balance_patients = []
+    over_limit_patients = []
+    active_categories = list(clinic.yakap_categories.filter(is_active=True).order_by("sort_order", "name"))
+    for profile in clinic.yakap_patient_profiles.select_related("patient").order_by("patient__full_name"):
+        if len(low_balance_patients) >= 10 and len(over_limit_patients) >= 10:
+            break
+        for category in active_categories:
+            balance = estimated_remaining_for(profile, category)
+            state = balance_state_for(balance, settings_obj.low_balance_threshold_amount)
+            row = {"profile": profile, "patient": profile.patient, "category": category, "balance": balance, "state": state}
+            if state == "low" and len(low_balance_patients) < 10:
+                low_balance_patients.append(row)
+            elif state == "negative_or_exceeded" and len(over_limit_patients) < 10:
+                over_limit_patients.append(row)
 
     if request.method == "POST" and post_form == "settings":
         settings_form = ClinicYakapSettingsForm(request.POST, instance=settings_obj)
@@ -1778,8 +1823,82 @@ def yakap(request):
             "category_form": category_form,
             "categories": clinic.yakap_categories.all(),
             "unverified_appointments": unverified_appointments,
+            "upcoming_yakap_appointments": upcoming_yakap_appointments,
+            "recent_ledger_entries": recent_ledger_entries,
+            "services_missing_rules": services_missing_rules,
+            "low_balance_patients": low_balance_patients,
+            "over_limit_patients": over_limit_patients,
+            "export_form": YakapExportForm(initial={"started_at": today.replace(month=1, day=1), "ended_at": today}),
         },
     )
+
+
+@login_required
+def yakap_export(request):
+    clinic = _clinic_or_redirect(request)
+    _require_settings_permission(request.user)
+
+    form = YakapExportForm(request.GET)
+    if not form.is_valid():
+        messages.error(request, "Choose a valid YAKAP export date range.")
+        return redirect("dashboard:yakap")
+
+    started_at = form.cleaned_data["started_at"]
+    ended_at = form.cleaned_data["ended_at"]
+    clinic_tz = ZoneInfo(clinic.timezone)
+    start_dt = timezone.make_aware(datetime.combine(started_at, time.min), clinic_tz)
+    end_dt = timezone.make_aware(datetime.combine(ended_at + timedelta(days=1), time.min), clinic_tz)
+    entries = clinic.yakap_ledger_entries.select_related(
+        "patient",
+        "appointment",
+        "service",
+        "category",
+        "created_by",
+    ).filter(
+        occurred_at__gte=start_dt,
+        occurred_at__lt=end_dt,
+    ).order_by("occurred_at", "created_at")
+
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="yakap-ledger-export.csv"'
+    writer = csv.writer(response)
+    writer.writerow([
+        "occurred_at",
+        "patient",
+        "appointment_id",
+        "service",
+        "category",
+        "entry_type",
+        "amount",
+        "verification_status",
+        "created_by",
+        "external_reference",
+        "note",
+    ])
+    for entry in entries:
+        writer.writerow([
+            timezone.localtime(entry.occurred_at, clinic_tz).isoformat(),
+            entry.patient.full_name,
+            entry.appointment_id or "",
+            entry.service.name if entry.service else "",
+            entry.category.name,
+            entry.entry_type,
+            f"{entry.amount:.2f}",
+            entry.verification_status,
+            entry.created_by.get_username() if entry.created_by else "",
+            entry.external_reference,
+            entry.note,
+        ])
+
+    settings_obj, _created = ClinicYakapSettings.objects.get_or_create(clinic=clinic)
+    create_yakap_audit_event(
+        clinic=clinic,
+        actor=request.user,
+        action=YakapAuditEvent.ACTION_EXPORT_CREATED,
+        obj=settings_obj,
+        summary=f"Exported YAKAP ledger entries from {started_at} to {ended_at}.",
+    )
+    return response
 
 
 @login_required
