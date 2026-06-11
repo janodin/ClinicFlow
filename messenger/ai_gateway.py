@@ -1,9 +1,11 @@
 import json
 import logging
+import re
 
 from django.conf import settings
 
 from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+from patients.models import normalize_phone
 
 from .ai_provider_client import AIProviderError, call_chat_completion
 from .ai_tools import (
@@ -26,12 +28,15 @@ from .ai_tools import (
     reschedule_widget_verified_appointment,
 )
 from .defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
+from .models import MessengerConversation
 
 
 logger = logging.getLogger(__name__)
 
 MAX_GATEWAY_MESSAGE_CHARS = 1800
 MAX_GATEWAY_TOOL_CALLS_PER_RESPONSE = 4
+EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+PHONE_RE = re.compile(r"(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)")
 MUTATING_TOOL_NAMES = {"book_confirmed_appointment", "cancel_verified_appointment", "reschedule_verified_appointment"}
 GATEWAY_TOOL_NAMES = {
     "match_services",
@@ -106,17 +111,118 @@ def _safe_context_for_prompt(value):
     return value
 
 
-def _system_message(clinic, context):
+def _messenger_new_turn_texts(value):
+    text = str(value or "").strip()
+    if not text:
+        return []
+    marker = "New Messenger messages in order:"
+    if marker in text:
+        text = text.split(marker, 1)[1]
+        text = text.split("Treat the new messages", 1)[0]
+    lines = [line.strip() for line in text.splitlines()]
+    bullet_texts = [line[2:].strip() for line in lines if line.startswith("- ") and line[2:].strip()]
+    return bullet_texts or [text]
+
+
+def _extract_name_from_contact_text(text, phone_text=""):
+    candidate = EMAIL_RE.sub(" ", str(text or ""))
+    if phone_text:
+        candidate = candidate.replace(phone_text, " ")
+    candidate = PHONE_RE.sub(" ", candidate)
+    candidate = re.sub(
+        r"\b(?:yes|confirm|please|thanks|thank you|book|booking|appointment|for|my|name|full name|phone|number|email|is|ako si)\b",
+        " ",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    candidate = re.sub(r"[^A-Za-z' -]", " ", candidate)
+    candidate = re.sub(r"\s+", " ", candidate).strip(" -")
+    if len(candidate) < 2 or not re.search(r"[A-Za-z]", candidate):
+        return ""
+    return candidate[:160]
+
+
+def _extract_contact_details(text):
+    details = {}
+    email_match = EMAIL_RE.search(str(text or ""))
+    if email_match:
+        details["email"] = email_match.group(0).strip()[:254]
+    phone_matches = list(PHONE_RE.finditer(str(text or "")))
+    phone_text = ""
+    if phone_matches:
+        phone_text = phone_matches[-1].group(0).strip()
+        phone = normalize_phone(phone_text)
+        if len(phone) >= 9:
+            details["phone"] = phone[:40]
+    name = _extract_name_from_contact_text(text, phone_text)
+    if name:
+        details["full_name"] = name
+    return details
+
+
+def _messenger_history_texts_from_db(data):
+    page_id = str(data.get("page_id", "")).strip()
+    psid = str(data.get("psid", "")).strip()
+    if not page_id or not psid:
+        return []
+    conversation = (
+        MessengerConversation.objects.filter(
+            connection__page_id=page_id,
+            connection__page_access_token__gt="",
+            connection__is_active=True,
+            connection__clinic__is_active=True,
+            connection__clinic__requires_onboarding=False,
+            psid=psid,
+        )
+        .only("history")
+        .first()
+    )
+    if not conversation or not isinstance(conversation.history, list):
+        return []
+    return [
+        str(entry.get("content", ""))
+        for entry in conversation.history[-16:]
+        if isinstance(entry, dict) and str(entry.get("role", "")).strip().lower() == "user"
+    ]
+
+
+def _known_patient_details_prompt(data):
+    channel = str(data.get("channel", "")).strip().lower()
+    if channel != "messenger":
+        return ""
+    details = {}
+    for text in [*_messenger_history_texts_from_db(data), *_messenger_new_turn_texts(data.get("message", ""))]:
+        extracted = _extract_contact_details(text)
+        for key in ("full_name", "phone", "email"):
+            if extracted.get(key):
+                details[key] = extracted[key]
+    if not details:
+        return ""
+
+    lines = [
+        "Known patient booking details from this Messenger conversation:",
+        "Use these as already provided; do not ask for a known field again unless the patient changes it.",
+    ]
+    for key in ("full_name", "phone", "email"):
+        if details.get(key):
+            lines.append(f"- {key}: {details[key]}")
+    return "\n".join(lines)
+
+
+def _system_message(clinic, context, patient_details_prompt=""):
     ai_settings = get_or_create_clinic_ai_settings(clinic)
     instructions = (ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT).strip()
     safe_context = _safe_context_for_prompt(context)
+    content_parts = [
+        instructions,
+        "Clinic context JSON:",
+        json.dumps(safe_context, default=str),
+    ]
+    if patient_details_prompt:
+        content_parts.append(patient_details_prompt)
     return {
         "role": "system",
-        "content": "\n\n".join([
-            instructions,
-            "Clinic context JSON:",
-            json.dumps(safe_context, default=str),
-        ]),
+        "content": "\n\n".join(content_parts),
     }
 
 
@@ -125,7 +231,7 @@ def _clean_gateway_content(value):
 
 
 def _messages_for_request(clinic, context, data):
-    messages = [_system_message(clinic, context)]
+    messages = [_system_message(clinic, context, _known_patient_details_prompt(data))]
     history = data.get("history", [])
     if isinstance(history, list):
         for item in history[-16:]:

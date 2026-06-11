@@ -2284,6 +2284,47 @@ def test_ai_gateway_limits_history_entries_sent_to_provider(mock_call):
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_includes_known_messenger_patient_details_from_history(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.models import MessengerConversation
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_known_patient", "PAGE-GATEWAY-KNOWN-PATIENT")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-known-patient")
+    MessengerConversation.objects.create(
+        connection=connection,
+        psid="PSID-KNOWN-PATIENT",
+        history=[
+            {"role": "user", "content": "Norhain kalimpo 09567890456 norhainkalimpo@gmail.com"},
+            {"role": "assistant", "content": "Thanks, I found an open slot."},
+        ],
+    )
+    mock_call.return_value = {"role": "assistant", "content": "Please confirm the appointment details."}
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-KNOWN-PATIENT",
+        "message": "confirm",
+        "history": [
+            {"role": "user", "content": "Norhain kalimpo [phone redacted] norhainkalimpo@gmail.com"},
+            {"role": "assistant", "content": "Thanks, I found an open slot."},
+        ],
+    })
+
+    assert result["fallback"] is False
+    messages = mock_call.call_args.args[1]
+    system_content = messages[0]["content"]
+    assert "Known patient booking details from this Messenger conversation:" in system_content
+    assert "full_name: Norhain kalimpo" in system_content
+    assert "phone: 09567890456" in system_content
+    assert "email: norhainkalimpo@gmail.com" in system_content
+    assert "09567890456" not in json.dumps(messages[1:])
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_executes_match_services_tool_with_server_side_widget_clinic(mock_call):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply
