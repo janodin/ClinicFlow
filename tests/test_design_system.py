@@ -2196,7 +2196,7 @@ def test_task_4_dashboard_uses_today_workspace_composition():
     assert "New appointment" in template
     assert "Add patient" in template
     assert "View all appointments" not in template
-    assert "Needs attention" in template
+    assert "Needs attention" not in template
     assert "Today's schedule" in template
     assert "{{ appointments|length }} appointments" in template
     assert "Booking widget active" in template

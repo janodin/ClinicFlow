@@ -386,9 +386,6 @@ def home(request):
     day_end = day_start + timedelta(days=1)
     appointments = clinic.appointments.select_related("patient", "service").filter(starts_at__gte=day_start, starts_at__lt=day_end)
     pending_appointments = clinic.appointments.select_related("patient", "service").filter(status=Appointment.STATUS_PENDING)
-    needs_attention = appointments.filter(
-        status__in=[Appointment.STATUS_PENDING, Appointment.STATUS_CONFIRMED, Appointment.STATUS_NO_SHOW]
-    )[:6]
     upcoming = clinic.appointments.select_related("patient", "service").filter(starts_at__gte=timezone.now()).exclude(status=Appointment.STATUS_CANCELLED)[:5]
     slot_service = clinic.services.filter(is_active=True, is_archived=False).first()
     open_slots = generate_slots(clinic, slot_service, today) if slot_service else []
@@ -407,7 +404,6 @@ def home(request):
         "upcoming": upcoming,
         "metrics": metrics,
         "today": today,
-        "needs_attention": needs_attention,
         "open_slots_count": len(open_slots),
         "next_slot_label": open_slots[0]["label"] if open_slots else "",
         "slot_service": slot_service,
