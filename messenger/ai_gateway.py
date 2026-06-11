@@ -1,8 +1,11 @@
 import json
 import logging
 import re
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.utils import timezone
 
 from clinics.models import ClinicAIProviderSettings, ClinicAISettings
 from patients.models import normalize_phone
@@ -59,6 +62,22 @@ SECRET_CONTEXT_KEYS = {
     "password",
     "credential",
 }
+CURRENT_BOOKING_SAFETY_RULES = """Current KliniAssist booking safety rules:
+- Collect service, local date/time, full name, phone, and email before asking for final booking confirmation.
+- Do not describe email as optional for bookings.
+- Before booking, summarize service, local date/time, full name, phone, and email, then ask for explicit confirmation.
+- Do not call book_confirmed_appointment in the same turn where the patient first provides or changes a required booking detail.
+- If the requested service is not an active clinic service, say it is unavailable; do not substitute a different service unless the patient explicitly accepts it.
+- If the patient uses a weekday such as this Saturday, keep the weekday and calendar date consistent with the clinic timezone."""
+WEEKDAY_NAMES = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
 
 
 def _fallback_for_clinic(clinic, error):
@@ -111,6 +130,42 @@ def _safe_context_for_prompt(value):
     return value
 
 
+def _current_turn_texts(data):
+    channel = str(data.get("channel", "")).strip().lower()
+    if channel == "messenger":
+        return _messenger_new_turn_texts(data.get("message", ""))
+    text = str(data.get("message", "")).strip()
+    return [text] if text else []
+
+
+def _text_has_contact_detail(text):
+    value = str(text or "")
+    return bool(
+        EMAIL_RE.search(value)
+        or PHONE_RE.search(value)
+        or re.search(r"\b(?:my name|full name|phone|email)\b", value, flags=re.IGNORECASE)
+    )
+
+
+def _text_confirms_booking(text):
+    return bool(
+        re.search(
+            r"\b(?:yes|confirm|confirmed|go ahead|book it|please book|finalize|proceed)\b",
+            str(text or ""),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _confirmed_in_current_turn(data):
+    texts = _current_turn_texts(data)
+    if not texts:
+        return False
+    if any(_text_has_contact_detail(text) for text in texts):
+        return False
+    return any(_text_confirms_booking(text) for text in texts)
+
+
 def _messenger_new_turn_texts(value):
     text = str(value or "").strip()
     if not text:
@@ -122,6 +177,76 @@ def _messenger_new_turn_texts(value):
     lines = [line.strip() for line in text.splitlines()]
     bullet_texts = [line[2:].strip() for line in lines if line.startswith("- ") and line[2:].strip()]
     return bullet_texts or [text]
+
+
+def _clinic_for_tool(channel, data):
+    if channel == "messenger":
+        connection = get_connection_for_page(data.get("page_id", ""))
+        return connection.clinic if connection else None
+    if channel == "widget":
+        return get_clinic_for_slug(data.get("clinic_slug", ""))
+    return None
+
+
+def _mentioned_weekday(texts):
+    text = "\n".join(str(text or "") for text in texts).lower()
+    for name, weekday in WEEKDAY_NAMES.items():
+        if re.search(rf"\b(?:this\s+|next\s+)?{name}\b", text):
+            return name.capitalize(), weekday
+    return "", None
+
+
+def _target_date_from_tool_args(clinic, args):
+    try:
+        if args.get("preferred_starts_at") or args.get("starts_at"):
+            value = str(args.get("preferred_starts_at") or args.get("starts_at")).replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(value)
+            if timezone.is_naive(parsed):
+                parsed = timezone.make_aware(parsed, ZoneInfo(clinic.timezone))
+            return parsed.astimezone(ZoneInfo(clinic.timezone)).date()
+        if args.get("preferred_date"):
+            return date.fromisoformat(str(args.get("preferred_date")))
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _next_weekday_date(clinic, weekday):
+    today = timezone.now().astimezone(ZoneInfo(clinic.timezone)).date()
+    days = (weekday - today.weekday()) % 7
+    if days == 0:
+        days = 7
+    return today + timedelta(days=days)
+
+
+def _weekday_mismatch_result(channel, data, args, *, mutation=False):
+    clinic = _clinic_for_tool(channel, data)
+    if clinic is None:
+        return None
+    weekday_name, weekday = _mentioned_weekday(_current_turn_texts(data))
+    if weekday is None:
+        return None
+    target_date = _target_date_from_tool_args(clinic, args)
+    if target_date is None or target_date.weekday() == weekday:
+        return None
+    expected_date = _next_weekday_date(clinic, weekday)
+    message = (
+        "Requested weekday does not match the date sent to availability. "
+        f"The patient asked for {weekday_name}; use {expected_date.isoformat()} "
+        f"for this {weekday_name} in the clinic timezone."
+    )
+    if mutation:
+        return {"created": False, "error": message}
+    return {
+        "found": True,
+        "available": False,
+        "error": message,
+        "selected_slot": None,
+        "alternatives": [],
+        "suggestion_type": "weekday_mismatch",
+        "requested_date": target_date.isoformat(),
+        "suggested_date": expected_date.isoformat(),
+    }
 
 
 def _extract_name_from_contact_text(text, phone_text=""):
@@ -209,12 +334,54 @@ def _known_patient_details_prompt(data):
     return "\n".join(lines)
 
 
+def _slot_summary(slot):
+    if not isinstance(slot, dict):
+        return ""
+    return str(slot.get("label") or slot.get("local_starts_at") or slot.get("starts_at") or "available time")
+
+
+def _reply_from_tool_result(result):
+    if not isinstance(result, dict):
+        return ""
+    error = str(result.get("error") or "").strip()
+    if error:
+        return error
+    if result.get("created") is True and isinstance(result.get("appointment"), dict):
+        appointment = result["appointment"]
+        service = appointment.get("service", "appointment")
+        date_label = appointment.get("local_date_label", "")
+        time_label = appointment.get("local_time_label", "")
+        reference = appointment.get("reference_code", "")
+        reply = f"Your {service} is booked"
+        if date_label or time_label:
+            reply += f" for {date_label} {time_label}".rstrip()
+        if reference:
+            reply += f". Reference code: {reference}"
+        return reply + "."
+    if result.get("available") is True:
+        selected = result.get("selected_slot")
+        if selected:
+            return f"That slot is available: {_slot_summary(selected)}. Please provide the remaining booking details so I can summarize before confirmation."
+        alternatives = result.get("alternatives") if isinstance(result.get("alternatives"), list) else []
+        if alternatives:
+            options = ", ".join(_slot_summary(slot) for slot in alternatives[:5])
+            return f"Slots are available: {options}. Which time works best for you?"
+    if result.get("available") is False:
+        alternatives = result.get("alternatives") if isinstance(result.get("alternatives"), list) else []
+        if alternatives:
+            options = ", ".join(_slot_summary(slot) for slot in alternatives[:3])
+            return f"The requested slot is not available. Nearest available options are: {options}."
+        return "That appointment time is not available. Please choose another date or time."
+    return ""
+
+
 def _system_message(clinic, context, patient_details_prompt=""):
     ai_settings = get_or_create_clinic_ai_settings(clinic)
     instructions = (ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT).strip()
     safe_context = _safe_context_for_prompt(context)
     content_parts = [
         instructions,
+        CURRENT_BOOKING_SAFETY_RULES,
         "Clinic context JSON:",
         json.dumps(safe_context, default=str),
     ]
@@ -449,6 +616,14 @@ def _tool_calls_are_allowed(tool_calls, mutation_already_executed=False):
     return True
 
 
+def _booking_confirmed_argument(data, args):
+    if not _bool_value(args.get("confirmed")):
+        return False, ""
+    if _confirmed_in_current_turn(data):
+        return True, ""
+    return False, "Appointment creation requires explicit user confirmation; current patient message did not explicitly confirm the complete details."
+
+
 def _execute_tool(channel, data, name, args):
     if channel == "messenger":
         page_id = data.get("page_id", "")
@@ -458,6 +633,9 @@ def _execute_tool(channel, data, name, args):
         if name == "match_services":
             return match_services(page_id, args.get("query", ""))
         if name == "check_availability":
+            mismatch = _weekday_mismatch_result(channel, data, args)
+            if mismatch:
+                return mismatch
             return check_availability(
                 page_id,
                 args.get("service_id"),
@@ -489,13 +667,19 @@ def _execute_tool(channel, data, name, args):
                 input_sequence=input_sequence,
             )
         if name == "book_confirmed_appointment":
+            mismatch = _weekday_mismatch_result(channel, data, args, mutation=True)
+            if mismatch:
+                return mismatch
+            confirmed, confirmation_error = _booking_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"created": False, "error": confirmation_error}
             return book_confirmed_appointment(
                 page_id,
                 args.get("service_id"),
                 args.get("starts_at", ""),
                 args.get("full_name", ""),
                 args.get("phone", ""),
-                _bool_value(args.get("confirmed")),
+                confirmed,
                 email=args.get("email", ""),
                 reason=args.get("reason", ""),
                 psid=psid,
@@ -507,6 +691,9 @@ def _execute_tool(channel, data, name, args):
         if name == "match_services":
             return match_widget_services(clinic_slug, args.get("query", ""))
         if name == "check_availability":
+            mismatch = _weekday_mismatch_result(channel, data, args)
+            if mismatch:
+                return mismatch
             return check_widget_availability(
                 clinic_slug,
                 args.get("service_id"),
@@ -532,13 +719,19 @@ def _execute_tool(channel, data, name, args):
                 _bool_value(args.get("confirmed")),
             )
         if name == "book_confirmed_appointment":
+            mismatch = _weekday_mismatch_result(channel, data, args, mutation=True)
+            if mismatch:
+                return mismatch
+            confirmed, confirmation_error = _booking_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"created": False, "error": confirmation_error}
             return book_widget_confirmed_appointment(
                 clinic_slug,
                 args.get("service_id"),
                 args.get("starts_at", ""),
                 args.get("full_name", ""),
                 args.get("phone", ""),
-                _bool_value(args.get("confirmed")),
+                confirmed,
                 email=args.get("email", ""),
                 reason=args.get("reason", ""),
             )
@@ -562,9 +755,13 @@ def build_gateway_reply(data):
     tools = _tool_definitions()
     max_iterations = max(1, getattr(settings, "AI_GATEWAY_MAX_TOOL_ITERATIONS", 5))
     mutation_executed = False
+    last_tool_result = None
     for _iteration in range(max_iterations):
         provider_message, provider_error = _call_provider_with_fallback(provider_settings, messages, tools)
         if provider_message is None:
+            tool_reply = _reply_from_tool_result(last_tool_result)
+            if tool_reply:
+                return {"reply": tool_reply, "fallback": False, "error": ""}
             return _fallback_for_clinic(clinic, provider_error)
 
         tool_calls = provider_message.get("tool_calls") or []
@@ -591,6 +788,7 @@ def build_gateway_reply(data):
                     extra={"clinic_id": clinic.id, "tool_name": name},
                 )
                 result = {"error": "Tool execution failed."}
+            last_tool_result = result
             if name in MUTATING_TOOL_NAMES:
                 mutation_executed = True
             messages.append({

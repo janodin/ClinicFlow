@@ -498,6 +498,40 @@ def test_channel_reply_redacts_failed_appointment_verification_phone_numbers():
     assert "[phone redacted]" in prepare_block
 
 
+def test_channel_reply_preserves_phone_numbers_in_booking_confirmation_summary():
+    reply = _run_prepare_channel_reply(
+        """
+Appointment Summary
+
+- Service: Dental Cleaning
+- Date & Time: June 12, 2026, 9:00 AM
+- Full Name: Production QA Test Patient
+- Phone: 0917-123-4567
+- Email: qa.production.test@example.com
+
+Please let me know if everything looks correct and you'd like to confirm the booking.
+""",
+        channel="widget",
+    )
+
+    assert "0917-123-4567" in reply
+    assert "[phone redacted]" not in reply
+
+
+def test_channel_reply_still_redacts_failed_appointment_lookup_phone_numbers():
+    reply = _run_prepare_channel_reply(
+        """
+I couldn't verify the appointment. The appointment booked under 0917-123-4567 does not match the reference code provided.
+
+Please re-enter the reference code and phone number used for the booking.
+""",
+        channel="widget",
+    )
+
+    assert "[phone redacted]" in reply
+    assert "0917-123-4567" not in reply
+
+
 def test_meta_messenger_events_acknowledges_only_after_signature_verification():
     source = SOURCE.read_text(encoding="utf-8")
 

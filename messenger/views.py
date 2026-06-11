@@ -262,17 +262,6 @@ def _turn_user_content(messages):
 
 def _compose_turn_prompt(conversation, messages):
     lines = []
-    history = conversation.history[-16:] if isinstance(conversation.history, list) else []
-    if history:
-        lines.append("Previous completed Messenger conversation:")
-        for entry in history:
-            if not isinstance(entry, dict):
-                continue
-            role = str(entry.get("role", "")).strip() or "message"
-            content = str(entry.get("content", "")).strip()
-            if content:
-                lines.append(f"{role.title()}: {content}")
-        lines.append("")
     lines.append("New Messenger messages in order:")
     for message in messages:
         content = (message.text or message.postback or "").strip()

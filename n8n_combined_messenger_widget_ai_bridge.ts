@@ -1052,8 +1052,8 @@ const prepareChannelReply = node({
 function isFailedAppointmentVerificationReply(value) {
   const text = String(value || '').toLowerCase();
   const appointmentContext = ['appointment', 'booking', 'reference', 'cancel', 'reschedul'].some((term) => text.includes(term));
-  const identityContext = ['phone', 'number', 'verify', 'verification', 'unable to verify', "couldn't verify", 'could not verify', "doesn't match", 'does not match', 'not match', 'booked under', 'belongs to', 'provided', 'confirm', 'lookup', 'not found'].some((term) => text.includes(term));
-  return appointmentContext && identityContext;
+  const failedVerificationContext = ['unable to verify', "couldn't verify", 'could not verify', "doesn't match", 'does not match', 'not match', 'booked under', 'belongs to', 'lookup failed', 'not found'].some((term) => text.includes(term));
+  return appointmentContext && failedVerificationContext;
 }
 function stripAssistantReasoningText(value) {
   const original = String(value || '').trim();

@@ -2046,6 +2046,35 @@ def test_ai_gateway_calls_provider_for_widget_clinic(mock_call):
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_appends_current_booking_safety_rules_after_stale_saved_instructions(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_safety_overlay", "PAGE-GATEWAY-SAFETY-OVERLAY")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        instructions=(
+            "Old clinic instructions. For booking, collect service, date/time, "
+            "full name, and phone in normal conversation. Email is optional."
+        ),
+    )
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-safety-overlay")
+    mock_call.return_value = {"role": "assistant", "content": "Please provide your email."}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "I want to book."})
+
+    assert result["fallback"] is False
+    system_content = mock_call.call_args.args[1][0]["content"]
+    assert "Old clinic instructions" in system_content
+    assert system_content.index("Old clinic instructions") < system_content.index("Current KliniAssist booking safety rules")
+    assert "Collect service, local date/time, full name, phone, and email before asking for final booking confirmation." in system_content
+    assert "Do not describe email as optional for bookings." in system_content
+    assert "Do not call book_confirmed_appointment in the same turn where the patient first provides or changes a required booking detail." in system_content
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_retries_fallback_model_when_primary_provider_errors(mock_call, caplog):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply
@@ -2382,6 +2411,143 @@ def test_ai_gateway_booking_tool_preserves_confirmation_and_messenger_identity(m
 
 
 @pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_booking_tool_requires_confirmation_in_current_turn_after_new_email(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_tools import check_widget_availability
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_email_confirm", "PAGE-GATEWAY-EMAIL-CONFIRM")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-email-confirm")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    slot = check_widget_availability(clinic.slug, service.id, preferred_date=target_date.isoformat())["alternatives"][0]
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "book_confirmed_appointment",
+                    "arguments": json.dumps({
+                        "service_id": service.id,
+                        "starts_at": slot["starts_at"],
+                        "full_name": "Production QA Test Patient",
+                        "phone": "09171234567",
+                        "email": "qa.production.test@example.com",
+                        "confirmed": True,
+                    }),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please confirm the complete details before I book it."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "qa.production.test@example.com",
+        "history": [
+            {"role": "user", "content": "Yes, please confirm it."},
+            {"role": "assistant", "content": "I still need your email address."},
+        ],
+    })
+
+    assert result["reply"] == "Please confirm the complete details before I book it."
+    assert not Appointment.objects.filter(clinic=clinic).exists()
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "current patient message did not explicitly confirm" in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_returns_availability_error_when_provider_fails_after_tool_result(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+    from widget.views import PAST_APPOINTMENT_TIME_MESSAGE
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_tool_fallback", "PAGE-GATEWAY-TOOL-FALLBACK")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Generic fallback.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o", fallback_model="gpt-4o-mini", api_key="sk-tool-fallback")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    past_start = (timezone.now() - timedelta(days=1)).isoformat()
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": past_start}),
+                },
+            }],
+        },
+        AIProviderError("AI provider request failed."),
+        AIProviderError("AI provider request failed."),
+    ]
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Can I book yesterday at 9 AM?"})
+
+    assert result["fallback"] is False
+    assert result["error"] == ""
+    assert PAST_APPOINTMENT_TIME_MESSAGE in result["reply"]
+    assert result["reply"] != "Generic fallback."
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_tool_rejects_weekday_date_mismatch_from_model(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_weekday_guard", "PAGE-GATEWAY-WEEKDAY-GUARD")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-weekday-guard")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30, price=0)
+    today = timezone.localdate()
+    days_until_saturday = (5 - today.weekday()) % 7 or 7
+    next_saturday = today + timedelta(days=days_until_saturday)
+    wrong_date = next_saturday + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=wrong_date.weekday(), open_time=time(9), close_time=time(10))
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_date": wrong_date.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please choose a valid Saturday date."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "Can I book a Dental Cleaning this Saturday at 9 AM?",
+    })
+
+    assert result["reply"] == "Please choose a valid Saturday date."
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "weekday" in tool_message["content"].lower()
+    assert next_saturday.isoformat() in tool_message["content"]
+    assert "\"available\": false" in tool_message["content"]
+
+
+@pytest.mark.django_db
 @override_settings(AI_GATEWAY_MAX_TOOL_ITERATIONS=1)
 @patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_returns_fallback_when_tool_loop_exceeds_cap(mock_call):
@@ -2547,7 +2713,7 @@ def test_ai_gateway_rejects_second_mutation_across_tool_iterations(mock_call):
         {"role": "assistant", "content": "", "tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "book_confirmed_appointment", "arguments": json.dumps(second_args)}}]},
     ]
 
-    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Book twice across turns"})
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Yes, book it twice across turns"})
 
     assert result == {"reply": "Please call us.", "fallback": True, "error": "invalid_tool_call"}
     assert Appointment.objects.filter(clinic=clinic).count() == 1
@@ -4376,6 +4542,46 @@ def test_ai_turn_new_message_supersedes_in_flight_turn_and_coalesces_pending_mes
 
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_payload_keeps_prior_conversation_out_of_current_message():
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_current_only", "PAGE-AI-TURN-CURRENT-ONLY")
+    client = Client()
+    first = _post_ai_turn_register(
+        client,
+        "PAGE-AI-TURN-CURRENT-ONLY",
+        "PSID1",
+        "mid-turn-cheapest",
+        "ano ang pinakamurang appointment?",
+    ).json()
+    _post_ai_turn_complete(
+        client,
+        "PAGE-AI-TURN-CURRENT-ONLY",
+        "PSID1",
+        first["turn_token"],
+        first["input_sequence"],
+        "Ang pinakamurang serbisyo namin ay Bone Test.",
+    )
+
+    response = _post_ai_turn_register(
+        client,
+        "PAGE-AI-TURN-CURRENT-ONLY",
+        "PSID1",
+        "mid-turn-redacted-question",
+        "what does it mean by redacted?",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "what does it mean by redacted?" in data["message"]
+    assert "ano ang pinakamurang appointment?" not in data["message"]
+    assert "Bone Test" not in data["message"]
+    assert data["history"] == [
+        {"role": "user", "content": "ano ang pinakamurang appointment?"},
+        {"role": "assistant", "content": "Ang pinakamurang serbisyo namin ay Bone Test."},
+    ]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
 def test_ai_turn_payload_includes_prior_history_phone_numbers():
     _clinic, _connection = _create_messenger_clinic("owner_ai_turn_redact_phone", "PAGE-AI-TURN-REDACT-PHONE")
     client = Client()
@@ -4405,7 +4611,7 @@ def test_ai_turn_payload_includes_prior_history_phone_numbers():
 
     assert response.status_code == 200
     data = response.json()
-    assert "09175551234" in data["message"]
+    assert "09175551234" not in data["message"]
     assert "09175551234" in json.dumps(data["history"])
     assert "[phone redacted]" not in data["message"]
     assert "[phone redacted]" not in json.dumps(data["history"])
