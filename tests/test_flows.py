@@ -55,13 +55,29 @@ def test_today_dashboard_context_is_clinic_scoped_and_actionable(client):
     patient = Patient.objects.create(clinic=clinic, full_name="Demo Patient", phone="09170001111")
     other_patient = Patient.objects.create(clinic=other_clinic, full_name="Other Patient", phone="09170002222")
     starts_at = fixed_now + timedelta(hours=1)
-    Appointment.objects.create(
+    pending_appointment = Appointment.objects.create(
         clinic=clinic,
         patient=patient,
         service=service,
         starts_at=starts_at,
         ends_at=starts_at + timedelta(minutes=30),
         status=Appointment.STATUS_PENDING,
+    )
+    confirmed_appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at + timedelta(hours=1),
+        ends_at=starts_at + timedelta(hours=1, minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    no_show_appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at + timedelta(hours=2),
+        ends_at=starts_at + timedelta(hours=2, minutes=30),
+        status=Appointment.STATUS_NO_SHOW,
     )
     Appointment.objects.create(
         clinic=other_clinic,
@@ -80,7 +96,7 @@ def test_today_dashboard_context_is_clinic_scoped_and_actionable(client):
     assert response.context["metrics"]["pending"] == 1
     assert response.context["open_slots_count"] >= 1
     assert response.context["next_slot_label"]
-    assert list(response.context["needs_attention"]) == [Appointment.objects.get(clinic=clinic)]
+    assert list(response.context["needs_attention"]) == [pending_appointment, confirmed_appointment, no_show_appointment]
 
 
 @pytest.mark.django_db
