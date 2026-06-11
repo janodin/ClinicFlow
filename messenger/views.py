@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 import uuid
 from datetime import timedelta
 
@@ -49,8 +48,6 @@ from .models import (
 logger = logging.getLogger(__name__)
 MESSENGER_QUICK_REPLY_LIMIT = 13
 MESSENGER_QUICK_REPLY_TITLE_LIMIT = 20
-MESSENGER_HISTORY_PHONE_REDACTION = "[phone redacted]"
-PHONE_LIKE_HISTORY_RE = re.compile(r"(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)")
 
 
 def _verify_shared_secret(request):
@@ -263,31 +260,9 @@ def _turn_user_content(messages):
     )
 
 
-def _redact_phone_like_history_text(value):
-    def replace_if_phone_like(match):
-        digits = re.sub(r"\D", "", match.group(0))
-        if len(digits) < 9:
-            return match.group(0)
-        return MESSENGER_HISTORY_PHONE_REDACTION
-
-    return PHONE_LIKE_HISTORY_RE.sub(replace_if_phone_like, str(value or ""))
-
-
-def _redacted_conversation_history(history):
-    redacted = []
-    for entry in history:
-        if not isinstance(entry, dict):
-            continue
-        item = dict(entry)
-        item["content"] = _redact_phone_like_history_text(item.get("content", ""))
-        redacted.append(item)
-    return redacted
-
-
 def _compose_turn_prompt(conversation, messages):
     lines = []
     history = conversation.history[-16:] if isinstance(conversation.history, list) else []
-    history = _redacted_conversation_history(history)
     if history:
         lines.append("Previous completed Messenger conversation:")
         for entry in history:
@@ -316,7 +291,7 @@ def _turn_payload(conversation, turn):
         "input_sequence": turn.input_sequence,
         "messages": [_serialize_turn_message(message) for message in messages],
         "message": _compose_turn_prompt(conversation, messages),
-        "history": _redacted_conversation_history(history),
+        "history": history,
     }
 
 

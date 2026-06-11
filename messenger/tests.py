@@ -2284,7 +2284,7 @@ def test_ai_gateway_limits_history_entries_sent_to_provider(mock_call):
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
-def test_ai_gateway_includes_known_messenger_patient_details_from_history(mock_call):
+def test_ai_gateway_includes_known_messenger_patient_details_and_preserves_history_phone(mock_call):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply
     from messenger.models import MessengerConversation
@@ -2308,7 +2308,7 @@ def test_ai_gateway_includes_known_messenger_patient_details_from_history(mock_c
         "psid": "PSID-KNOWN-PATIENT",
         "message": "confirm",
         "history": [
-            {"role": "user", "content": "Norhain kalimpo [phone redacted] norhainkalimpo@gmail.com"},
+            {"role": "user", "content": "Norhain kalimpo 09567890456 norhainkalimpo@gmail.com"},
             {"role": "assistant", "content": "Thanks, I found an open slot."},
         ],
     })
@@ -2320,7 +2320,7 @@ def test_ai_gateway_includes_known_messenger_patient_details_from_history(mock_c
     assert "full_name: Norhain kalimpo" in system_content
     assert "phone: 09567890456" in system_content
     assert "email: norhainkalimpo@gmail.com" in system_content
-    assert "09567890456" not in json.dumps(messages[1:])
+    assert "09567890456" in json.dumps(messages[1:])
 
 
 @pytest.mark.django_db
@@ -4376,7 +4376,7 @@ def test_ai_turn_new_message_supersedes_in_flight_turn_and_coalesces_pending_mes
 
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
-def test_ai_turn_payload_redacts_prior_history_phone_numbers():
+def test_ai_turn_payload_includes_prior_history_phone_numbers():
     _clinic, _connection = _create_messenger_clinic("owner_ai_turn_redact_phone", "PAGE-AI-TURN-REDACT-PHONE")
     client = Client()
     first = _post_ai_turn_register(
@@ -4405,9 +4405,10 @@ def test_ai_turn_payload_redacts_prior_history_phone_numbers():
 
     assert response.status_code == 200
     data = response.json()
-    assert "09175551234" not in data["message"]
-    assert "09175551234" not in json.dumps(data["history"])
-    assert "[phone redacted]" in data["message"]
+    assert "09175551234" in data["message"]
+    assert "09175551234" in json.dumps(data["history"])
+    assert "[phone redacted]" not in data["message"]
+    assert "[phone redacted]" not in json.dumps(data["history"])
     assert "123445667788" in data["message"]
 
 
