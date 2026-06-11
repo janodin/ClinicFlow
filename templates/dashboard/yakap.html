@@ -5,13 +5,14 @@
   <div class="cf-page-header">
     <div>
       <h1 class="cf-page-title ui-page-title">YAKAP</h1>
-      <p class="cf-page-description">Configure patient-facing YAKAP copy, estimated annual credit, and clinic-owned coverage categories.</p>
+      <p class="cf-page-description">Configure patient-facing YAKAP copy, category-specific estimated limits, and clinic-owned coverage categories.</p>
     </div>
     <span class="cf-badge {% if yakap_settings.is_enabled %}cf-badge-active{% else %}cf-badge-inactive{% endif %}">
       {% if yakap_settings.is_enabled %}Enabled{% else %}Disabled{% endif %}
     </span>
   </div>
 
+  {% if can_manage_yakap_settings %}
   <section class="cf-card p-4">
     <form method="get" action="{% url 'dashboard:yakap_export' %}" class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
       <div>
@@ -31,6 +32,7 @@
       </div>
     </form>
   </section>
+  {% endif %}
 
   <section class="cf-card p-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -39,9 +41,15 @@
         <h2 class="cf-section-title mt-2">Estimated YAKAP coverage</h2>
         <p class="mt-2 text-sm text-[var(--cf-muted)]">Show careful public guidance while keeping all balances as estimates until clinic staff verify eligibility.</p>
       </div>
-      <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] px-4 py-3 text-right">
-        <p class="cf-kpi-label">Default annual credit</p>
-        <p class="mt-1 text-2xl font-light tabular-nums text-[var(--cf-ink)]">PHP {{ yakap_settings.default_annual_credit }}</p>
+      <div class="grid gap-2 sm:grid-cols-2">
+        <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] px-4 py-3 text-right">
+          <p class="cf-kpi-label">Medicines/GAMOT default</p>
+          <p class="mt-1 text-2xl font-light tabular-nums text-[var(--cf-ink)]">PHP {{ yakap_settings.medicine_annual_limit_default }}</p>
+        </div>
+        <div class="rounded-lg border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] px-4 py-3 text-right">
+          <p class="cf-kpi-label">Non-medicine default</p>
+          <p class="mt-1 text-2xl font-light tabular-nums text-[var(--cf-ink)]">PHP {{ yakap_settings.default_non_medicine_limit }}</p>
+        </div>
       </div>
     </div>
     <p class="mt-4 rounded-lg border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] px-4 py-3 text-sm text-[var(--cf-ink)]">YAKAP coverage shown in KliniAssist is public guidance only. Estimated remaining balances are not official PhilHealth balances and must be verified through the clinic's PhilHealth workflow before service.</p>
@@ -50,27 +58,27 @@
   <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
     <div class="cf-card p-4">
       <p class="cf-kpi-label">Unverified</p>
-      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ unverified_appointments|length }}</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ unverified_appointments_count }}</p>
       <p class="mt-1 text-xs text-[var(--cf-muted)]">Requests needing review</p>
     </div>
     <div class="cf-card p-4">
       <p class="cf-kpi-label">Upcoming YAKAP appointments</p>
-      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ upcoming_yakap_appointments|length }}</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ upcoming_yakap_appointments_count }}</p>
       <p class="mt-1 text-xs text-[var(--cf-muted)]">Future visits with YAKAP intent</p>
     </div>
     <div class="cf-card p-4">
       <p class="cf-kpi-label">Low estimated balance</p>
-      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ low_balance_patients|length }}</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ low_balance_patients_count }}</p>
       <p class="mt-1 text-xs text-[var(--cf-muted)]">At or below threshold</p>
     </div>
     <div class="cf-card p-4">
       <p class="cf-kpi-label">Over estimated limit</p>
-      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ over_limit_patients|length }}</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ over_limit_patients_count }}</p>
       <p class="mt-1 text-xs text-[var(--cf-muted)]">Negative estimated remaining</p>
     </div>
     <div class="cf-card p-4">
       <p class="cf-kpi-label">Services missing YAKAP rules</p>
-      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ services_missing_rules|length }}</p>
+      <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ services_missing_rules_count }}</p>
       <p class="mt-1 text-xs text-[var(--cf-muted)]">Active services to classify</p>
     </div>
   </section>
@@ -82,7 +90,7 @@
           <h2 class="cf-section-title">Upcoming YAKAP appointments</h2>
           <p class="mt-1 text-sm text-[var(--cf-muted)]">Future visits where patients requested estimated YAKAP coverage.</p>
         </div>
-        <span class="cf-badge cf-badge-info">{{ upcoming_yakap_appointments|length }} upcoming</span>
+        <span class="cf-badge cf-badge-info">{{ upcoming_yakap_appointments_count }} upcoming</span>
       </div>
       {% if upcoming_yakap_appointments %}
         <div class="cf-table-wrap">
@@ -127,7 +135,7 @@
           <h2 class="cf-section-title">Services missing YAKAP rules</h2>
           <p class="mt-1 text-sm text-[var(--cf-muted)]">Classify active services so staff and booking flows show consistent estimates.</p>
         </div>
-        <span class="cf-badge cf-badge-info">{{ services_missing_rules|length }} services</span>
+        <span class="cf-badge cf-badge-info">{{ services_missing_rules_count }} services</span>
       </div>
       {% if services_missing_rules %}
         <div class="cf-table-wrap">
@@ -168,7 +176,7 @@
           <h2 class="cf-section-title">Low estimated balance</h2>
           <p class="mt-1 text-sm text-[var(--cf-muted)]">Patients with remaining estimates at or below the clinic threshold.</p>
         </div>
-        <span class="cf-badge cf-badge-warning cf-status-pending">{{ low_balance_patients|length }} low</span>
+        <span class="cf-badge cf-badge-warning cf-status-pending">{{ low_balance_patients_count }} low</span>
       </div>
       {% if low_balance_patients %}
         <div class="cf-table-wrap">
@@ -209,7 +217,7 @@
           <h2 class="cf-section-title">Over estimated limit</h2>
           <p class="mt-1 text-sm text-[var(--cf-muted)]">Patients whose manual ledger usage exceeds the current estimated period limit.</p>
         </div>
-        <span class="cf-badge bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]">{{ over_limit_patients|length }} over</span>
+        <span class="cf-badge bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]">{{ over_limit_patients_count }} over</span>
       </div>
       {% if over_limit_patients %}
         <div class="cf-table-wrap">
@@ -290,6 +298,7 @@
     {% endif %}
   </section>
 
+  {% if can_manage_yakap_settings %}
   <div class="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,.9fr)]">
     <section class="cf-card p-6">
       <div class="mb-5 flex items-center gap-3">
@@ -321,6 +330,12 @@
           </div>
 
           <div class="cf-field md:col-span-2">
+            <label class="cf-label" for="{{ settings_form.program_label.id_for_label }}">{{ settings_form.program_label.label }}</label>
+            {{ settings_form.program_label }}
+            {% if settings_form.program_label.errors %}<p class="cf-error">{{ settings_form.program_label.errors.0 }}</p>{% endif %}
+          </div>
+
+          <div class="cf-field md:col-span-2">
             <label class="cf-label" for="{{ settings_form.public_promo_headline.id_for_label }}">{{ settings_form.public_promo_headline.label }}</label>
             {{ settings_form.public_promo_headline }}
             {% if settings_form.public_promo_headline.errors %}<p class="cf-error">{{ settings_form.public_promo_headline.errors.0 }}</p>{% endif %}
@@ -336,12 +351,39 @@
             <p class="mt-1 text-xs text-[var(--cf-muted)]">Tell patients that eligibility and remaining coverage require clinic verification.</p>
             {% if settings_form.public_disclaimer.errors %}<p class="cf-error">{{ settings_form.public_disclaimer.errors.0 }}</p>{% endif %}
           </div>
-          <div class="cf-field">
-            <label class="cf-label" for="{{ settings_form.default_annual_credit.id_for_label }}">{{ settings_form.default_annual_credit.label }}</label>
-            {{ settings_form.default_annual_credit }}
-            {% if settings_form.default_annual_credit.errors %}<p class="cf-error">{{ settings_form.default_annual_credit.errors.0 }}</p>{% endif %}
+          <div class="grid gap-4 md:col-span-2 sm:grid-cols-3">
+            <div class="cf-field">
+              <label class="cf-label" for="{{ settings_form.medicine_annual_limit_default.id_for_label }}">{{ settings_form.medicine_annual_limit_default.label }}</label>
+              {{ settings_form.medicine_annual_limit_default }}
+              <p class="mt-1 text-xs text-[var(--cf-muted)]">Default for Medicines/GAMOT only.</p>
+              {% if settings_form.medicine_annual_limit_default.errors %}<p class="cf-error">{{ settings_form.medicine_annual_limit_default.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label class="cf-label" for="{{ settings_form.default_non_medicine_limit.id_for_label }}">{{ settings_form.default_non_medicine_limit.label }}</label>
+              {{ settings_form.default_non_medicine_limit }}
+              <p class="mt-1 text-xs text-[var(--cf-muted)]">Default for non-medicine categories.</p>
+              {% if settings_form.default_non_medicine_limit.errors %}<p class="cf-error">{{ settings_form.default_non_medicine_limit.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label class="cf-label" for="{{ settings_form.default_annual_credit.id_for_label }}">{{ settings_form.default_annual_credit.label }}</label>
+              {{ settings_form.default_annual_credit }}
+              <p class="mt-1 text-xs text-[var(--cf-muted)]">Legacy generic estimate; use category limits for policy.</p>
+              {% if settings_form.default_annual_credit.errors %}<p class="cf-error">{{ settings_form.default_annual_credit.errors.0 }}</p>{% endif %}
+            </div>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
+          <div class="grid gap-4 md:col-span-2 sm:grid-cols-2">
+            <div class="cf-field">
+              <label class="cf-label" for="{{ settings_form.low_balance_threshold_amount.id_for_label }}">{{ settings_form.low_balance_threshold_amount.label }}</label>
+              {{ settings_form.low_balance_threshold_amount }}
+              {% if settings_form.low_balance_threshold_amount.errors %}<p class="cf-error">{{ settings_form.low_balance_threshold_amount.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label class="cf-label" for="{{ settings_form.verification_stale_after_days.id_for_label }}">{{ settings_form.verification_stale_after_days.label }}</label>
+              {{ settings_form.verification_stale_after_days }}
+              {% if settings_form.verification_stale_after_days.errors %}<p class="cf-error">{{ settings_form.verification_stale_after_days.errors.0 }}</p>{% endif %}
+            </div>
+          </div>
+          <div class="grid gap-4 md:col-span-2 sm:grid-cols-2">
             <div class="cf-field">
               <label class="cf-label" for="{{ settings_form.reset_month.id_for_label }}">{{ settings_form.reset_month.label }}</label>
               {{ settings_form.reset_month }}
@@ -439,6 +481,7 @@
       </form>
     </section>
   </div>
+  {% endif %}
 
   <section class="cf-card p-6">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -476,6 +519,52 @@
           </table>
         </div>
       </div>
+      {% if can_manage_yakap_settings %}
+      <div class="mt-5 grid gap-3">
+        <div>
+          <h3 class="text-sm font-semibold text-[var(--cf-ink)]">Edit Category Limits</h3>
+          <p class="mt-1 text-xs text-[var(--cf-muted)]">Update default category limits when clinic policy changes. Existing credit-line periods keep their saved limit snapshots.</p>
+        </div>
+        {% for category in categories %}
+          <form method="post" action="{% url 'dashboard:yakap' %}" class="grid gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-4 lg:grid-cols-[minmax(180px,1fr)_minmax(150px,.8fr)_minmax(140px,.7fr)_minmax(90px,.5fr)]">
+            {% csrf_token %}
+            <input type="hidden" name="_form" value="category">
+            <input type="hidden" name="category_id" value="{{ category.id }}">
+            <div class="cf-field">
+              <label class="cf-label" for="category-name-{{ category.id }}">Name</label>
+              <input id="category-name-{{ category.id }}" name="name" value="{{ category.name }}" class="cf-input" required>
+            </div>
+            <div class="cf-field">
+              <label class="cf-label" for="category-type-{{ category.id }}">Type</label>
+              <select id="category-type-{{ category.id }}" name="category_type" class="cf-select">
+                {% for value, label in category_type_choices %}
+                  <option value="{{ value }}" {% if category.category_type == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="cf-field">
+              <label class="cf-label" for="category-limit-{{ category.id }}">Annual limit</label>
+              <input id="category-limit-{{ category.id }}" name="annual_limit" value="{{ category.annual_limit }}" type="number" min="0" step="0.01" class="cf-input" required>
+            </div>
+            <div class="cf-field">
+              <label class="cf-label" for="category-sort-{{ category.id }}">Sort</label>
+              <input id="category-sort-{{ category.id }}" name="sort_order" value="{{ category.sort_order }}" type="number" min="0" step="1" class="cf-input" required>
+            </div>
+            <div class="cf-field lg:col-span-3">
+              <label class="cf-label" for="category-notes-{{ category.id }}">Notes</label>
+              <textarea id="category-notes-{{ category.id }}" name="notes" rows="2" class="cf-textarea">{{ category.notes }}</textarea>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-3 lg:col-span-1 lg:items-end">
+              <label class="flex items-center gap-2 text-sm font-semibold text-[var(--cf-ink)]">
+                <input type="checkbox" name="is_active" class="cf-checkbox" {% if category.is_active %}checked{% endif %}>
+                Active
+              </label>
+              <button type="submit" class="cf-btn cf-btn-secondary"><i data-lucide="save" class="h-4 w-4"></i>Save</button>
+            </div>
+          </form>
+        {% endfor %}
+      </div>
+      {% endif %}
     {% else %}
       <div class="cf-empty-state">
         <div class="cf-icon-box mb-4 p-4"><i data-lucide="shield-check" class="h-6 w-6"></i></div>

@@ -122,6 +122,56 @@ def _yakap_ledger_post_data(category, **overrides):
     return data
 
 
+def _prepare_verified_yakap_visit(
+    clinic,
+    service,
+    *,
+    category_name="Primary Care",
+    profile_status=PatientYakapProfile.STATUS_ACTIVE,
+    rule_status=ServiceYakapRule.STATUS_COVERED,
+    snapshot_status=AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
+    verified_at=None,
+):
+    settings, categories = ensure_default_yakap_setup(clinic)
+    category = next(item for item in categories if item.name == category_name)
+    category.annual_limit = Decimal("20000.00")
+    category.save(update_fields=["annual_limit", "updated_at"])
+    ServiceYakapRule.objects.update_or_create(
+        clinic=clinic,
+        service=service,
+        defaults={
+            "category": category,
+            "coverage_status": rule_status,
+            "estimated_covered_amount": Decimal("300.00"),
+            "requires_verification": True,
+            "public_badge_label": "YAKAP verification available",
+        },
+    )
+    patient, appointment = _create_patient_appointment(clinic, service)
+    snapshot = AppointmentYakapSnapshot.objects.create(
+        clinic=clinic,
+        appointment=appointment,
+        requested=True,
+        coverage_status=snapshot_status,
+        category_name=category.name,
+        service_rule_status=rule_status,
+        estimated_covered_amount_at_booking=Decimal("300.00"),
+    )
+    verified_at = verified_at or timezone.now()
+    profile = yakap_profile_for_patient(patient)
+    profile.status = profile_status
+    profile.registered_clinic_name = clinic.name
+    profile.verification_method = "Clinic PhilHealth workflow"
+    profile.verification_reference = "YAKAP-VERIFIED"
+    profile.last_verified_at = verified_at
+    profile.last_verified_by = clinic.group.owner
+    profile.save()
+    snapshot.verified_at = verified_at
+    snapshot.verified_by = clinic.group.owner
+    snapshot.save()
+    return settings, category, patient, appointment, snapshot, profile
+
+
 @pytest.mark.django_db
 def test_yakap_dashboard_requires_login(client):
     response = client.get(reverse("dashboard:yakap"))
@@ -209,6 +259,31 @@ def test_yakap_dashboard_queue_includes_unverified_requests(client, clinic_setup
 
 
 @pytest.mark.django_db
+def test_appointment_detail_shows_verified_yakap_status_with_manual_verification_copy(client, clinic_setup):
+    clinic, service = clinic_setup
+    _patient, appointment, snapshot = _create_yakap_requested_appointment(
+        clinic,
+        service,
+        status=AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
+    )
+    snapshot.verified_by = clinic.group.owner
+    snapshot.verified_at = timezone.now()
+    snapshot.verification_note = "Method: PhilHealth portal"
+    snapshot.save()
+    client.force_login(clinic.group.owner)
+
+    response = client.get(reverse("dashboard:appointment_detail", args=[appointment.id]))
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "Clinic verification recorded for this visit." in content
+    assert "Estimated coverage only; this is not a PhilHealth eligibility or benefit determination." in content
+    assert "YAKAP assistance approved" not in content
+    assert "official PhilHealth approval" not in content
+    assert "guaranteed free" not in content.lower()
+
+
+@pytest.mark.django_db
 def test_yakap_dashboard_shows_operational_risk_sections(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
@@ -250,6 +325,7 @@ def test_yakap_dashboard_shows_operational_risk_sections(client, clinic_setup):
         note="Over estimated limit.",
         created_by=clinic.group.owner,
     )
+    assert not YakapCreditLinePeriod.objects.filter(clinic=clinic).exists()
 
     response = client.get(reverse("dashboard:yakap"))
 
@@ -265,6 +341,21 @@ def test_yakap_dashboard_shows_operational_risk_sections(client, clinic_setup):
     assert b"Recent YAKAP ledger entries" in response.content
     assert b"Low estimated balance." in response.content
     assert reverse("dashboard:appointment_detail", args=[request_appointment.id]).encode() in response.content
+    assert not YakapCreditLinePeriod.objects.filter(clinic=clinic).exists()
+
+
+@pytest.mark.django_db
+def test_yakap_dashboard_kpis_use_total_counts_not_table_caps(client, clinic_setup):
+    clinic, _service = clinic_setup
+    client.force_login(clinic.group.owner)
+    ensure_default_yakap_setup(clinic)
+    for index in range(11):
+        clinic.services.create(name=f"Unclassified Service {index}", duration_minutes=30)
+
+    response = client.get(reverse("dashboard:yakap"))
+
+    assert response.status_code == 200
+    assert b'<p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">12</p>' in response.content
 
 
 @pytest.mark.django_db
@@ -335,7 +426,7 @@ def test_yakap_export_is_clinic_scoped_and_audited(client, clinic_setup):
     assert response["Content-Type"] == "text/csv"
     rows = list(csv.DictReader(StringIO(response.content.decode())))
     assert [row["patient"] for row in rows] == ["Export Included Patient"]
-    assert rows[0]["appointment_id"] == str(appointment.id)
+    assert rows[0]["appointment_reference"] == appointment.reference_code
     assert rows[0]["service"] == service.name
     assert rows[0]["category"] == category.name
     assert rows[0]["amount"] == "300.00"
@@ -350,8 +441,53 @@ def test_yakap_export_is_clinic_scoped_and_audited(client, clinic_setup):
 
 
 @pytest.mark.django_db
-def test_yakap_dashboard_rejects_staff_without_settings_permission(client, clinic_setup):
-    clinic, _service = clinic_setup
+def test_yakap_export_escapes_formula_like_csv_cells(client, clinic_setup):
+    clinic, service = clinic_setup
+    ensure_default_yakap_setup(clinic)
+    category = YakapCoverageCategory.objects.get(clinic=clinic, name="Primary Care")
+    patient = Patient.objects.create(clinic=clinic, full_name="=Formula Patient", phone="0917-555-0301")
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.now() + timedelta(days=4),
+        ends_at=timezone.now() + timedelta(days=4, minutes=service.duration_minutes),
+        source=Appointment.SOURCE_STAFF,
+        reason="YAKAP export formula test",
+    )
+    profile = yakap_profile_for_patient(patient)
+    YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=patient,
+        profile=profile,
+        appointment=appointment,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("300.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        external_reference="+REF",
+        note="@formula note",
+        created_by=clinic.group.owner,
+    )
+    client.force_login(clinic.group.owner)
+
+    response = client.get(
+        reverse("dashboard:yakap_export"),
+        {"started_at": timezone.localdate().isoformat(), "ended_at": timezone.localdate().isoformat()},
+    )
+
+    assert response.status_code == 200
+    rows = list(csv.DictReader(StringIO(response.content.decode())))
+    assert rows[0]["patient"] == "'=Formula Patient"
+    assert rows[0]["external_reference"] == "'+REF"
+    assert rows[0]["note"] == "'@formula note"
+
+
+@pytest.mark.django_db
+def test_yakap_dashboard_staff_can_view_operational_sections_without_settings_controls(client, clinic_setup):
+    clinic, service = clinic_setup
+    _patient, appointment, _snapshot = _create_yakap_requested_appointment(clinic, service, full_name="Staff Visible YAKAP")
     User = get_user_model()
     staff = User.objects.create_user(username="yakap-staff@example.com", email="yakap-staff@example.com")
     ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
@@ -359,7 +495,14 @@ def test_yakap_dashboard_rejects_staff_without_settings_permission(client, clini
 
     response = client.get(reverse("dashboard:yakap"))
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert b"Staff Visible YAKAP" in response.content
+    assert reverse("dashboard:appointment_detail", args=[appointment.id]).encode() in response.content
+    assert b"Unverified YAKAP requests" in response.content
+    assert b"Manual ledger export" not in response.content
+    assert b'name="_form" value="settings"' not in response.content
+    assert b'name="_form" value="category"' not in response.content
+    assert not ClinicYakapSettings.objects.filter(clinic=clinic).exists()
 
 
 @pytest.mark.django_db
@@ -373,6 +516,32 @@ def test_yakap_dashboard_post_rejects_staff_without_settings_permission(client, 
     response = client.post(reverse("dashboard:yakap"), _yakap_settings_post_data())
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_yakap_dashboard_category_post_rejects_staff_without_mutating(client, clinic_setup):
+    clinic, _service = clinic_setup
+    User = get_user_model()
+    staff = User.objects.create_user(username="yakap-category-staff@example.com", email="yakap-category-staff@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.post(
+        reverse("dashboard:yakap"),
+        {
+            "_form": "category",
+            "name": "Unauthorized Category",
+            "category_type": YakapCoverageCategory.TYPE_OTHER,
+            "annual_limit": "1000.00",
+            "is_active": "on",
+            "notes": "Should not save.",
+            "sort_order": "9",
+        },
+    )
+
+    assert response.status_code == 403
+    assert not YakapCoverageCategory.objects.filter(clinic=clinic, name="Unauthorized Category").exists()
+    assert not YakapAuditEvent.objects.exists()
 
 
 @pytest.mark.django_db
@@ -414,6 +583,48 @@ def test_widget_shows_yakap_promo_when_enabled(client, clinic_setup):
     assert response.status_code == 200
     assert b"Custom YAKAP clinic estimate" in response.content
     assert b"Custom YAKAP disclaimer requires clinic verification." in response.content
+
+
+@pytest.mark.django_db
+def test_widget_shows_public_yakap_service_badge_without_amount(client, clinic_setup):
+    clinic, service = clinic_setup
+    _enable_yakap_settings(client, clinic)
+    client.force_login(clinic.group.owner)
+    client.get(reverse("dashboard:yakap"))
+    category = YakapCoverageCategory.objects.get(clinic=clinic, name="Medicines")
+    ServiceYakapRule.objects.create(
+        clinic=clinic,
+        service=service,
+        category=category,
+        coverage_status=ServiceYakapRule.STATUS_POSSIBLY_COVERED,
+        estimated_covered_amount=Decimal("350.00"),
+        public_badge_label="YAKAP verification available",
+    )
+    client.logout()
+
+    response = client.get(reverse("widget:home", args=[clinic.slug]))
+
+    assert response.status_code == 200
+    assert b"YAKAP verification available" in response.content
+    assert b"350.00" not in response.content
+    assert b"20000" not in response.content
+
+
+@pytest.mark.django_db
+def test_widget_hides_public_yakap_service_badge_without_category(client, clinic_setup):
+    clinic, service = clinic_setup
+    _enable_yakap_settings(client, clinic)
+    ServiceYakapRule.objects.create(
+        clinic=clinic,
+        service=service,
+        coverage_status=ServiceYakapRule.STATUS_POSSIBLY_COVERED,
+        public_badge_label="YAKAP verification available",
+    )
+
+    response = client.get(reverse("widget:home", args=[clinic.slug]))
+
+    assert response.status_code == 200
+    assert b"YAKAP verification available" not in response.content
 
 
 @pytest.mark.django_db
@@ -492,6 +703,48 @@ def test_yakap_settings_invalid_post_renders_errors_without_saving(client, clini
 
 
 @pytest.mark.django_db
+def test_yakap_dashboard_renders_policy_settings_fields(client, clinic_setup):
+    clinic, _service = clinic_setup
+    client.force_login(clinic.group.owner)
+
+    response = client.get(reverse("dashboard:yakap"))
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    for field_name in [
+        "program_label",
+        "medicine_annual_limit_default",
+        "default_non_medicine_limit",
+        "low_balance_threshold_amount",
+        "verification_stale_after_days",
+    ]:
+        assert f'name="{field_name}"' in content
+    assert '<p class="cf-kpi-label">Default annual credit</p>' not in content
+    assert "Medicines/GAMOT default" in content
+
+
+@pytest.mark.django_db
+def test_yakap_settings_save_is_audited(client, clinic_setup):
+    clinic, _service = clinic_setup
+    client.force_login(clinic.group.owner)
+
+    response = client.post(
+        reverse("dashboard:yakap"),
+        _yakap_settings_post_data(public_promo_headline="Audited YAKAP headline"),
+    )
+
+    assert response.status_code == 302
+    settings = ClinicYakapSettings.objects.get(clinic=clinic)
+    event = YakapAuditEvent.objects.get(
+        clinic=clinic,
+        action=YakapAuditEvent.ACTION_SETTINGS_CHANGED,
+        object_type="ClinicYakapSettings",
+        object_id=str(settings.pk),
+    )
+    assert "settings" in event.summary.lower()
+
+
+@pytest.mark.django_db
 def test_yakap_category_create_uses_active_clinic_not_posted_clinic(client, clinic_setup):
     clinic, _service = clinic_setup
     other_group = ClinicGroup.objects.create(name="Other Clinic Group", owner=clinic.group.owner)
@@ -516,6 +769,41 @@ def test_yakap_category_create_uses_active_clinic_not_posted_clinic(client, clin
     category = YakapCoverageCategory.objects.get(clinic=clinic, name="Dental")
     assert category.annual_limit == Decimal("5000.00")
     assert not YakapCoverageCategory.objects.filter(clinic=other_clinic, name="Dental").exists()
+
+
+@pytest.mark.django_db
+def test_yakap_dashboard_updates_existing_category_limit_and_audits(client, clinic_setup):
+    clinic, _service = clinic_setup
+    ensure_default_yakap_setup(clinic)
+    category = YakapCoverageCategory.objects.get(clinic=clinic, name="Primary Care")
+    client.force_login(clinic.group.owner)
+
+    response = client.post(
+        reverse("dashboard:yakap"),
+        {
+            "_form": "category",
+            "category_id": str(category.id),
+            "name": category.name,
+            "category_type": category.category_type,
+            "annual_limit": "1500.00",
+            "is_active": "on",
+            "notes": "Updated local policy.",
+            "sort_order": str(category.sort_order),
+        },
+    )
+
+    assert response.status_code == 302
+    category.refresh_from_db()
+    assert category.annual_limit == Decimal("1500.00")
+    assert category.notes == "Updated local policy."
+    assert YakapCoverageCategory.objects.filter(clinic=clinic, name="Primary Care").count() == 1
+    event = YakapAuditEvent.objects.get(
+        clinic=clinic,
+        action=YakapAuditEvent.ACTION_SETTINGS_CHANGED,
+        object_type="YakapCoverageCategory",
+        object_id=str(category.pk),
+    )
+    assert "updated" in event.summary.lower()
 
 
 @pytest.mark.django_db
@@ -573,14 +861,137 @@ def test_yakap_invalid_category_post_renders_errors_without_saving(client, clini
 
 
 @pytest.mark.django_db
+def test_yakap_ledger_blocks_unverified_request_without_saving(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    _settings, category, _patient, appointment, snapshot, _profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        snapshot_status=AppointmentYakapSnapshot.STATUS_UNVERIFIED,
+    )
+    client.raise_request_exception = False
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"Verify YAKAP eligibility for this visit before posting usage" in response.content
+    assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
+    snapshot.refresh_from_db()
+    assert snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_UNVERIFIED
+
+
+@pytest.mark.django_db
+def test_yakap_ledger_blocks_inactive_profile_without_saving(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    _settings, category, _patient, appointment, _snapshot, profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        profile_status=PatientYakapProfile.STATUS_INACTIVE,
+    )
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"Patient YAKAP profile must be active" in response.content
+    assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
+    profile.refresh_from_db()
+    assert profile.status == PatientYakapProfile.STATUS_INACTIVE
+
+
+@pytest.mark.django_db
+def test_yakap_ledger_blocks_active_profile_without_verification_timestamp(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    _settings, category, _patient, appointment, _snapshot, profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+    )
+    profile.last_verified_at = None
+    profile.save(update_fields=["last_verified_at", "updated_at"])
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"Record patient YAKAP verification before posting usage" in response.content
+    assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
+
+
+@pytest.mark.django_db
+def test_yakap_ledger_blocks_service_rule_cash_only_without_saving(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    _settings, category, _patient, appointment, _snapshot, _profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        rule_status=ServiceYakapRule.STATUS_CASH_ONLY,
+    )
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"This service is not configured as YAKAP-covered for ledger posting" in response.content
+    assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
+
+
+@pytest.mark.django_db
+def test_stale_yakap_profile_requires_confirmation_before_ledger_post(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    stale_verified_at = timezone.now() - timedelta(days=45)
+    _settings, category, _patient, appointment, _snapshot, _profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        verified_at=stale_verified_at,
+    )
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category),
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"YAKAP verification is stale" in response.content
+    assert b"confirm_stale_verification" in response.content
+    assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
+
+    post_data = _yakap_ledger_post_data(category)
+    post_data["confirm_stale_verification"] = "on"
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        post_data,
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert YakapLedgerEntry.objects.filter(appointment=appointment).exists()
+    _profile.refresh_from_db()
+    assert _profile.last_verified_at > stale_verified_at
+    assert _profile.last_verified_by == clinic.group.owner
+
+
+@pytest.mark.django_db
 def test_staff_can_add_yakap_ledger_entry_from_appointment(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    client.get(reverse("dashboard:yakap"))
-    category = YakapCoverageCategory.objects.get(clinic=clinic, name="Primary Care")
-    category.annual_limit = Decimal("20000.00")
-    category.save(update_fields=["annual_limit", "updated_at"])
-    _patient, appointment = _create_patient_appointment(clinic, service)
+    _settings, category, _patient, appointment, _snapshot, _profile = _prepare_verified_yakap_visit(clinic, service)
 
     response = client.post(
         reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
@@ -600,15 +1011,7 @@ def test_staff_can_add_yakap_ledger_entry_from_appointment(client, clinic_setup)
 def test_yakap_ledger_entry_marks_verified_request_as_posted(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    client.get(reverse("dashboard:yakap"))
-    category = YakapCoverageCategory.objects.get(clinic=clinic, name="Primary Care")
-    category.annual_limit = Decimal("20000.00")
-    category.save(update_fields=["annual_limit", "updated_at"])
-    _patient, appointment, snapshot = _create_yakap_requested_appointment(
-        clinic,
-        service,
-        status=AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
-    )
+    _settings, category, _patient, appointment, snapshot, _profile = _prepare_verified_yakap_visit(clinic, service)
 
     response = client.post(
         reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
@@ -621,36 +1024,59 @@ def test_yakap_ledger_entry_marks_verified_request_as_posted(client, clinic_setu
 
 
 @pytest.mark.django_db
-def test_yakap_ledger_entry_marks_existing_snapshot_as_posted(client, clinic_setup):
+def test_yakap_ledger_allows_additional_usage_after_snapshot_posted(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    client.get(reverse("dashboard:yakap"))
-    category = YakapCoverageCategory.objects.get(clinic=clinic, name="Primary Care")
-    category.annual_limit = Decimal("20000.00")
-    category.save(update_fields=["annual_limit", "updated_at"])
-    _patient, appointment, snapshot = _create_yakap_requested_appointment(
+    _settings, category, _patient, appointment, snapshot, _profile = _prepare_verified_yakap_visit(clinic, service)
+    first_response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category),
+    )
+    assert first_response.status_code == 302
+    snapshot.refresh_from_db()
+    assert snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_POSTED
+
+    second_response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(category, amount="150.00", note="Additional verified usage."),
+    )
+
+    assert second_response.status_code == 302
+    assert YakapLedgerEntry.objects.filter(appointment=appointment).count() == 2
+
+
+@pytest.mark.django_db
+def test_yakap_ledger_entry_does_not_mark_not_eligible_request_as_posted(client, clinic_setup):
+    clinic, service = clinic_setup
+    client.force_login(clinic.group.owner)
+    _settings, category, _patient, appointment, snapshot, _profile = _prepare_verified_yakap_visit(
         clinic,
         service,
-        status=AppointmentYakapSnapshot.STATUS_NOT_ELIGIBLE,
+        snapshot_status=AppointmentYakapSnapshot.STATUS_NOT_ELIGIBLE,
     )
 
     response = client.post(
         reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
         _yakap_ledger_post_data(category),
+        HTTP_HX_REQUEST="true",
     )
 
-    assert response.status_code == 302
+    assert response.status_code == 200
+    assert b"Verify YAKAP eligibility for this visit before posting usage" in response.content
+    assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
     snapshot.refresh_from_db()
-    assert snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_POSTED
+    assert snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_NOT_ELIGIBLE
 
 
 @pytest.mark.django_db
 def test_successful_appointment_ledger_entry_creates_credit_line_period_snapshot(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    _settings, categories = ensure_default_yakap_setup(clinic)
-    category = next(item for item in categories if item.name == "Medicines")
-    patient, appointment = _create_patient_appointment(clinic, service)
+    _settings, category, patient, appointment, _snapshot, _profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        category_name="Medicines",
+    )
 
     response = client.post(
         reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
@@ -771,6 +1197,80 @@ def test_staff_role_cannot_post_yakap_reversal(client, clinic_setup):
 
     assert response.status_code == 403
     assert not YakapLedgerEntry.objects.filter(appointment=appointment, entry_type=YakapLedgerEntry.TYPE_REVERSAL).exists()
+
+
+@pytest.mark.django_db
+def test_staff_role_cannot_post_yakap_adjustment(client, clinic_setup):
+    clinic, service = clinic_setup
+    _settings, category, _patient, appointment, _snapshot, _profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        category_name="Medicines",
+    )
+    User = get_user_model()
+    staff = User.objects.create_user(username="yakap-adjustment-staff@example.com", email="yakap-adjustment-staff@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(
+            category,
+            entry_type=YakapLedgerEntry.TYPE_ADJUSTMENT,
+            amount="100.00",
+            note="Staff should not post adjustments.",
+        ),
+    )
+
+    assert response.status_code == 403
+    assert not YakapLedgerEntry.objects.filter(
+        appointment=appointment,
+        entry_type=YakapLedgerEntry.TYPE_ADJUSTMENT,
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_staff_role_cannot_attach_reversal_link_to_non_reversal_entry(client, clinic_setup):
+    clinic, service = clinic_setup
+    _settings, category, _patient, appointment, _snapshot, profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        category_name="Medicines",
+    )
+    original_entry = YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=appointment.patient,
+        profile=profile,
+        appointment=appointment,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE,
+        amount=Decimal("300.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        note="Original verified usage.",
+        created_by=clinic.group.owner,
+    )
+    User = get_user_model()
+    staff = User.objects.create_user(username="yakap-link-staff@example.com", email="yakap-link-staff@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.post(
+        reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
+        _yakap_ledger_post_data(
+            category,
+            entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE,
+            amount="100.00",
+            reversal_of=str(original_entry.pk),
+            note="Staff should not attach reversal metadata.",
+        ),
+    )
+
+    assert response.status_code == 403
+    assert not YakapLedgerEntry.objects.filter(
+        appointment=appointment,
+        note="Staff should not attach reversal metadata.",
+    ).exists()
 
 
 @pytest.mark.django_db
@@ -992,11 +1492,13 @@ def test_yakap_ledger_cross_period_reversal_rerenders_error_without_saving(clien
 def test_ledger_over_limit_requires_confirmation_when_hard_block_disabled(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    settings, categories = ensure_default_yakap_setup(clinic)
+    settings, category, patient, appointment, _snapshot, profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        category_name="Medicines",
+    )
     settings.hard_block_exceeded = False
     settings.save(update_fields=["hard_block_exceeded", "updated_at"])
-    category = next(item for item in categories if item.name == "Medicines")
-    patient, appointment = _create_patient_appointment(clinic, service)
 
     response = client.post(
         reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
@@ -1007,7 +1509,7 @@ def test_ledger_over_limit_requires_confirmation_when_hard_block_disabled(client
     assert response.status_code == 200
     assert b"exceeds estimated remaining" in response.content
     assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
-    assert not PatientYakapProfile.objects.filter(patient=patient).exists()
+    assert PatientYakapProfile.objects.filter(pk=profile.pk).exists()
     assert not YakapCreditLinePeriod.objects.filter(patient=patient, category=category).exists()
 
     confirmed = _yakap_ledger_post_data(category, entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE, amount="25000.00")
@@ -1023,11 +1525,13 @@ def test_ledger_over_limit_requires_confirmation_when_hard_block_disabled(client
 def test_ledger_over_limit_is_blocked_when_hard_block_enabled(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    settings, categories = ensure_default_yakap_setup(clinic)
+    settings, category, patient, appointment, _snapshot, profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        category_name="Medicines",
+    )
     settings.hard_block_exceeded = True
     settings.save(update_fields=["hard_block_exceeded", "updated_at"])
-    category = next(item for item in categories if item.name == "Medicines")
-    patient, appointment = _create_patient_appointment(clinic, service)
     post_data = _yakap_ledger_post_data(category, entry_type=YakapLedgerEntry.TYPE_MEDICINE_USAGE, amount="25000.00")
     post_data["confirm_over_limit"] = "on"
 
@@ -1036,7 +1540,7 @@ def test_ledger_over_limit_is_blocked_when_hard_block_enabled(client, clinic_set
     assert response.status_code == 200
     assert b"blocked by clinic YAKAP settings" in response.content
     assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
-    assert not PatientYakapProfile.objects.filter(patient=patient).exists()
+    assert PatientYakapProfile.objects.filter(pk=profile.pk).exists()
     assert not YakapCreditLinePeriod.objects.filter(patient=patient, category=category).exists()
 
 
@@ -1052,6 +1556,27 @@ def test_rejected_over_limit_does_not_create_yakap_settings_when_missing(client,
         sort_order=1,
     )
     patient, appointment = _create_patient_appointment(clinic, service)
+    ServiceYakapRule.objects.create(
+        clinic=clinic,
+        service=service,
+        category=category,
+        coverage_status=ServiceYakapRule.STATUS_COVERED,
+    )
+    profile = PatientYakapProfile.objects.create(
+        clinic=clinic,
+        patient=patient,
+        status=PatientYakapProfile.STATUS_ACTIVE,
+        last_verified_at=timezone.now(),
+        last_verified_by=clinic.group.owner,
+    )
+    AppointmentYakapSnapshot.objects.create(
+        clinic=clinic,
+        appointment=appointment,
+        requested=True,
+        coverage_status=AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
+        verified_at=timezone.now(),
+        verified_by=clinic.group.owner,
+    )
 
     response = client.post(
         reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]),
@@ -1062,7 +1587,7 @@ def test_rejected_over_limit_does_not_create_yakap_settings_when_missing(client,
     assert response.status_code == 200
     assert b"exceeds estimated remaining" in response.content
     assert not ClinicYakapSettings.objects.filter(clinic=clinic).exists()
-    assert not PatientYakapProfile.objects.filter(patient=patient).exists()
+    assert PatientYakapProfile.objects.filter(pk=profile.pk).exists()
     assert not YakapCreditLinePeriod.objects.filter(patient=patient, category=category).exists()
     assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
     assert not YakapAuditEvent.objects.exists()
@@ -1072,12 +1597,13 @@ def test_rejected_over_limit_does_not_create_yakap_settings_when_missing(client,
 def test_ledger_over_limit_uses_entry_period_not_current_period(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    settings, categories = ensure_default_yakap_setup(clinic)
+    settings, category, patient, appointment, _snapshot, profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        category_name="Medicines",
+    )
     settings.hard_block_exceeded = False
     settings.save(update_fields=["hard_block_exceeded", "updated_at"])
-    category = next(item for item in categories if item.name == "Medicines")
-    patient, appointment = _create_patient_appointment(clinic, service)
-    profile = yakap_profile_for_patient(patient)
     future_usage_at = timezone.now() + timedelta(days=370)
     YakapLedgerEntry.objects.create(
         clinic=clinic,
@@ -1114,10 +1640,11 @@ def test_ledger_over_limit_uses_entry_period_not_current_period(client, clinic_s
 def test_htmx_successful_ledger_post_keeps_patient_reversal_choices(client, clinic_setup):
     clinic, service = clinic_setup
     client.force_login(clinic.group.owner)
-    _settings, categories = ensure_default_yakap_setup(clinic)
-    category = next(item for item in categories if item.name == "Medicines")
-    patient, appointment = _create_patient_appointment(clinic, service)
-    profile = yakap_profile_for_patient(patient)
+    _settings, category, patient, appointment, _snapshot, profile = _prepare_verified_yakap_visit(
+        clinic,
+        service,
+        category_name="Medicines",
+    )
     original_entry = YakapLedgerEntry.objects.create(
         clinic=clinic,
         patient=patient,
@@ -1164,7 +1691,6 @@ def test_staff_without_daily_ops_permission_cannot_add_yakap_ledger_entry(client
 
     assert response.status_code == 403
     assert not YakapLedgerEntry.objects.filter(appointment=appointment).exists()
-
 
 @pytest.mark.django_db
 def test_staff_can_update_patient_yakap_profile(client, clinic_setup):
@@ -1301,6 +1827,25 @@ def test_patient_detail_can_start_yakap_profile_without_creating_one(client, cli
 
 
 @pytest.mark.django_db
+def test_patient_detail_existing_yakap_profile_does_not_create_credit_line_periods(client, clinic_setup):
+    clinic, service = clinic_setup
+    ensure_default_yakap_setup(clinic)
+    patient, _appointment = _create_patient_appointment(clinic, service)
+    profile = yakap_profile_for_patient(patient)
+    profile.status = PatientYakapProfile.STATUS_ACTIVE
+    profile.last_verified_at = timezone.now()
+    profile.last_verified_by = clinic.group.owner
+    profile.save()
+    client.force_login(clinic.group.owner)
+
+    response = client.get(reverse("dashboard:patient_detail", args=[patient.id]))
+
+    assert response.status_code == 200
+    assert b"Estimated YAKAP balances" in response.content
+    assert not YakapCreditLinePeriod.objects.filter(profile=profile).exists()
+
+
+@pytest.mark.django_db
 def test_viewer_cannot_update_yakap_status_or_profile(client, clinic_setup):
     clinic, service = clinic_setup
     patient, appointment, snapshot = _create_yakap_requested_appointment(clinic, service)
@@ -1419,6 +1964,69 @@ def test_service_edit_saves_yakap_rule(client, clinic_setup):
     service.refresh_from_db()
     assert service.yakap_rule.category == category
     assert service.yakap_rule.coverage_status == "covered"
+    event = YakapAuditEvent.objects.get(
+        clinic=clinic,
+        action=YakapAuditEvent.ACTION_SETTINGS_CHANGED,
+        object_type="ServiceYakapRule",
+        object_id=str(service.yakap_rule.pk),
+    )
+    assert "service rule" in event.summary.lower()
+
+
+@pytest.mark.django_db
+def test_staff_service_edit_with_yakap_rule_fields_is_forbidden_and_preserves_existing_rule(client, clinic_setup):
+    clinic, service = clinic_setup
+    ensure_default_yakap_setup(clinic)
+    category = YakapCoverageCategory.objects.get(clinic=clinic, name="Primary Care")
+    rule = ServiceYakapRule.objects.create(
+        clinic=clinic,
+        service=service,
+        category=category,
+        coverage_status=ServiceYakapRule.STATUS_REQUIRES_VERIFICATION,
+        estimated_covered_amount=Decimal("100.00"),
+    )
+    User = get_user_model()
+    staff = User.objects.create_user(username="yakap-service-staff@example.com", email="yakap-service-staff@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.post(reverse("dashboard:edit_service", args=[service.id]), {
+        "name": "Staff edited regular name",
+        "description": service.description,
+        "duration_minutes": "30",
+        "price": "0.00",
+        "color": "#06b6d4",
+        "is_active": "on",
+        "display_price": "on",
+        "yakap_category": str(category.id),
+        "yakap_coverage_status": ServiceYakapRule.STATUS_COVERED,
+        "yakap_estimated_covered_amount": "999.00",
+        "yakap_requires_verification": "on",
+        "yakap_public_badge_label": "Unsafe staff edit",
+    })
+
+    assert response.status_code == 403
+    service.refresh_from_db()
+    rule.refresh_from_db()
+    assert service.name != "Staff edited regular name"
+    assert rule.coverage_status == ServiceYakapRule.STATUS_REQUIRES_VERIFICATION
+    assert rule.estimated_covered_amount == Decimal("100.00")
+    assert not YakapAuditEvent.objects.exists()
+
+
+@pytest.mark.django_db
+def test_staff_service_edit_form_omits_yakap_rule_fields(client, clinic_setup):
+    clinic, service = clinic_setup
+    User = get_user_model()
+    staff = User.objects.create_user(username="yakap-service-form-staff@example.com", email="yakap-service-form-staff@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.get(reverse("dashboard:edit_service", args=[service.id]), HTTP_HX_REQUEST="true")
+
+    assert response.status_code == 200
+    assert b"YAKAP coverage rule" not in response.content
+    assert b"yakap_coverage_status" not in response.content
 
 
 @pytest.mark.django_db
@@ -1448,6 +2056,12 @@ def test_service_create_saves_yakap_rule(client, clinic_setup):
     assert service.yakap_rule.category == category
     assert service.yakap_rule.coverage_status == "possibly_covered"
     assert service.yakap_rule.estimated_covered_amount == Decimal("750.00")
+    assert YakapAuditEvent.objects.filter(
+        clinic=clinic,
+        action=YakapAuditEvent.ACTION_SETTINGS_CHANGED,
+        object_type="ServiceYakapRule",
+        object_id=str(service.yakap_rule.pk),
+    ).exists()
 
 
 @pytest.mark.django_db

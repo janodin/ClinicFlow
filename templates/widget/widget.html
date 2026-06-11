@@ -64,6 +64,9 @@
             <div class="min-w-0 flex-1">
               <p class="break-words font-bold text-sm text-[var(--cf-ink)]">{{ item.name }}</p>
               <p class="break-words text-xs text-[var(--cf-muted)]">{{ item.effective_duration }} min{% if item.display_price %} · ₱{{ item.price }}{% endif %}</p>
+              {% if yakap_settings and item.yakap_rule and item.yakap_rule.category and item.yakap_rule.is_publicly_promotable and item.yakap_rule.public_badge_label %}
+                <span class="mt-2 inline-flex rounded-full border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--cf-brand-strong)]">{{ item.yakap_rule.public_badge_label }}</span>
+              {% endif %}
             </div>
             <i data-lucide="chevron-right" class="h-4 w-4 text-[var(--cf-muted)]"></i>
           </button>

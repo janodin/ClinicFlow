@@ -3949,6 +3949,40 @@ def test_n8n_webhook_does_not_emit_quick_replies_when_messenger_mode_is_ai():
 
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_n8n_webhook_force_quick_replies_runs_guided_flow_in_ai_mode():
+    from clinics.models import ClinicAISettings
+
+    clinic, _connection = _create_messenger_clinic("owner_n8n_ai_force_quick", "PAGE-N8N-AI-FORCE-QUICK")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="AI mode is unavailable right now.",
+    )
+    Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30, price=0)
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:n8n_webhook"),
+        data=json.dumps({
+            "page_id": "PAGE-N8N-AI-FORCE-QUICK",
+            "psid": "PSID1",
+            "text": "Book an appointment",
+            "force_quick_replies": True,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["page_token"] == "TOKEN-PAGE-N8N-AI-FORCE-QUICK"
+    assert response.json()["page_id"] == "PAGE-N8N-AI-FORCE-QUICK"
+    assert response.json()["psid"] == "PSID1"
+    assert any(reply["type"] == "quick_replies" for reply in response.json()["replies"])
+    assert MessengerSession.objects.filter(connection__page_id="PAGE-N8N-AI-FORCE-QUICK", psid="PSID1").exists()
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
 def test_n8n_webhook_does_not_run_quick_reply_engine_in_ai_mode():
     from clinics.models import ClinicAISettings
     from messenger.ai_tools import DEFAULT_AI_FALLBACK_MESSAGE

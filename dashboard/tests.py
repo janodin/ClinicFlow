@@ -65,6 +65,64 @@ def calendar_setup(clinic_setup):
 
 
 @pytest.mark.django_db
+def test_viewer_cannot_update_appointment_status_or_payment(calendar_setup, client):
+    clinic, _service, _user, _patient, appointment, _target_date = calendar_setup
+    User = get_user_model()
+    viewer = User.objects.create_user(username="appointment-viewer@example.com", email="appointment-viewer@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=viewer, role="viewer")
+    client.force_login(viewer)
+
+    response = client.post(
+        reverse("dashboard:update_appointment", args=[appointment.id]),
+        {
+            "status": Appointment.STATUS_COMPLETED,
+            "payment_state": Appointment.PAYMENT_PAID_AT_CLINIC,
+        },
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 403
+    appointment.refresh_from_db()
+    assert appointment.status == Appointment.STATUS_CONFIRMED
+    assert appointment.payment_state != Appointment.PAYMENT_PAID_AT_CLINIC
+
+
+@pytest.mark.django_db
+def test_viewer_cannot_add_appointment_note(calendar_setup, client):
+    clinic, _service, _user, _patient, appointment, _target_date = calendar_setup
+    User = get_user_model()
+    viewer = User.objects.create_user(username="appointment-note-viewer@example.com", email="appointment-note-viewer@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=viewer, role="viewer")
+    client.force_login(viewer)
+
+    response = client.post(
+        reverse("dashboard:add_appointment_note", args=[appointment.id]),
+        {"body": "Viewer should not write notes."},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 403
+    assert not AppointmentNote.objects.filter(appointment=appointment).exists()
+
+
+@pytest.mark.django_db
+def test_viewer_appointment_detail_hides_daily_ops_forms(calendar_setup, client):
+    clinic, _service, _user, _patient, appointment, _target_date = calendar_setup
+    User = get_user_model()
+    viewer = User.objects.create_user(username="appointment-detail-viewer@example.com", email="appointment-detail-viewer@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=viewer, role="viewer")
+    client.force_login(viewer)
+
+    response = client.get(reverse("dashboard:appointment_detail", args=[appointment.id]))
+
+    assert response.status_code == 200
+    assert b"Appointment Details" in response.content
+    assert reverse("dashboard:update_appointment", args=[appointment.id]).encode() not in response.content
+    assert reverse("dashboard:add_appointment_note", args=[appointment.id]).encode() not in response.content
+    assert reverse("dashboard:appointment_yakap_ledger", args=[appointment.id]).encode() not in response.content
+
+
+@pytest.mark.django_db
 def test_search_patients(clinic_setup, client):
     clinic, service, user = clinic_setup
     client.force_login(user)

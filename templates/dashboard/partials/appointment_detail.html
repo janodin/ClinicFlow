@@ -58,6 +58,7 @@
     </div>
     {% endif %}
 
+    {% if can_manage_daily_ops %}
     <div class="border-t border-[var(--cf-line-soft)] pt-5">
       <h3 class="cf-label mb-3">Update Status</h3>
       <form method="post" action="{% url 'dashboard:update_appointment' appointment.id %}" class="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end" hx-post="{% url 'dashboard:update_appointment' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
@@ -76,6 +77,7 @@
         <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Update</button>
       </form>
     </div>
+    {% endif %}
 
     <div class="border-t border-[var(--cf-line-soft)] pt-5">
       <div class="rounded-[var(--cf-radius)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
@@ -88,11 +90,31 @@
         </div>
         {% with snapshot=yakap_snapshot %}
           {% if snapshot and snapshot.requested %}
-            <p class="mt-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">YAKAP was requested at booking. Confirm eligibility before applying any usage estimate.</p>
+            <div class="mt-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="font-semibold">YAKAP request status</p>
+                <span class="cf-badge {% if snapshot.coverage_status == 'not_eligible' %}cf-badge-danger{% elif snapshot.coverage_status == 'verified_for_visit' or snapshot.coverage_status == 'posted' %}cf-badge-active{% else %}cf-badge-warning cf-status-pending{% endif %}">{{ snapshot.get_coverage_status_display }}</span>
+              </div>
+              {% if snapshot.coverage_status == 'requested' or snapshot.coverage_status == 'unverified' or snapshot.coverage_status == 'needs_verification' %}
+                <p class="mt-2 text-sm text-[var(--cf-muted)]">Clinic-assisted YAKAP estimate only. Verify through the clinic workflow before honoring coverage.</p>
+              {% elif snapshot.coverage_status == 'verified_for_visit' %}
+                <p class="mt-2 text-sm text-[var(--cf-muted)]">Clinic verification recorded for this visit. Estimated coverage only; this is not a PhilHealth eligibility or benefit determination.</p>
+                {% if snapshot.verification_note %}<p class="mt-2 whitespace-pre-wrap text-xs text-[var(--cf-muted)]">{{ snapshot.verification_note }}</p>{% endif %}
+              {% elif snapshot.coverage_status == 'not_eligible' %}
+                <p class="mt-2 text-sm text-[var(--cf-muted)]">This request was marked not eligible for YAKAP assistance for this visit.</p>
+                {% if snapshot.verification_note %}<p class="mt-2 whitespace-pre-wrap text-xs text-[var(--cf-muted)]">{{ snapshot.verification_note }}</p>{% endif %}
+              {% elif snapshot.coverage_status == 'posted' %}
+                <p class="mt-2 text-sm text-[var(--cf-muted)]">YAKAP usage has been posted as a clinic-entered estimate.</p>
+              {% endif %}
+            </div>
           {% else %}
             <p class="mt-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-muted)]">No YAKAP request was recorded for this appointment.</p>
           {% endif %}
         {% endwith %}
+        {% if yakap_snapshot and yakap_snapshot.coverage_status == 'not_eligible' %}
+          <p class="mt-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-xs text-[var(--cf-muted)]">This request is marked not eligible. Only post usage if staff later verifies eligibility through the clinic workflow.</p>
+        {% endif %}
+        {% if can_manage_daily_ops %}
         <form method="post" action="{% url 'dashboard:update_appointment_yakap_status' appointment.id %}" class="mt-4 grid gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-4" hx-post="{% url 'dashboard:update_appointment_yakap_status' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
           {% csrf_token %}
           {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
@@ -110,7 +132,7 @@
             </div>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="text-xs text-[var(--cf-muted)]">Status is an internal clinic verification record, not an official PhilHealth approval.</p>
+            <p class="text-xs text-[var(--cf-muted)]">Status is an internal clinic verification record, not a PhilHealth eligibility decision.</p>
             <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="shield-check" class="h-4 w-4"></i>Update YAKAP Status</button>
           </div>
         </form>
@@ -164,14 +186,22 @@
             <input type="checkbox" name="confirm_over_limit" class="cf-checkbox mt-0.5">
             <span>Confirm over-limit posting after clinic verification. This is ignored when hard-block is enabled.</span>
           </label>
+          {% if yakap_verification_freshness.is_stale %}
+          <label class="flex gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">
+            <input type="checkbox" name="confirm_stale_verification" class="cf-checkbox mt-0.5">
+            <span>YAKAP verification is stale. Confirm refreshed clinic verification before posting usage.</span>
+          </label>
+          {% endif %}
           <div class="flex flex-wrap items-center justify-between gap-3">
             <p class="text-xs text-[var(--cf-muted)]">Estimated coverage only; this is not an official PhilHealth balance.</p>
             <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add YAKAP Usage</button>
           </div>
         </form>
+        {% endif %}
       </div>
     </div>
 
+    {% if can_manage_daily_ops %}
     <div class="border-t border-[var(--cf-line-soft)] pt-5">
       <h3 class="cf-label mb-3">Add Internal Note</h3>
       <form method="post" action="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-post="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
@@ -187,6 +217,7 @@
         </div>
       </form>
     </div>
+    {% endif %}
 
     {% if appointment.notes.all %}
     <div class="border-t border-[var(--cf-line-soft)] pt-5 space-y-3">
@@ -201,6 +232,7 @@
     {% endif %}
 
     </div>
+    {% if can_manage_daily_ops %}
     <div class="cf-modal-footer justify-between">
       <button type="button" @click="mode = 'delete'" class="cf-btn cf-btn-danger"><i data-lucide="trash-2" class="h-4 w-4"></i>Delete permanently</button>
       <div class="flex flex-wrap justify-end gap-2">
@@ -208,8 +240,10 @@
         <button type="button" @click="mode = 'reschedule'" class="cf-btn cf-btn-primary"><i data-lucide="calendar-clock" class="h-4 w-4"></i>Reschedule</button>
       </div>
     </div>
+    {% endif %}
   </div>
 
+  {% if can_manage_daily_ops %}
   <!-- Cancel Mode -->
   <div x-show="mode === 'cancel'" x-cloak>
     <div class="cf-modal-header flex items-center justify-between">
@@ -344,4 +378,5 @@
       </div>
     </form>
   </div>
+  {% endif %}
 </div>

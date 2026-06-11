@@ -56,7 +56,7 @@ def _enabled_yakap_settings(clinic):
 
 
 def _booking_context(clinic, request):
-    services = clinic.services.filter(is_active=True, is_archived=False)
+    services = clinic.services.filter(is_active=True, is_archived=False).select_related("yakap_rule", "yakap_rule__category")
     service_id = request.GET.get("service")
     service = services.filter(pk=service_id).first() if service_id else services.first()
     date_str = request.GET.get("date")

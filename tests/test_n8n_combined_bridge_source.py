@@ -89,7 +89,7 @@ def test_combined_bridge_uses_django_ai_gateway_for_clinic_owned_model_calls():
     assert "name: 'Call Django AI Gateway'" in source
     assert "DJANGO_AI_GATEWAY_REPLY_URL_EXPR" in source
     assert "/messenger/ai/gateway/reply/" in source
-    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .to(attachDjangoAiGatewayInput)\n  .to(prepareChannelReply)" in source
+    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .to(attachDjangoAiGatewayInput)\n  .to(resolveDjangoAiGatewayRoute)\n  .to(djangoAiGatewayResponseRoute)" in source
     assert "name: 'Shared Chat Model'" not in source
     assert "name: 'Shared Conversation Memory'" not in source
     assert "name: 'KliniAssist Shared AI Agent'" not in source
@@ -106,6 +106,28 @@ def test_combined_bridge_does_not_send_provider_models_to_n8n_gateway_payload():
     assert "OpenAI account" not in source
     assert "deepseek-ai/DeepSeek-V4-Flash" not in source
     assert re.search(provider_model_key_pattern, gateway_payload) is None
+
+
+def test_combined_bridge_routes_provider_gateway_fallbacks_to_forced_quick_replies():
+    source = SOURCE.read_text(encoding="utf-8")
+    route_start = source.index("const routeDjangoAiGatewayResponse")
+    route_end = source.index("const prepareSharedFallback")
+    route_node_block = source[route_start:route_end]
+    branch_start = source.index("const djangoAiGatewayResponseRoute")
+    branch_end = source.index("const messengerAiReplyBranch")
+    route_branch_block = source[branch_start:branch_end]
+
+    assert "name: 'Resolve Django AI Gateway Route'" in source
+    assert "const providerFallbackErrors = new Set(['ai_provider_unconfigured', 'ai_provider_error', 'empty_provider_reply', 'tool_loop_exceeded']);" in source
+    assert "force_quick_replies: providerFallback" in source
+    assert "name: 'Get Forced Messenger Quick Replies'" in source
+    assert "force_quick_replies: true" in source
+    assert "const sourceItems = $items('Route Django AI Gateway Response', 0);" in source
+    assert "const forcedMessengerQuickReplyBranch = getForcedMessengerQuickReplies" in source
+    assert "outputKey: 'forced_quick_replies'" in route_node_block
+    assert "outputKey: 'channel_reply'" in route_node_block
+    assert ".onCase(0, forcedMessengerQuickReplyBranch)" in route_branch_block
+    assert ".onCase(1, prepareChannelReply.to(sharedChannelReplyRoute))" in route_branch_block
 
 
 def test_n8n_sync_script_validates_gateway_route_instead_of_old_prompt_phrases():
@@ -127,7 +149,7 @@ def test_combined_bridge_uses_kliniassist_technical_namespace():
     assert "path: 'kliniassist-messenger'" in source
     assert "path: 'kliniassist-widget-assistant'" in source
     assert "const callDjangoAiGateway" in source
-    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .to(attachDjangoAiGatewayInput)\n  .to(prepareChannelReply)" in source
+    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .to(attachDjangoAiGatewayInput)\n  .to(resolveDjangoAiGatewayRoute)\n  .to(djangoAiGatewayResponseRoute)" in source
     assert ".onCase(0, messengerAiReplyBranch)" in source
     assert f"path: '{legacy_prefix}-messenger'" not in source
     assert f"path: '{legacy_prefix}-widget-assistant'" not in source

@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ValidationError
 from django.db.models import Case, DecimalField, F, Sum, When
 from django.utils import timezone
 
@@ -24,6 +25,69 @@ DEFAULT_CATEGORY_DEFINITIONS = [
     ("Medicines", YakapCoverageCategory.TYPE_MEDICINES, 2),
     ("Cancer Screening", YakapCoverageCategory.TYPE_CANCER_SCREENING, 3),
 ]
+
+YAKAP_LEDGER_PROFILE_ALLOWED_STATUSES = {PatientYakapProfile.STATUS_ACTIVE}
+YAKAP_LEDGER_SERVICE_RULE_ALLOWED_STATUSES = {
+    ServiceYakapRule.STATUS_COVERED,
+    ServiceYakapRule.STATUS_POSSIBLY_COVERED,
+    ServiceYakapRule.STATUS_REQUIRES_VERIFICATION,
+}
+YAKAP_LEDGER_APPOINTMENT_ALLOWED_STATUSES = {
+    AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
+    AppointmentYakapSnapshot.STATUS_POSTED,
+}
+
+
+def yakap_verification_freshness(profile, *, settings=None, now=None):
+    stale_after_days = getattr(settings, "verification_stale_after_days", 30) if settings else 30
+    stale_after_days = max(1, int(stale_after_days or 30))
+    if not profile:
+        return {
+            "is_stale": False,
+            "last_verified_at": None,
+            "stale_after_days": stale_after_days,
+            "stale_cutoff": None,
+        }
+    if not getattr(profile, "last_verified_at", None):
+        return {
+            "is_stale": True,
+            "last_verified_at": None,
+            "stale_after_days": stale_after_days,
+            "stale_cutoff": None,
+        }
+    now = now or timezone.now()
+    stale_cutoff = now - timedelta(days=stale_after_days)
+    return {
+        "is_stale": profile.last_verified_at < stale_cutoff,
+        "last_verified_at": profile.last_verified_at,
+        "stale_after_days": stale_after_days,
+        "stale_cutoff": stale_cutoff,
+    }
+
+
+def validate_yakap_ledger_posting(entry, appointment, profile, *, settings=None, confirm_stale_verification=False):
+    if entry.entry_type == YakapLedgerEntry.TYPE_REVERSAL:
+        return
+    if profile is None or profile.pk is None:
+        raise ValidationError("Patient YAKAP profile must be active before posting usage.")
+    if profile.status not in YAKAP_LEDGER_PROFILE_ALLOWED_STATUSES:
+        raise ValidationError("Patient YAKAP profile must be active before posting usage.")
+    if not profile.last_verified_at:
+        raise ValidationError("Record patient YAKAP verification before posting usage.")
+    try:
+        snapshot = appointment.yakap_snapshot
+    except AppointmentYakapSnapshot.DoesNotExist:
+        snapshot = None
+    if not snapshot or snapshot.coverage_status not in YAKAP_LEDGER_APPOINTMENT_ALLOWED_STATUSES:
+        raise ValidationError("Verify YAKAP eligibility for this visit before posting usage.")
+    rule = getattr(appointment.service, "yakap_rule", None)
+    if not rule or rule.coverage_status not in YAKAP_LEDGER_SERVICE_RULE_ALLOWED_STATUSES:
+        raise ValidationError("This service is not configured as YAKAP-covered for ledger posting.")
+    if not rule.category_id or rule.category_id != entry.category_id:
+        raise ValidationError("YAKAP ledger category must match the service YAKAP rule category.")
+    freshness = yakap_verification_freshness(profile, settings=settings)
+    if freshness["is_stale"] and not confirm_stale_verification:
+        raise ValidationError("YAKAP verification is stale. Confirm refreshed verification before posting usage.")
 
 def ensure_default_yakap_setup(clinic):
     yakap_settings, _created = ClinicYakapSettings.objects.get_or_create(clinic=clinic)

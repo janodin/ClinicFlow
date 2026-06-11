@@ -839,7 +839,8 @@ def n8n_webhook(request):
     connection = _active_connection_for_page(page_id)
     if not connection:
         return JsonResponse({"replies": [], "page_token": ""}, status=200)
-    if _uses_messenger_ai_mode(connection):
+    force_quick_replies = data.get("force_quick_replies") is True
+    if _uses_messenger_ai_mode(connection) and not force_quick_replies:
         return JsonResponse({
             "replies": [_messenger_ai_fallback_action(connection)],
             "page_token": connection.page_access_token,
