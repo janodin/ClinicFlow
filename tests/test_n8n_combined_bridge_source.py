@@ -696,7 +696,7 @@ def test_combined_bridge_completes_messenger_turn_before_facebook_send():
     assert "turn_token: $json.turn_token" in complete_block
     assert "input_sequence: $json.input_sequence" in complete_block
     assert "completion.send_reply" in prepare_current_block
-    assert ".onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))" in source
+    assert ".onCase(0, completeMessengerTurn.to(authorizeMessengerSend).to(prepareCurrentMessengerReply).to(sendFacebookReply))" in source
     assert ".onCase(0, sendFacebookReply)" not in workflow_block
 
 
@@ -776,7 +776,7 @@ def test_combined_bridge_routes_messenger_quick_replies_without_ai_agent():
     assert "should_use_quick_replies" in source
     assert "messaging.postback?.payload" in source
     assert "messaging.message?.quick_reply?.payload" in source
-    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(attachMessengerQuickRepliesInput)\n  .to(completeMessengerQuickReplyTurn)\n  .to(prepareMessengerQuickReplies)\n  .to(sendFacebookReply);" in source
+    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(attachMessengerQuickRepliesInput)\n  .to(completeMessengerQuickReplyTurn)\n  .to(authorizeMessengerQuickReplySend)\n  .to(prepareMessengerQuickReplies)\n  .to(sendFacebookReply);" in source
     assert "getMessengerQuickReplies\n  .to(completeMessengerTurn)" not in source
     assert ".onCase(1, messengerQuickReplyBranch)" in source
     assert "const replyItems = $items('Attach Messenger Quick Replies Input');" in source
@@ -835,6 +835,19 @@ def test_combined_bridge_facebook_bodies_include_messaging_type_response():
     source = SOURCE.read_text(encoding="utf-8")
 
     assert "messaging_type: 'RESPONSE'" in source
+
+
+def test_combined_bridge_authorizes_messenger_turn_immediately_before_facebook_send():
+    source = SOURCE.read_text(encoding="utf-8")
+
+    assert "DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR" in source
+    assert "/messenger/ai/turn/authorize-send/" in source
+    assert "name: 'Authorize Messenger Send'" in source
+    assert "name: 'Authorize Messenger Quick Reply Send'" in source
+    assert "name: 'Authorize Forced Messenger Quick Reply Send'" in source
+    assert "const sharedChannelReplyRoute = routeChannelReply\n  .onCase(0, completeMessengerTurn.to(authorizeMessengerSend).to(prepareCurrentMessengerReply).to(sendFacebookReply))" in source
+    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(attachMessengerQuickRepliesInput)\n  .to(completeMessengerQuickReplyTurn)\n  .to(authorizeMessengerQuickReplySend)\n  .to(prepareMessengerQuickReplies)\n  .to(sendFacebookReply)" in source
+    assert "const forcedMessengerQuickReplyBranch = getForcedMessengerQuickReplies\n  .to(attachForcedMessengerQuickRepliesInput)\n  .to(completeForcedMessengerQuickReplyTurn)\n  .to(authorizeForcedMessengerQuickReplySend)\n  .to(prepareForcedMessengerQuickReplies)\n  .to(sendFacebookReply)" in source
 
 
 def test_combined_bridge_uses_django_response_identity_for_messenger_quick_replies():

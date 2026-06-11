@@ -4446,6 +4446,40 @@ def _post_ai_turn_complete(client, page_id, psid, turn_token, input_sequence, re
     )
 
 
+def _post_ai_turn_authorize_send(client, page_id, psid, turn_token, input_sequence):
+    return client.post(
+        reverse("messenger:ai_turn_authorize_send"),
+        data=json.dumps({
+            "page_id": page_id,
+            "psid": psid,
+            "turn_token": turn_token,
+            "input_sequence": input_sequence,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+
+def _post_ai_turn_send_reply(client, page_id, psid, turn_token, input_sequence, reply_text="Reply", facebook_body=None):
+    return client.post(
+        reverse("messenger:ai_turn_send_reply"),
+        data=json.dumps({
+            "page_id": page_id,
+            "psid": psid,
+            "turn_token": turn_token,
+            "input_sequence": input_sequence,
+            "reply_text": reply_text,
+            "facebook_body": facebook_body or {
+                "messaging_type": "RESPONSE",
+                "recipient": {"id": psid},
+                "message": {"text": reply_text},
+            },
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+    )
+
+
 @pytest.mark.django_db
 @override_settings(N8N_WEBHOOK_SECRET="secret123")
 def test_ai_turn_register_claims_first_messenger_message_for_processing():
@@ -4538,6 +4572,159 @@ def test_ai_turn_new_message_supersedes_in_flight_turn_and_coalesces_pending_mes
         {"role": "user", "content": "June 15\nCleaning"},
         {"role": "assistant", "content": "What time works for Cleaning on June 15?"},
     ]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_authorize_send_allows_completed_current_turn():
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_authorize_current", "PAGE-AI-TURN-AUTH-CURRENT")
+    client = Client()
+    turn = _post_ai_turn_register(client, "PAGE-AI-TURN-AUTH-CURRENT", "PSID1", "mid-auth-current", "Hello").json()
+    complete = _post_ai_turn_complete(
+        client,
+        "PAGE-AI-TURN-AUTH-CURRENT",
+        "PSID1",
+        turn["turn_token"],
+        turn["input_sequence"],
+        "Hi, how can I help?",
+    )
+
+    response = _post_ai_turn_authorize_send(
+        client,
+        "PAGE-AI-TURN-AUTH-CURRENT",
+        "PSID1",
+        turn["turn_token"],
+        turn["input_sequence"],
+    )
+
+    assert complete.json()["send_reply"] is True
+    assert response.status_code == 200
+    assert response.json() == {"send_reply": True, "stale": False, "has_pending": False}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_authorize_send_blocks_completed_turn_after_new_message_arrives():
+    _clinic, _connection = _create_messenger_clinic("owner_ai_turn_authorize_stale", "PAGE-AI-TURN-AUTH-STALE")
+    client = Client()
+    turn = _post_ai_turn_register(client, "PAGE-AI-TURN-AUTH-STALE", "PSID1", "mid-auth-stale-1", "First question").json()
+    complete = _post_ai_turn_complete(
+        client,
+        "PAGE-AI-TURN-AUTH-STALE",
+        "PSID1",
+        turn["turn_token"],
+        turn["input_sequence"],
+        "First answer",
+    )
+    newer = _post_ai_turn_register(client, "PAGE-AI-TURN-AUTH-STALE", "PSID1", "mid-auth-stale-2", "Actually wait")
+
+    response = _post_ai_turn_authorize_send(
+        client,
+        "PAGE-AI-TURN-AUTH-STALE",
+        "PSID1",
+        turn["turn_token"],
+        turn["input_sequence"],
+    )
+
+    assert complete.json()["send_reply"] is True
+    assert newer.json()["process_now"] is True
+    assert response.status_code == 200
+    assert response.json() == {"send_reply": False, "stale": True, "has_pending": True}
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+@patch("messenger.views.requests.post")
+def test_ai_turn_send_reply_sends_facebook_message_then_persists_history(mock_post):
+    from messenger.models import MessengerConversation, MessengerAITurn
+
+    _clinic, connection = _create_messenger_clinic("owner_ai_turn_send_success", "PAGE-AI-TURN-SEND-SUCCESS")
+    client = Client()
+    turn = _post_ai_turn_register(client, connection.page_id, "PSID1", "mid-send-success", "Hello").json()
+    mock_post.return_value.raise_for_status.return_value = None
+
+    response = _post_ai_turn_send_reply(
+        client,
+        connection.page_id,
+        "PSID1",
+        turn["turn_token"],
+        turn["input_sequence"],
+        "Hi, how can I help?",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"send_reply": True, "stale": False, "has_pending": False, "sent": True}
+    mock_post.assert_called_once()
+    assert mock_post.call_args.kwargs["params"] == {"access_token": connection.page_access_token}
+    assert mock_post.call_args.kwargs["json"]["recipient"] == {"id": "PSID1"}
+    conversation = MessengerConversation.objects.get(connection=connection, psid="PSID1")
+    saved_turn = MessengerAITurn.objects.get(conversation=conversation, token=turn["turn_token"])
+    assert conversation.completed_sequence == turn["input_sequence"]
+    assert conversation.active_turn_token == ""
+    assert conversation.history[-2:] == [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi, how can I help?"},
+    ]
+    assert saved_turn.status == MessengerAITurn.STATUS_COMPLETED
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+@patch("messenger.views.requests.post")
+def test_ai_turn_send_reply_does_not_persist_history_when_facebook_send_fails(mock_post):
+    from messenger.models import MessengerConversation, MessengerAITurn
+
+    _clinic, connection = _create_messenger_clinic("owner_ai_turn_send_failure", "PAGE-AI-TURN-SEND-FAILURE")
+    client = Client()
+    turn = _post_ai_turn_register(client, connection.page_id, "PSID1", "mid-send-failure", "Hello").json()
+    mock_post.return_value.raise_for_status.side_effect = requests.RequestException("Graph failed")
+
+    response = _post_ai_turn_send_reply(
+        client,
+        connection.page_id,
+        "PSID1",
+        turn["turn_token"],
+        turn["input_sequence"],
+        "Hi, how can I help?",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"send_reply": False, "stale": False, "has_pending": False, "sent": False, "error": "facebook_send_failed"}
+    conversation = MessengerConversation.objects.get(connection=connection, psid="PSID1")
+    saved_turn = MessengerAITurn.objects.get(conversation=conversation, token=turn["turn_token"])
+    assert conversation.completed_sequence == 0
+    assert conversation.active_turn_token == turn["turn_token"]
+    assert conversation.history == []
+    assert saved_turn.status == MessengerAITurn.STATUS_ACTIVE
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+@patch("messenger.views.requests.post")
+def test_ai_turn_send_reply_blocks_stale_turn_after_new_message_arrives(mock_post):
+    from messenger.models import MessengerConversation
+
+    _clinic, connection = _create_messenger_clinic("owner_ai_turn_send_stale", "PAGE-AI-TURN-SEND-STALE")
+    client = Client()
+    turn = _post_ai_turn_register(client, connection.page_id, "PSID1", "mid-send-stale-1", "First question").json()
+    newer = _post_ai_turn_register(client, connection.page_id, "PSID1", "mid-send-stale-2", "Actually wait")
+
+    response = _post_ai_turn_send_reply(
+        client,
+        connection.page_id,
+        "PSID1",
+        turn["turn_token"],
+        turn["input_sequence"],
+        "First answer",
+    )
+
+    assert newer.json()["process_now"] is True
+    assert response.status_code == 200
+    assert response.json() == {"send_reply": False, "stale": True, "has_pending": True, "sent": False}
+    mock_post.assert_not_called()
+    conversation = MessengerConversation.objects.get(connection=connection, psid="PSID1")
+    assert conversation.completed_sequence == 0
+    assert conversation.history == []
 
 
 @pytest.mark.django_db

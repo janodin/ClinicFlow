@@ -20,6 +20,7 @@ const DJANGO_WIDGET_AI_CONTEXT_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' 
 const DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/register/" }}');
 const DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/claim/" }}');
 const DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/complete/" }}');
+const DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/authorize-send/" }}');
 const DJANGO_MESSENGER_N8N_WEBHOOK_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/n8n-webhook/" }}');
 
 const metaWebhookVerification = trigger({
@@ -977,6 +978,29 @@ const completeForcedMessengerQuickReplyTurn = node({
   output: [{ send_reply: true, stale: false, has_pending: false }],
 });
 
+const authorizeForcedMessengerQuickReplySend = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Authorize Forced Messenger Quick Reply Send',
+    position: [2976, 520],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.page_id, psid: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.psid, turn_token: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.turn_token, input_sequence: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.input_sequence || 0 } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ send_reply: true, stale: false, has_pending: false }],
+});
+
 const prepareForcedMessengerQuickReplies = node({
   type: 'n8n-nodes-base.code',
   version: 2,
@@ -1184,6 +1208,52 @@ const completeMessengerQuickReplyTurn = node({
   output: [{ send_reply: true, stale: false, has_pending: false }],
 });
 
+const authorizeMessengerSend = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Authorize Messenger Send',
+    position: [2752, 640],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $items("Route Channel Reply", 0)[$itemIndex].json.page_id, psid: $items("Route Channel Reply", 0)[$itemIndex].json.psid, turn_token: $items("Route Channel Reply", 0)[$itemIndex].json.turn_token, input_sequence: $items("Route Channel Reply", 0)[$itemIndex].json.input_sequence || 0 } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ send_reply: true, stale: false, has_pending: false }],
+});
+
+const authorizeMessengerQuickReplySend = node({
+  type: 'n8n-nodes-base.httpRequest',
+  version: 4.4,
+  config: {
+    name: 'Authorize Messenger Quick Reply Send',
+    position: [2080, 520],
+    parameters: {
+      method: 'POST',
+      url: DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
+      sendBody: true,
+      specifyBody: 'json',
+      jsonBody: expr('{{ { page_id: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.page_id, psid: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.psid, turn_token: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.turn_token, input_sequence: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.input_sequence || 0 } }}'),
+      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
+    },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
+  },
+  output: [{ send_reply: true, stale: false, has_pending: false }],
+});
+
 const prepareCurrentMessengerReply = node({
   type: 'n8n-nodes-base.code',
   version: 2,
@@ -1245,12 +1315,13 @@ const returnWidgetReply = node({
 });
 
 const sharedChannelReplyRoute = routeChannelReply
-  .onCase(0, completeMessengerTurn.to(prepareCurrentMessengerReply).to(sendFacebookReply))
+  .onCase(0, completeMessengerTurn.to(authorizeMessengerSend).to(prepareCurrentMessengerReply).to(sendFacebookReply))
   .onCase(1, returnWidgetReply);
 
 const forcedMessengerQuickReplyBranch = getForcedMessengerQuickReplies
   .to(attachForcedMessengerQuickRepliesInput)
   .to(completeForcedMessengerQuickReplyTurn)
+  .to(authorizeForcedMessengerQuickReplySend)
   .to(prepareForcedMessengerQuickReplies)
   .to(sendFacebookReply);
 
@@ -1266,6 +1337,7 @@ const messengerAiReplyBranch = callDjangoAiGateway
 const messengerQuickReplyBranch = getMessengerQuickReplies
   .to(attachMessengerQuickRepliesInput)
   .to(completeMessengerQuickReplyTurn)
+  .to(authorizeMessengerQuickReplySend)
   .to(prepareMessengerQuickReplies)
   .to(sendFacebookReply);
 
