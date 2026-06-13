@@ -166,11 +166,15 @@ class ServiceYakapRule(FullCleanOnSaveMixin, TimeStampedModel):
 
     @property
     def is_publicly_promotable(self):
-        return self.coverage_status in {
-            self.STATUS_COVERED,
-            self.STATUS_POSSIBLY_COVERED,
-            self.STATUS_REQUIRES_VERIFICATION,
-        }
+        return (
+            self.coverage_status in {
+                self.STATUS_COVERED,
+                self.STATUS_POSSIBLY_COVERED,
+                self.STATUS_REQUIRES_VERIFICATION,
+            }
+            and bool(self.category_id)
+            and bool(getattr(self.category, "is_active", False))
+        )
 
 
 class PatientYakapProfile(FullCleanOnSaveMixin, TimeStampedModel):
@@ -388,18 +392,22 @@ class YakapLedgerEntry(FullCleanOnSaveMixin, TimeStampedModel):
             errors["service"] = "Service must match the appointment service."
         if self.reversal_of_id:
             original_entry = self.reversal_of
+            if self.entry_type != self.TYPE_REVERSAL:
+                errors["reversal_of"] = "Reversal link is only allowed for reversal entries."
+            elif self.reversal_of.entry_type == self.TYPE_REVERSAL:
+                errors["reversal_of"] = "Reversal cannot reverse another reversal entry."
             if self.clinic_id and original_entry.clinic_id != self.clinic_id:
-                errors["reversal_of"] = "Reversal entry must belong to the same clinic."
+                errors.setdefault("reversal_of", "Reversal entry must belong to the same clinic.")
             if self.patient_id and original_entry.patient_id != self.patient_id:
-                errors["reversal_of"] = "Reversal entry must belong to the same patient."
+                errors.setdefault("reversal_of", "Reversal entry must belong to the same patient.")
             if self.category_id and original_entry.category_id != self.category_id:
-                errors["reversal_of"] = "Reversal entry must belong to the same category."
+                errors.setdefault("reversal_of", "Reversal entry must belong to the same category.")
             if self.entry_type == self.TYPE_REVERSAL:
                 if self._period_bounds_for(self.occurred_at, clinic=original_entry.clinic) != self._period_bounds_for(
                     original_entry.occurred_at,
                     clinic=original_entry.clinic,
                 ):
-                    errors["reversal_of"] = "Reversal must be in the same benefit period as the original entry."
+                    errors.setdefault("reversal_of", "Reversal must be in the same benefit period as the original entry.")
                 reversed_total = original_entry.reversals.filter(entry_type=self.TYPE_REVERSAL).exclude(pk=self.pk).aggregate(
                     total=models.Sum("amount")
                 )["total"] or Decimal("0.00")
@@ -460,6 +468,10 @@ class YakapLedgerEntry(FullCleanOnSaveMixin, TimeStampedModel):
         if self.entry_type == self.TYPE_REVERSAL:
             return -self.amount
         return self.amount
+
+    def __str__(self):
+        category = self.category.name if self.category_id else "YAKAP"
+        return f"{self.get_entry_type_display()} {self.amount} for {category}"
 
 
 class YakapCreditLinePeriod(FullCleanOnSaveMixin, TimeStampedModel):

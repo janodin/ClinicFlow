@@ -5,7 +5,7 @@
   <div class="cf-page-header">
     <div><h1 class="cf-page-title ui-page-title">Appointments</h1><p class="cf-page-description">Manage and track all clinic appointments</p></div>
     <div class="cf-page-actions">
-      <a href="{% url 'dashboard:export_csv' %}?{% if status %}status={{ status }}&{% endif %}{% if date_from %}date_from={{ date_from }}&{% endif %}{% if date_to %}date_to={{ date_to }}&{% endif %}{% if service_filter %}service={{ service_filter }}&{% endif %}{% if source_filter %}source={{ source_filter }}&{% endif %}{% if payment_filter %}payment_state={{ payment_filter }}{% endif %}" :href="exportHref()"
+      <a href="{% url 'dashboard:export_csv' %}?{% if status %}status={{ status|urlencode }}&{% endif %}{% if date_from %}date_from={{ date_from|urlencode }}&{% endif %}{% if date_to %}date_to={{ date_to|urlencode }}&{% endif %}{% if service_filter %}service={{ service_filter|urlencode }}&{% endif %}{% if source_filter %}source={{ source_filter|urlencode }}&{% endif %}{% if payment_filter %}payment_state={{ payment_filter|urlencode }}{% endif %}" :href="exportHref()"
          class="cf-btn cf-btn-secondary"><i data-lucide="download" class="h-4 w-4"></i>Export CSV</a>
       <button @click="open=true" class="cf-btn cf-btn-primary"><i data-lucide="calendar-plus" class="h-4 w-4"></i>Add appointment</button>
     </div>

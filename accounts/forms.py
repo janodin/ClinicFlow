@@ -140,7 +140,6 @@ class FirstRunOnboardingForm(forms.Form):
     booking_approval_mode = forms.ChoiceField(choices=Clinic.APPROVAL_CHOICES, widget=forms.Select(attrs={"class": "cf-select"}))
     service_name = forms.CharField(max_length=160, widget=forms.TextInput(attrs={"class": _INPUT}))
     service_duration_minutes = forms.IntegerField(min_value=1, max_value=480, widget=forms.NumberInput(attrs={"class": _INPUT}))
-    service_price = forms.DecimalField(min_value=0, max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={"class": _INPUT, "step": "0.01"}))
 
     def __init__(self, *args, clinic=None, service=None, **kwargs):
         self.clinic = clinic
@@ -169,7 +168,6 @@ class FirstRunOnboardingForm(forms.Form):
                 "booking_approval_mode": clinic.booking_approval_mode,
                 "service_name": service.name if service else "General Consultation",
                 "service_duration_minutes": service.duration_minutes if service and service.duration_minutes else clinic.default_appointment_duration,
-                "service_price": service.price if service else "0.00",
             }
         )
         hours = {hour.weekday: hour for hour in clinic.business_hours.all()}

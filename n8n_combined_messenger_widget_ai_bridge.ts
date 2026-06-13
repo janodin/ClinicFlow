@@ -7,8 +7,7 @@ import {
   expr,
 } from '@n8n/workflow-sdk';
 
-const DJANGO_BASE_URL_FALLBACK = 'https://178-105-83-211.nip.io';
-const DJANGO_BASE_URL_EXPR = '($vars.DJANGO_BASE_URL || "' + DJANGO_BASE_URL_FALLBACK + '").replace(/\\/$/, "")';
+const DJANGO_BASE_URL_EXPR = '(() => { const base = String($vars.DJANGO_BASE_URL || "").trim(); if (!base) { throw new Error("DJANGO_BASE_URL is required"); } const url = new URL(base); if (url.protocol !== "https:") { throw new Error("DJANGO_BASE_URL must use https"); } return url.toString().replace(/\\/$/, ""); })()';
 const N8N_WEBHOOK_CREDENTIAL_ID = 'PJHqVMwE3qU58s9E';
 const MESSENGER_FALLBACK = 'Thanks for your message. Please contact the clinic directly for help.';
 const WIDGET_FALLBACK = 'Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.';
@@ -19,8 +18,7 @@ const DJANGO_AI_GATEWAY_REPLY_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' +
 const DJANGO_WIDGET_AI_CONTEXT_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/context/" }}');
 const DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/register/" }}');
 const DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/claim/" }}');
-const DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/complete/" }}');
-const DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/authorize-send/" }}');
+const DJANGO_MESSENGER_AI_TURN_SEND_REPLY_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/send-reply/" }}');
 const DJANGO_MESSENGER_N8N_WEBHOOK_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/n8n-webhook/" }}');
 
 const metaWebhookVerification = trigger({
@@ -340,7 +338,7 @@ const registerMessengerTurn = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, message_id: $json.message_id, message: $json.message, postback: $json.postback || "" } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, message_id: $json.message_id, message: $json.message, postback: $json.postback || "", raw_body: $json.raw_body, signature: $json.signature } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
@@ -551,12 +549,12 @@ const getMessengerClinicContext = node({
       headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id } }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token || "", input_sequence: $json.input_sequence || 0 } }}'),
       options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
-  output: [{ found: true, page_id: 'PAGE123', page_token: 'PAGE_TOKEN', clinic: { id: 1, name: 'Demo Clinic', timezone: 'Asia/Manila' }, current_time: { timezone: 'Asia/Manila', now: '2026-06-01T09:00:00+08:00', today: '2026-06-01' }, ai: { is_ai_enabled: true, instructions: 'Be helpful.', fallback_message: MESSENGER_FALLBACK }, services: [], faqs: [] }],
+  output: [{ found: true, page_id: 'PAGE123', clinic: { id: 1, name: 'Demo Clinic', timezone: 'Asia/Manila' }, current_time: { timezone: 'Asia/Manila', now: '2026-06-01T09:00:00+08:00', today: '2026-06-01' }, ai: { is_ai_enabled: true, instructions: 'Be helpful.', fallback_message: MESSENGER_FALLBACK }, services: [], faqs: [] }],
 });
 
 const attachMessengerContext = node({
@@ -573,13 +571,12 @@ return $input.all().map((inputItem, itemIndex) => {
   const context = inputItem.json || {};
   return { json: {
     ...source,
-    context,
-    access_token: context.page_token || ''
+    context
   } };
 });`,
     },
   },
-  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message: 'New Messenger messages in order:\n- June 15\n- Cleaning', raw_message: 'Cleaning', raw_postback: '', turn_token: 'turn-token', input_sequence: 2, access_token: 'PAGE_TOKEN', context: { found: true, ai: { is_ai_enabled: true } } }],
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message: 'New Messenger messages in order:\n- June 15\n- Cleaning', raw_message: 'Cleaning', raw_postback: '', turn_token: 'turn-token', input_sequence: 2, context: { found: true, ai: { is_ai_enabled: true } } }],
 });
 
 const getWidgetClinicContext = node({
@@ -613,17 +610,33 @@ const buildMessengerSharedInput = node({
     position: [3536, 560],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `return $input.all().map((inputItem) => {
+      jsCode: `function sanitizeServicePricing(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeServicePricing(item));
+  }
+  if (value && typeof value === 'object') {
+    const clone = { ...value };
+    delete clone.price;
+    delete clone.display_price;
+    for (const key of Object.keys(clone)) {
+      clone[key] = sanitizeServicePricing(clone[key]);
+    }
+    return clone;
+  }
+  return value;
+}
+
+return $input.all().map((inputItem) => {
   const input = inputItem.json || {};
   const rawContext = input.context || {};
-  const { page_token: pageToken, page_token_available: pageTokenAvailable, ...safeContext } = rawContext;
+  const sanitizedContext = sanitizeServicePricing(rawContext);
   const claim = input.claim || {};
-  const aiVersion = safeContext.ai?.settings_updated_at || 'unversioned';
-  return { json: { ...input, message: claim.message || input.message || '', turn_token: claim.turn_token || input.turn_token || '', input_sequence: claim.input_sequence || input.input_sequence || 0, turn_messages: claim.messages || input.turn_messages || [], history: claim.history || input.history || [], session_key: input.session_key + ':ai-settings:' + aiVersion + ':turn:' + (claim.turn_token || input.turn_token || 'no-turn'), access_token: pageToken || input.access_token || '', context: safeContext, fallback_message: safeContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
+  const aiVersion = rawContext.ai?.settings_updated_at || 'unversioned';
+  return { json: { ...input, message: claim.message || input.message || '', turn_token: claim.turn_token || input.turn_token || '', input_sequence: claim.input_sequence || input.input_sequence || 0, turn_messages: claim.messages || input.turn_messages || [], history: claim.history || input.history || [], session_key: input.session_key + ':ai-settings:' + aiVersion + ':turn:' + (claim.turn_token || input.turn_token || 'no-turn'), context: sanitizedContext, fallback_message: rawContext.ai?.fallback_message || '${MESSENGER_FALLBACK}' } };
 });`,
     },
   },
-  output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', page_id: 'PAGE123', psid: 'PSID123', clinic_slug: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook', access_token: 'PAGE_TOKEN', fallback_message: MESSENGER_FALLBACK, context: { found: true, ai: { is_ai_enabled: true } } }],
+  output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', page_id: 'PAGE123', psid: 'PSID123', clinic_slug: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook', fallback_message: MESSENGER_FALLBACK, context: { found: true, ai: { is_ai_enabled: true } } }],
 });
 
 const buildWidgetSharedInput = node({
@@ -634,10 +647,27 @@ const buildWidgetSharedInput = node({
     position: [912, 1040],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const context = $input.first().json || {};
+      jsCode: `function sanitizeServicePricing(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeServicePricing(item));
+  }
+  if (value && typeof value === 'object') {
+    const clone = { ...value };
+    delete clone.price;
+    delete clone.display_price;
+    for (const key of Object.keys(clone)) {
+      clone[key] = sanitizeServicePricing(clone[key]);
+    }
+    return clone;
+  }
+  return value;
+}
+
+const context = $input.first().json || {};
 const source = $items('Normalize Widget Request')[0].json || {};
+const sanitizedContext = sanitizeServicePricing(context);
 const aiVersion = context.ai?.settings_updated_at || 'unversioned';
-return [{ json: { ...source, session_key: source.session_key + ':ai-settings:' + aiVersion, context, fallback_message: context.ai?.fallback_message || '${WIDGET_FALLBACK}' } }];`,
+return [{ json: { ...source, session_key: source.session_key + ':ai-settings:' + aiVersion, context: sanitizedContext, fallback_message: context.ai?.fallback_message || '${WIDGET_FALLBACK}' } }];`,
     },
   },
   output: [{ channel: 'widget', message: 'Can I book tomorrow?', page_id: '', psid: '', clinic_slug: 'demo-clinic', session_id: 'SESSION123', session_key: 'widget:demo-clinic:SESSION123', output_mode: 'widget_json', fallback_message: WIDGET_FALLBACK, context: { found: true, ai: { is_ai_enabled: true } } }],
@@ -743,7 +773,7 @@ const getMessengerQuickReplies = node({
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
-  output: [{ replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }], page_token: 'PAGE_TOKEN' }],
+  output: [{ replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }] }],
 });
 
 const attachMessengerQuickRepliesInput = node({
@@ -761,14 +791,12 @@ return $input.all().map((inputItem, itemIndex) => {
   return { json: {
     ...source,
     quick_reply_response: response,
-    replies: Array.isArray(response.replies) ? response.replies : [],
-    page_token: response.page_token || source.access_token || '',
-    access_token: response.page_token || source.access_token || ''
+    replies: Array.isArray(response.replies) ? response.replies : []
   } };
 });`,
     },
   },
-  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, page_token: 'PAGE_TOKEN', access_token: 'PAGE_TOKEN', replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }] }],
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }] }],
 });
 
 const prepareMessengerQuickReplies = node({
@@ -780,35 +808,41 @@ const prepareMessengerQuickReplies = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const items = [];
-const replyItems = $items('Attach Messenger Quick Replies Input');
-for (const [itemIndex, inputItem] of $input.all().entries()) {
-  const completion = inputItem.json || {};
-  if (completion.send_reply === false) { continue; }
-  const input = replyItems[itemIndex]?.json || {};
+for (const inputItem of $input.all()) {
+  const input = inputItem.json || {};
   const actions = Array.isArray(input.replies) ? input.replies : [];
-  const pageToken = input.page_token || input.access_token || '';
   const psid = input.psid || '';
-  if (!pageToken || !psid) { continue; }
+  if (!psid) { continue; }
+  const facebookBodies = [];
+  const replyTexts = [];
+  const appendBody = (facebookBody, replyText) => {
+    facebookBodies.push(facebookBody);
+    replyTexts.push(replyText);
+  };
   for (const action of actions) {
     if (action.type === 'text') {
-      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: String(action.text || '') } } } });
+      const text = String(action.text || '');
+      appendBody({ messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text } }, text);
     }
     if (action.type === 'quick_replies') {
       const quickReplies = (action.options || []).slice(0, 13).map((option) => ({ content_type: 'text', title: String(option.title || '').slice(0, 20), payload: String(option.payload || '') }));
       const message = { text: String(action.text || '') };
       if (quickReplies.length) { message.quick_replies = quickReplies; }
-      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message } } });
+      appendBody({ messaging_type: 'RESPONSE', recipient: { id: psid }, message }, message.text);
     }
   }
   if (!actions.length) {
     const fallback = input.fallback_message || '${MESSENGER_FALLBACK}';
-    items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: fallback } } } });
+    appendBody({ messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: fallback } }, fallback);
+  }
+  if (facebookBodies.length) {
+    items.push({ json: { ...input, facebook_bodies: facebookBodies, reply_text: replyTexts.filter(Boolean).join('\n'), page_id: input.page_id || '', psid, turn_token: input.turn_token || '', input_sequence: input.input_sequence || 0 } });
   }
 }
 return items;`,
     },
   },
-  output: [{ access_token: 'PAGE_TOKEN', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } } }],
+  output: [{ page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, reply_text: 'Choose an option:', facebook_bodies: [{ messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } }] }],
 });
 
 const callDjangoAiGateway = node({
@@ -817,6 +851,7 @@ const callDjangoAiGateway = node({
   config: {
     name: 'Call Django AI Gateway',
     position: [1744, 720],
+    onError: 'continueErrorOutput',
     parameters: {
       method: 'POST',
       url: DJANGO_AI_GATEWAY_REPLY_URL_EXPR,
@@ -832,6 +867,26 @@ const callDjangoAiGateway = node({
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ reply: 'Assistant reply', fallback: false, error: '' }],
+});
+
+const handleDjangoAiGatewayError = node({
+  type: 'n8n-nodes-base.code',
+  version: 2,
+  config: {
+    name: 'Handle Django AI Gateway Error',
+    position: [1968, 880],
+    parameters: {
+      mode: 'runOnceForAllItems',
+      jsCode: `const sourceItems = $items('Route Assistant Mode', 0);
+return $input.all().map((inputItem, itemIndex) => {
+  const source = sourceItems[itemIndex]?.json || {};
+  const channel = source.channel || 'widget';
+  const fallback = source.fallback_message || (channel === 'messenger' ? '${MESSENGER_FALLBACK}' : '${WIDGET_FALLBACK}');
+  return { json: { ...source, gateway_response: { reply: fallback, fallback: true, error: 'ai_gateway_transport_error' }, reply: fallback, fallback: true, error: 'ai_gateway_transport_error' } };
+});`,
+    },
+  },
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, reply: MESSENGER_FALLBACK, fallback: true, error: 'ai_gateway_transport_error' }],
 });
 
 const attachDjangoAiGatewayInput = node({
@@ -850,7 +905,7 @@ return $input.all().map((inputItem, itemIndex) => {
 });`,
     },
   },
-  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', access_token: 'PAGE_TOKEN', reply: 'Assistant reply', fallback: false, error: '' }],
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', reply: 'Assistant reply', fallback: false, error: '' }],
 });
 
 const resolveDjangoAiGatewayRoute = node({
@@ -861,7 +916,7 @@ const resolveDjangoAiGatewayRoute = node({
     position: [2080, 720],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const providerFallbackErrors = new Set(['ai_provider_unconfigured', 'ai_provider_error', 'empty_provider_reply', 'tool_loop_exceeded']);
+      jsCode: `const providerFallbackErrors = new Set(['ai_provider_unconfigured', 'ai_provider_error', 'empty_provider_reply', 'tool_loop_exceeded', 'ai_gateway_transport_error']);
 return $input.all().map((inputItem) => {
   const item = inputItem.json || {};
   const error = String(item.error || '').trim();
@@ -927,7 +982,7 @@ const getForcedMessengerQuickReplies = node({
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
-  output: [{ replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }], page_token: 'PAGE_TOKEN' }],
+  output: [{ replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }] }],
 });
 
 const attachForcedMessengerQuickRepliesInput = node({
@@ -945,60 +1000,12 @@ return $input.all().map((inputItem, itemIndex) => {
   return { json: {
     ...source,
     quick_reply_response: response,
-    replies: Array.isArray(response.replies) ? response.replies : [],
-    page_token: response.page_token || source.access_token || '',
-    access_token: response.page_token || source.access_token || ''
+    replies: Array.isArray(response.replies) ? response.replies : []
   } };
 });`,
     },
   },
-  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, page_token: 'PAGE_TOKEN', access_token: 'PAGE_TOKEN', replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }] }],
-});
-
-const completeForcedMessengerQuickReplyTurn = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.4,
-  config: {
-    name: 'Complete Forced Messenger Quick Reply Turn',
-    position: [2864, 520],
-    parameters: {
-      method: 'POST',
-      url: DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR,
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence || 0, reply_text: (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\n")) } }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ send_reply: true, stale: false, has_pending: false }],
-});
-
-const authorizeForcedMessengerQuickReplySend = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.4,
-  config: {
-    name: 'Authorize Forced Messenger Quick Reply Send',
-    position: [2976, 520],
-    parameters: {
-      method: 'POST',
-      url: DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR,
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.page_id, psid: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.psid, turn_token: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.turn_token, input_sequence: $items("Attach Forced Messenger Quick Replies Input")[$itemIndex].json.input_sequence || 0 } }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ send_reply: true, stale: false, has_pending: false }],
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, replies: [{ type: 'quick_replies', text: 'Choose an option:', options: [{ title: 'Book an appointment', payload: 'start_booking' }] }] }],
 });
 
 const prepareForcedMessengerQuickReplies = node({
@@ -1010,35 +1017,41 @@ const prepareForcedMessengerQuickReplies = node({
     parameters: {
       mode: 'runOnceForAllItems',
       jsCode: `const items = [];
-const replyItems = $items('Attach Forced Messenger Quick Replies Input');
-for (const [itemIndex, inputItem] of $input.all().entries()) {
-  const completion = inputItem.json || {};
-  if (completion.send_reply === false) { continue; }
-  const input = replyItems[itemIndex]?.json || {};
+for (const inputItem of $input.all()) {
+  const input = inputItem.json || {};
   const actions = Array.isArray(input.replies) ? input.replies : [];
-  const pageToken = input.page_token || input.access_token || '';
   const psid = input.psid || '';
-  if (!pageToken || !psid) { continue; }
+  if (!psid) { continue; }
+  const facebookBodies = [];
+  const replyTexts = [];
+  const appendBody = (facebookBody, replyText) => {
+    facebookBodies.push(facebookBody);
+    replyTexts.push(replyText);
+  };
   for (const action of actions) {
     if (action.type === 'text') {
-      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: String(action.text || '') } } } });
+      const text = String(action.text || '');
+      appendBody({ messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text } }, text);
     }
     if (action.type === 'quick_replies') {
       const quickReplies = (action.options || []).slice(0, 13).map((option) => ({ content_type: 'text', title: String(option.title || '').slice(0, 20), payload: String(option.payload || '') }));
       const message = { text: String(action.text || '') };
       if (quickReplies.length) { message.quick_replies = quickReplies; }
-      items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message } } });
+      appendBody({ messaging_type: 'RESPONSE', recipient: { id: psid }, message }, message.text);
     }
   }
   if (!actions.length) {
     const fallback = input.fallback_message || '${MESSENGER_FALLBACK}';
-    items.push({ json: { access_token: pageToken, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: fallback } } } });
+    appendBody({ messaging_type: 'RESPONSE', recipient: { id: psid }, message: { text: fallback } }, fallback);
+  }
+  if (facebookBodies.length) {
+    items.push({ json: { ...input, facebook_bodies: facebookBodies, reply_text: replyTexts.filter(Boolean).join('\n'), page_id: input.page_id || '', psid, turn_token: input.turn_token || '', input_sequence: input.input_sequence || 0 } });
   }
 }
 return items;`,
     },
   },
-  output: [{ access_token: 'PAGE_TOKEN', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } } }],
+  output: [{ page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, reply_text: 'Choose an option:', facebook_bodies: [{ messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } }] }],
 });
 
 const prepareSharedFallback = node({
@@ -1111,6 +1124,9 @@ return $input.all().map((inputItem) => {
   if (isFailedAppointmentVerificationReply(text)) {
     text = redactPhoneLikeText(text);
   }
+  text = channel === 'messenger'
+    ? String(text || '').replace(/\\*\\*([^*\\n]+?)\\*\\*/g, '$1').replace(/\\*([^*\\n]+?)\\*/g, '$1')
+    : text;
   const maxLength = channel === 'messenger' ? 1900 : 1800;
   if (text.length > maxLength) {
     text = text.slice(0, maxLength);
@@ -1118,14 +1134,13 @@ return $input.all().map((inputItem) => {
   return { json: {
     ...shared,
     reply_text: text,
-    access_token: shared.access_token || '',
     facebook_body: { messaging_type: 'RESPONSE', recipient: { id: shared.psid || '' }, message: { text } },
     widget_body: { reply: text }
   } };
 });`,
     },
   },
-  output: [{ channel: 'widget', reply_text: 'Assistant reply', access_token: '', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: '' }, message: { text: 'Assistant reply' } }, widget_body: { reply: 'Assistant reply' } }],
+  output: [{ channel: 'widget', reply_text: 'Assistant reply', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: '' }, message: { text: 'Assistant reply' } }, widget_body: { reply: 'Assistant reply' } }],
 });
 
 const routeChannelReply = switchCase({
@@ -1162,98 +1177,6 @@ const routeChannelReply = switchCase({
   },
 });
 
-const completeMessengerTurn = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.4,
-  config: {
-    name: 'Complete Messenger Turn',
-    position: [2640, 640],
-    parameters: {
-      method: 'POST',
-      url: DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR,
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence, reply_text: $json.reply_text || "" } }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ send_reply: true, stale: false, has_pending: false }],
-});
-
-const completeMessengerQuickReplyTurn = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.4,
-  config: {
-    name: 'Complete Messenger Quick Reply Turn',
-    position: [1968, 520],
-    parameters: {
-      method: 'POST',
-      url: DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR,
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence || 0, reply_text: (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\n")) } }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ send_reply: true, stale: false, has_pending: false }],
-});
-
-const authorizeMessengerSend = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.4,
-  config: {
-    name: 'Authorize Messenger Send',
-    position: [2752, 640],
-    parameters: {
-      method: 'POST',
-      url: DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR,
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $items("Route Channel Reply", 0)[$itemIndex].json.page_id, psid: $items("Route Channel Reply", 0)[$itemIndex].json.psid, turn_token: $items("Route Channel Reply", 0)[$itemIndex].json.turn_token, input_sequence: $items("Route Channel Reply", 0)[$itemIndex].json.input_sequence || 0 } }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ send_reply: true, stale: false, has_pending: false }],
-});
-
-const authorizeMessengerQuickReplySend = node({
-  type: 'n8n-nodes-base.httpRequest',
-  version: 4.4,
-  config: {
-    name: 'Authorize Messenger Quick Reply Send',
-    position: [2080, 520],
-    parameters: {
-      method: 'POST',
-      url: DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR,
-      authentication: 'genericCredentialType',
-      genericAuthType: 'httpHeaderAuth',
-      sendHeaders: true,
-      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
-      sendBody: true,
-      specifyBody: 'json',
-      jsonBody: expr('{{ { page_id: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.page_id, psid: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.psid, turn_token: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.turn_token, input_sequence: $items("Attach Messenger Quick Replies Input")[$itemIndex].json.input_sequence || 0 } }}'),
-      options: { response: { response: { neverError: true, responseFormat: 'json' } }, timeout: 15000 },
-    },
-    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
-  },
-  output: [{ send_reply: true, stale: false, has_pending: false }],
-});
-
 const prepareCurrentMessengerReply = node({
   type: 'n8n-nodes-base.code',
   version: 2,
@@ -1262,38 +1185,33 @@ const prepareCurrentMessengerReply = node({
     position: [2864, 640],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const replies = $items('Route Channel Reply', 0);
-return $input.all().map((input, itemIndex) => {
-  const completion = input.json || {};
-  const reply = replies[itemIndex]?.json || {};
-  if (!completion.send_reply) {
-    return null;
-  }
-  return { json: { ...reply, turn_completion: completion } };
-}).filter(Boolean);`,
+      jsCode: `return $input.all().map((input) => ({ json: input.json || {} }));`,
     },
   },
-  output: [{ send_reply: true, access_token: 'PAGE_TOKEN', facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Assistant reply' } } }],
+  output: [{ send_reply: true, page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Assistant reply' } } }],
 });
 
-const sendFacebookReply = node({
+const sendMessengerReplyViaDjango = node({
   type: 'n8n-nodes-base.httpRequest',
   version: 4.4,
   config: {
-    name: 'Send Facebook Reply',
-    position: [2640, 640],
+    name: 'Send Messenger Reply via Django',
+    position: [2864, 640],
     parameters: {
       method: 'POST',
-      url: 'https://graph.facebook.com/v18.0/me/messages',
-      sendQuery: true,
-      queryParameters: { parameters: [{ name: 'access_token', value: expr('{{ $json.access_token }}') }] },
+      url: DJANGO_MESSENGER_AI_TURN_SEND_REPLY_URL_EXPR,
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Content-Type', value: 'application/json' }] },
       sendBody: true,
       specifyBody: 'json',
-      jsonBody: expr('{{ $json.facebook_body }}'),
+      jsonBody: expr('{{ { page_id: $json.page_id, psid: $json.psid, turn_token: $json.turn_token, input_sequence: $json.input_sequence || 0, reply_text: $json.reply_text || "", facebook_body: $json.facebook_body, facebook_bodies: $json.facebook_bodies || [] } }}'),
       options: { response: { response: { responseFormat: 'json' } }, timeout: 15000 },
     },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
-  output: [{ recipient_id: 'PSID123', message_id: 'mid.123' }],
+  output: [{ send_reply: true, stale: false, has_pending: false, sent: true }],
 });
 
 const returnWidgetReply = node({
@@ -1315,31 +1233,32 @@ const returnWidgetReply = node({
 });
 
 const sharedChannelReplyRoute = routeChannelReply
-  .onCase(0, completeMessengerTurn.to(authorizeMessengerSend).to(prepareCurrentMessengerReply).to(sendFacebookReply))
+  .onCase(0, prepareCurrentMessengerReply.to(sendMessengerReplyViaDjango))
   .onCase(1, returnWidgetReply);
 
 const forcedMessengerQuickReplyBranch = getForcedMessengerQuickReplies
   .to(attachForcedMessengerQuickRepliesInput)
-  .to(completeForcedMessengerQuickReplyTurn)
-  .to(authorizeForcedMessengerQuickReplySend)
   .to(prepareForcedMessengerQuickReplies)
-  .to(sendFacebookReply);
+  .to(sendMessengerReplyViaDjango);
 
 const djangoAiGatewayResponseRoute = routeDjangoAiGatewayResponse
   .onCase(0, forcedMessengerQuickReplyBranch)
   .onCase(1, prepareChannelReply.to(sharedChannelReplyRoute));
 
+const messengerAiGatewayErrorBranch = handleDjangoAiGatewayError
+  .to(resolveDjangoAiGatewayRoute)
+  .to(djangoAiGatewayResponseRoute);
+
 const messengerAiReplyBranch = callDjangoAiGateway
+  .onError(messengerAiGatewayErrorBranch)
   .to(attachDjangoAiGatewayInput)
   .to(resolveDjangoAiGatewayRoute)
   .to(djangoAiGatewayResponseRoute);
 
 const messengerQuickReplyBranch = getMessengerQuickReplies
   .to(attachMessengerQuickRepliesInput)
-  .to(completeMessengerQuickReplyTurn)
-  .to(authorizeMessengerQuickReplySend)
   .to(prepareMessengerQuickReplies)
-  .to(sendFacebookReply);
+  .to(sendMessengerReplyViaDjango);
 
 const sharedFallbackReplyBranch = prepareSharedFallback
   .to(prepareChannelReply)

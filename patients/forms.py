@@ -7,6 +7,7 @@ from .utils import normalize_phone
 _INPUT = "cf-input"
 _SELECT = "cf-select"
 _TEXTAREA = "cf-textarea"
+MIN_PATIENT_PHONE_DIGITS = 7
 
 
 class PatientForm(forms.ModelForm):
@@ -30,6 +31,8 @@ class PatientForm(forms.ModelForm):
         normalized = normalize_phone(phone)
         if not normalized:
             raise forms.ValidationError("Phone number is required.")
+        if len(normalized) < MIN_PATIENT_PHONE_DIGITS:
+            raise forms.ValidationError("Phone number must contain at least 7 digits.")
         qs = Patient.objects.filter(clinic=self.clinic, normalized_phone=normalized)
         if self.instance and self.instance.pk:
             qs = qs.exclude(pk=self.instance.pk)

@@ -1,4 +1,5 @@
 from datetime import time, timedelta
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -138,3 +139,89 @@ class AppointmentInvariantTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("patient_email", form.errors)
+
+    def test_staff_form_initializes_existing_appointment_in_clinic_timezone(self):
+        self.clinic.timezone = "America/Los_Angeles"
+        self.clinic.save(update_fields=["timezone"])
+        clinic_tz = ZoneInfo(self.clinic.timezone)
+        local_start = timezone.datetime(2026, 1, 10, 23, 30, tzinfo=clinic_tz)
+        appointment = Appointment.objects.create(
+            clinic=self.clinic,
+            patient=self.patient,
+            service=self.service,
+            starts_at=local_start,
+            ends_at=local_start + timedelta(minutes=30),
+        )
+
+        form = StaffAppointmentForm(self.clinic, instance=Appointment.objects.get(pk=appointment.pk))
+
+        self.assertEqual(form.fields["date"].initial, local_start.date())
+        self.assertEqual(form.fields["time"].initial, local_start.time().replace(second=0, microsecond=0))
+
+    def test_staff_form_rejects_invalid_status_transition(self):
+        target_date = timezone.localdate() + timedelta(days=1)
+        ClinicBusinessHour.objects.create(
+            clinic=self.clinic,
+            weekday=target_date.weekday(),
+            is_open=True,
+            open_time=time(9),
+            close_time=time(17),
+        )
+        starts_at = timezone.make_aware(timezone.datetime.combine(target_date, time(9)))
+        appointment = Appointment.objects.create(
+            clinic=self.clinic,
+            patient=self.patient,
+            service=self.service,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(minutes=30),
+            status=Appointment.STATUS_COMPLETED,
+        )
+
+        form = StaffAppointmentForm(
+            self.clinic,
+            data={
+                "patient_name": self.patient.full_name,
+                "patient_phone": self.patient.phone,
+                "patient_email": "patient@example.com",
+                "date": target_date.isoformat(),
+                "time": "09:00",
+                "service": self.service.id,
+                "status": Appointment.STATUS_PENDING,
+                "payment_state": Appointment.PAYMENT_UNPAID,
+                "source": Appointment.SOURCE_STAFF,
+                "reason": "",
+            },
+            instance=appointment,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("status", form.errors)
+
+    def test_staff_form_rejects_short_patient_phone(self):
+        target_date = timezone.localdate() + timedelta(days=1)
+        ClinicBusinessHour.objects.create(
+            clinic=self.clinic,
+            weekday=target_date.weekday(),
+            is_open=True,
+            open_time=time(9),
+            close_time=time(17),
+        )
+
+        form = StaffAppointmentForm(
+            self.clinic,
+            data={
+                "patient_name": "New Patient",
+                "patient_phone": "123456",
+                "patient_email": "new.patient@example.com",
+                "date": target_date.isoformat(),
+                "time": "09:00",
+                "service": self.service.id,
+                "status": Appointment.STATUS_PENDING,
+                "payment_state": Appointment.PAYMENT_UNPAID,
+                "source": Appointment.SOURCE_STAFF,
+                "reason": "",
+            },
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("patient_phone", form.errors)

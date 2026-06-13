@@ -29,12 +29,24 @@ class ServiceTests(TestCase):
             clinic=self.clinic,
             name="Consultation",
             duration_minutes=30,
-            price="500.00",
             is_active=True,
-            display_price=True,
         )
         self.client = Client()
         self.client.login(username="owner@test.com", password="pass")
+
+    def test_service_model_no_longer_exposes_pricing_fields(self):
+        field_names = {field.name for field in Service._meta.get_fields()}
+
+        self.assertNotIn("price", field_names)
+        self.assertNotIn("display_price", field_names)
+
+    def test_service_form_excludes_pricing_fields(self):
+        from services.forms import ServiceForm
+
+        form = ServiceForm(self.clinic)
+
+        self.assertNotIn("price", form.fields)
+        self.assertNotIn("display_price", form.fields)
 
     def test_service_edit_updates_fields(self):
         url = reverse("dashboard:edit_service", args=[self.service.id])
@@ -44,17 +56,15 @@ class ServiceTests(TestCase):
                 "name": "Updated Consultation",
                 "description": "Updated desc",
                 "duration_minutes": 45,
-                "price": "750.00",
                 "color": "#ff0000",
                 "is_active": "on",
-                "display_price": "on",
             },
         )
         self.assertEqual(response.status_code, 302)
         self.service.refresh_from_db()
         self.assertEqual(self.service.name, "Updated Consultation")
+        self.assertEqual(self.service.description, "Updated desc")
         self.assertEqual(self.service.duration_minutes, 45)
-        self.assertEqual(str(self.service.price), "750.00")
         self.assertEqual(self.service.color, "#ff0000")
 
     def test_service_default_color_uses_neon_aqua_primary(self):
@@ -62,7 +72,6 @@ class ServiceTests(TestCase):
             clinic=self.clinic,
             name="Neon Aqua Default Service",
             duration_minutes=20,
-            price="300.00",
         )
 
         self.assertEqual(service.color, "#06b6d4")
@@ -102,7 +111,6 @@ class ServiceTests(TestCase):
             {
                 "name": self.service.name,
                 "duration_minutes": 0,
-                "price": self.service.price,
                 "is_active": "on",
             },
         )
@@ -110,25 +118,15 @@ class ServiceTests(TestCase):
         # Model clean is not triggered by ORM save unless full_clean is called.
         # Let's test the form directly.
         from services.forms import ServiceForm
-        form = ServiceForm(self.clinic, {"duration_minutes": 0, "name": "X", "price": "1"})
+        form = ServiceForm(self.clinic, {"duration_minutes": 0, "name": "X"})
         self.assertFalse(form.is_valid())
         self.assertIn("duration_minutes", form.errors)
 
     def test_duration_validation_rejects_over_480(self):
         from services.forms import ServiceForm
-        form = ServiceForm(self.clinic, {"duration_minutes": 481, "name": "X", "price": "1"})
+        form = ServiceForm(self.clinic, {"duration_minutes": 481, "name": "X"})
         self.assertFalse(form.is_valid())
         self.assertIn("duration_minutes", form.errors)
-
-    def test_display_price_false_hides_price_in_widget_context(self):
-        self.service.display_price = False
-        self.service.save()
-        from widget.views import _booking_context
-        request = self.client.get("/").wsgi_request
-        ctx = _booking_context(self.clinic, request)
-        svc = ctx["services"].filter(pk=self.service.pk).first()
-        self.assertIsNotNone(svc)
-        self.assertFalse(svc.display_price)
 
     def test_service_clinic_isolation(self):
         other_service = Service.objects.create(clinic=self.other_clinic, name="Other Service", duration_minutes=30)
@@ -152,7 +150,6 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "New Service",
             "duration_minutes": 30,
-            "price": "100.00",
             "color": "#ff0000",
             "is_active": "on",
         })
@@ -164,7 +161,6 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "HTMX Service",
             "duration_minutes": 30,
-            "price": "100.00",
             "color": "#ff0000",
             "is_active": "on",
         }, HTTP_HX_REQUEST="true")
@@ -187,7 +183,6 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "Updated via HTMX",
             "duration_minutes": 30,
-            "price": "100.00",
             "color": "#ff0000",
             "is_active": "on",
         }, HTTP_HX_REQUEST="true")
@@ -294,7 +289,6 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "Consultation",
             "duration_minutes": 30,
-            "price": "100.00",
             "color": "#ff0000",
         }, HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 200)

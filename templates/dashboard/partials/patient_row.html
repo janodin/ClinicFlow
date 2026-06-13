@@ -2,14 +2,14 @@
   <td class="p-5">
     <a href="{% url 'dashboard:patient_detail' patient.id %}" class="flex items-center gap-3">
       <span class="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--cf-brand-soft)] text-sm font-semibold text-[var(--cf-brand)]">{{ patient.full_name|first }}</span>
-      <span>
+      <span class="min-w-0 max-w-[14rem] break-all">
         <span class="block font-semibold text-[var(--cf-ink)]">{{ patient.full_name }}</span>
         <span class="cf-muted text-xs">Patient #{{ patient.id }}</span>
       </span>
     </a>
   </td>
-  <td>{{ patient.formatted_phone }}</td>
-  <td>{{ patient.email|default:"No email" }}</td>
+  <td class="whitespace-nowrap text-[var(--cf-muted)]">{{ patient.formatted_phone }}</td>
+  <td class="max-w-[14rem] break-all text-[var(--cf-muted)]">{{ patient.email|default:"No email" }}</td>
   <td>{{ patient.created_at|date:"M Y" }}</td>
   <td><span class="cf-badge cf-badge-active"><i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Active</span></td>
   <td class="pr-5">

@@ -3,7 +3,7 @@
 {% block title %}Settings{% endblock %}
 {% block content %}
 {% active_membership_role as role %}
-<div x-data="{tab: window.location.search.includes('tab=') ? new URLSearchParams(window.location.search).get('tab') : 'general'}" class="cf-page">
+<div x-data="{tab: '{{ active_tab|default:'general'|escapejs }}'}" class="cf-page">
   <div class="cf-page-header">
     <div><h1 class="cf-page-title ui-page-title">Settings</h1><p class="cf-page-description">Manage clinic profile, booking behavior, and hours.</p></div>
   </div>
@@ -77,12 +77,14 @@
                     <label for="settings-close-time-{{ weekday }}" class="sr-only">Close time</label>
                     <input id="settings-close-time-{{ weekday }}" type="time" name="close_time_{{ weekday }}" value="{% if h %}{{ h.close_time|time:'H:i' }}{% else %}17:00{% endif %}" class="cf-input">
                   </td>
-                  <td class="p-4 flex gap-2">
-                    <label for="settings-break-start-{{ weekday }}" class="sr-only">Break start</label>
-                    <input id="settings-break-start-{{ weekday }}" type="time" name="break_start_{{ weekday }}" value="{% if h and h.break_start %}{{ h.break_start|time:'H:i' }}{% else %}12:00{% endif %}" class="cf-input">
-                    <span class="self-center text-[var(--cf-muted)]">to</span>
-                    <label for="settings-break-end-{{ weekday }}" class="sr-only">Break end</label>
-                    <input id="settings-break-end-{{ weekday }}" type="time" name="break_end_{{ weekday }}" value="{% if h and h.break_end %}{{ h.break_end|time:'H:i' }}{% else %}13:00{% endif %}" class="cf-input">
+                  <td class="p-4">
+                    <div class="flex min-w-[14rem] gap-2">
+                      <label for="settings-break-start-{{ weekday }}" class="sr-only">Break start</label>
+                      <input id="settings-break-start-{{ weekday }}" type="time" name="break_start_{{ weekday }}" value="{% if h and h.break_start %}{{ h.break_start|time:'H:i' }}{% else %}12:00{% endif %}" class="cf-input">
+                      <span class="self-center text-[var(--cf-muted)]">to</span>
+                      <label for="settings-break-end-{{ weekday }}" class="sr-only">Break end</label>
+                      <input id="settings-break-end-{{ weekday }}" type="time" name="break_end_{{ weekday }}" value="{% if h and h.break_end %}{{ h.break_end|time:'H:i' }}{% else %}13:00{% endif %}" class="cf-input">
+                    </div>
                   </td>
                 </tr>
                 {% endwith %}
@@ -185,7 +187,7 @@
           <label for="settings-slot-service" class="cf-label">Service</label>
           <select id="settings-slot-service" name="service" required class="cf-select">
             <option value="">Select service</option>
-            {% for service in clinic.services.all %}<option value="{{ service.id }}" {% if slot_service.id == service.id %}selected{% endif %}>{{ service.name }}</option>{% endfor %}
+            {% for service in slot_preview_services %}<option value="{{ service.id }}" {% if slot_service.id == service.id %}selected{% endif %}>{{ service.name }}</option>{% endfor %}
           </select>
         </div>
         <div class="cf-field">

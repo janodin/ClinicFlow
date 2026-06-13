@@ -5,13 +5,14 @@ from django import forms
 from django.utils import timezone
 
 from appointments.models import Appointment, AppointmentNote
-from patients.models import Patient
+from patients.utils import normalize_phone
 from scheduling.utils import validate_slot
 
 
 _INPUT = "cf-input"
 _SELECT = "cf-select"
 _TEXTAREA = "cf-textarea"
+MIN_PATIENT_PHONE_DIGITS = 7
 
 
 class GuestBookingForm(forms.Form):
@@ -51,11 +52,27 @@ class StaffAppointmentForm(forms.ModelForm):
         self.clinic = clinic
         self.fields["service"].queryset = clinic.services.filter(is_active=True, is_archived=False)
         if self.instance and self.instance.pk:
-            self.fields["date"].initial = self.instance.starts_at.date()
-            self.fields["time"].initial = self.instance.starts_at.time()
+            starts_at = self.instance.starts_at.astimezone(ZoneInfo(self.clinic.timezone))
+            self.fields["date"].initial = starts_at.date()
+            self.fields["time"].initial = starts_at.time().replace(second=0, microsecond=0)
             self.fields["patient_name"].initial = self.instance.patient.full_name
             self.fields["patient_phone"].initial = self.instance.patient.phone
             self.fields["patient_email"].initial = self.instance.patient.email
+
+    def clean_patient_phone(self):
+        phone = self.cleaned_data.get("patient_phone", "")
+        if len(normalize_phone(phone)) < MIN_PATIENT_PHONE_DIGITS:
+            raise forms.ValidationError("Phone number must contain at least 7 digits.")
+        return phone
+
+    def clean_status(self):
+        status = self.cleaned_data.get("status")
+        if self.instance and self.instance.pk and status != self.instance.status:
+            if not self.instance.can_transition_to(status):
+                raise forms.ValidationError(
+                    f"Cannot change status from {self.instance.get_status_display()} to {dict(Appointment.STATUS_CHOICES).get(status)}."
+                )
+        return status
 
     def clean(self):
         cleaned_data = super().clean()

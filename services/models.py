@@ -1,7 +1,4 @@
-from decimal import Decimal
-
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
 from django.db import models
 
 from clinics.models import Clinic, TimeStampedModel
@@ -12,13 +9,8 @@ class Service(TimeStampedModel):
     name = models.CharField(max_length=160)
     description = models.TextField(blank=True)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
-    price = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal("0.00"),
-        validators=[MinValueValidator(Decimal("0.00"))]
-    )
     is_active = models.BooleanField(default=True)
     is_archived = models.BooleanField(default=False)
-    display_price = models.BooleanField(default=True)
     color = models.CharField(max_length=7, default="#06b6d4")
 
     class Meta:

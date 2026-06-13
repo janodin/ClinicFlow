@@ -66,7 +66,7 @@
         <label class="cf-label" for="{{ form.app_secret.id_for_label }}">{{ form.app_secret.label }}</label>
         <div class="relative">
           {{ form.app_secret }}
-          <button type="button" class="cf-secret-toggle absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--cf-muted)] transition hover:text-[var(--cf-brand)] focus:outline-none" data-secret-toggle data-secret-field="app_secret" data-secret-url="{% url 'dashboard:messenger_secret_reveal' %}" data-secret-mask="************" data-has-secret="{% if connection and connection.app_secret %}true{% else %}false{% endif %}" data-show-label="Show Facebook App Secret" data-hide-label="Hide Facebook App Secret" aria-label="Show Facebook App Secret" aria-pressed="false">
+          <button type="button" class="cf-secret-toggle absolute top-1/2 right-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--cf-muted)] transition hover:text-[var(--cf-brand)] focus:outline-none" data-secret-toggle data-secret-field="app_secret" data-secret-url="{% url 'dashboard:messenger_secret_reveal' %}" data-secret-mask="************" data-has-secret="{% if connection and connection.app_secret %}true{% else %}false{% endif %}" data-show-label="Show Facebook App Secret" data-hide-label="Hide Facebook App Secret" aria-label="Show Facebook App Secret" aria-pressed="false">
             <i data-lucide="eye" class="h-4 w-4" aria-hidden="true"></i>
           </button>
         </div>
@@ -86,7 +86,7 @@
         <label class="cf-label" for="{{ form.page_access_token.id_for_label }}">{{ form.page_access_token.label }}</label>
         <div class="relative">
           {{ form.page_access_token }}
-          <button type="button" class="cf-secret-toggle absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--cf-muted)] transition hover:text-[var(--cf-brand)] focus:outline-none" data-secret-toggle data-secret-field="page_access_token" data-secret-url="{% url 'dashboard:messenger_secret_reveal' %}" data-secret-mask="************" data-has-secret="{% if connection and connection.page_access_token %}true{% else %}false{% endif %}" data-show-label="Show Page Access Token" data-hide-label="Hide Page Access Token" aria-label="Show Page Access Token" aria-pressed="false">
+          <button type="button" class="cf-secret-toggle absolute top-1/2 right-1.5 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--cf-muted)] transition hover:text-[var(--cf-brand)] focus:outline-none" data-secret-toggle data-secret-field="page_access_token" data-secret-url="{% url 'dashboard:messenger_secret_reveal' %}" data-secret-mask="************" data-has-secret="{% if connection and connection.page_access_token %}true{% else %}false{% endif %}" data-show-label="Show Page Access Token" data-hide-label="Hide Page Access Token" aria-label="Show Page Access Token" aria-pressed="false">
             <i data-lucide="eye" class="h-4 w-4" aria-hidden="true"></i>
           </button>
         </div>
@@ -160,9 +160,9 @@
 
     <div class="cf-field">
       <p class="cf-label">Meta Callback URL</p>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2 max-sm:flex-col max-sm:items-stretch">
         <div class="cf-mono cf-mobile-break break-all rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0">{{ meta_n8n_webhook_url }}</div>
-        <button @click="navigator.clipboard.writeText('{{ meta_n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+        <button @click="navigator.clipboard.writeText('{{ meta_n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm w-full sm:w-auto" type="button">
           <i data-lucide="copy" class="h-4 w-4"></i>
           <span class="copy-label">Copy</span>
         </button>
@@ -172,9 +172,9 @@
 
     <div class="cf-field">
       <p class="cf-label">Django Webhook URL</p>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2 max-sm:flex-col max-sm:items-stretch">
         <div class="cf-mono cf-mobile-break break-all rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0">{{ n8n_webhook_url }}</div>
-        <button @click="navigator.clipboard.writeText('{{ n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm" type="button">
+        <button @click="navigator.clipboard.writeText('{{ n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm w-full sm:w-auto" type="button">
           <i data-lucide="copy" class="h-4 w-4"></i>
           <span class="copy-label">Copy</span>
         </button>

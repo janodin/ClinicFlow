@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
@@ -12,6 +12,12 @@ from patients.models import normalize_phone
 from scheduling.models import Weekday
 from scheduling.utils import generate_slots, validate_slot
 from widget.views import PAST_APPOINTMENT_TIME_MESSAGE, _process_guest_booking
+from yakap.services import (
+    cancel_unposted_yakap_snapshot,
+    is_public_yakap_request_allowed,
+    public_yakap_badge_label,
+    validate_yakap_appointment_cancellation,
+)
 
 from .defaults import DEFAULT_AI_FALLBACK_MESSAGE, DEFAULT_MESSENGER_AI_PROMPT
 from .models import MessengerConnection, MessengerConversation
@@ -87,14 +93,46 @@ def _website_ai_disabled_response_for_clinic(clinic):
     return None
 
 
-def _service_payload(service):
+def _yakap_payload_for_clinic(clinic):
+    try:
+        yakap_settings = clinic.yakap_settings
+    except ObjectDoesNotExist:
+        return {"is_enabled": False}
+    if not yakap_settings.is_enabled:
+        return {"is_enabled": False}
+    return {
+        "is_enabled": True,
+        "program_label": yakap_settings.program_label,
+        "public_promo_headline": yakap_settings.public_promo_headline,
+        "public_promo_body": yakap_settings.public_promo_body,
+        "public_disclaimer": yakap_settings.public_disclaimer,
+    }
+
+
+def _enabled_yakap_settings_for_clinic(clinic):
+    try:
+        yakap_settings = clinic.yakap_settings
+    except ObjectDoesNotExist:
+        return None
+    return yakap_settings if yakap_settings.is_enabled else None
+
+
+def _service_yakap_rule_payload(clinic, service, yakap_settings):
+    if not yakap_settings or not is_public_yakap_request_allowed(clinic, service, settings=yakap_settings):
+        return None
+    return {
+        "can_request_check": True,
+        "public_badge_label": public_yakap_badge_label(service.yakap_rule),
+    }
+
+
+def _service_payload(service, include_yakap=False, yakap_settings=None):
     return {
         "id": service.id,
         "name": service.name,
         "description": service.description,
         "duration_minutes": service.effective_duration(),
-        "price": str(service.price),
-        "display_price": service.display_price,
+        "yakap_rule": _service_yakap_rule_payload(service.clinic, service, yakap_settings) if include_yakap else None,
     }
 
 
@@ -201,17 +239,16 @@ def _appointment_summary(clinic, appointment):
     }
 
 
-def _verified_appointment_for_clinic(clinic, reference_code, phone):
+def _verified_appointment_for_clinic(clinic, reference_code, phone, *, lock=False):
     reference = (reference_code or "").strip().upper()
     normalized_phone = normalize_phone(phone)
     if not reference or not normalized_phone:
         return None, "Please provide the appointment reference code and phone number."
 
-    appointment = (
-        clinic.appointments.select_related("patient", "service")
-        .filter(reference_code__iexact=reference, patient__normalized_phone=normalized_phone)
-        .first()
-    )
+    appointments = clinic.appointments.select_related("patient", "service")
+    if lock:
+        appointments = appointments.select_for_update()
+    appointment = appointments.filter(reference_code__iexact=reference, patient__normalized_phone=normalized_phone).first()
     if not appointment:
         return None, APPOINTMENT_LOOKUP_ERROR
     if appointment.starts_at <= timezone.now():
@@ -250,14 +287,14 @@ def build_ai_context(page_id):
         return {"found": False}
 
     clinic = connection.clinic
-    services = clinic.services.filter(is_active=True, is_archived=False).order_by("name")
+    services = clinic.services.filter(is_active=True, is_archived=False).select_related("yakap_rule", "yakap_rule__category").order_by("name")
     faqs = clinic.faqs.filter(is_active=True).order_by("question")
     clinic_now = timezone.now().astimezone(ZoneInfo(clinic.timezone))
+    yakap = _yakap_payload_for_clinic(clinic)
+    yakap_settings = _enabled_yakap_settings_for_clinic(clinic)
     return {
         "found": True,
         "page_id": connection.page_id,
-        "page_token": connection.page_access_token,
-        "page_token_available": bool(connection.page_access_token),
         "current_time": {
             "timezone": clinic.timezone,
             "now": clinic_now.isoformat(),
@@ -272,7 +309,12 @@ def build_ai_context(page_id):
             "timezone": clinic.timezone,
         },
         "ai": _ai_payload_for_clinic(clinic),
-        "services": [_service_payload(service) for service in services],
+        "yakap": yakap,
+        "services": [
+            _service_payload(service, include_yakap=yakap["is_enabled"], yakap_settings=yakap_settings)
+            for service in services
+        ],
+        "providers": [],
         "faqs": [{"question": faq.question, "answer": faq.answer} for faq in faqs],
         "business_hours": _business_hours_payload(clinic),
         "unavailable_dates": _unavailable_dates_payload(clinic),
@@ -283,9 +325,11 @@ def build_widget_ai_context(clinic_slug):
     clinic = get_clinic_for_slug(clinic_slug)
     if not clinic:
         return {"found": False}
-    services = clinic.services.filter(is_active=True, is_archived=False).order_by("name")
+    services = clinic.services.filter(is_active=True, is_archived=False).select_related("yakap_rule", "yakap_rule__category").order_by("name")
     faqs = clinic.faqs.filter(is_active=True).order_by("question")
     clinic_now = timezone.now().astimezone(ZoneInfo(clinic.timezone))
+    yakap = _yakap_payload_for_clinic(clinic)
+    yakap_settings = _enabled_yakap_settings_for_clinic(clinic)
     return {
         "found": True,
         "channel": "widget",
@@ -304,7 +348,12 @@ def build_widget_ai_context(clinic_slug):
             "timezone": clinic.timezone,
         },
         "ai": _ai_payload_for_clinic(clinic),
-        "services": [_service_payload(service) for service in services],
+        "yakap": yakap,
+        "services": [
+            _service_payload(service, include_yakap=yakap["is_enabled"], yakap_settings=yakap_settings)
+            for service in services
+        ],
+        "providers": [],
         "faqs": [{"question": faq.question, "answer": faq.answer} for faq in faqs],
         "business_hours": _business_hours_payload(clinic),
         "unavailable_dates": _unavailable_dates_payload(clinic),
@@ -315,8 +364,9 @@ def match_services(page_id, query):
     connection = get_connection_for_page(page_id)
     if not connection:
         return {"found": False, "matches": []}
+    clinic = connection.clinic
     query_text = (query or "").strip().lower()
-    services = connection.clinic.services.filter(is_active=True, is_archived=False).order_by("name")
+    services = clinic.services.filter(is_active=True, is_archived=False).order_by("name")
     if query_text:
         matches = [
             service for service in services
@@ -324,7 +374,15 @@ def match_services(page_id, query):
         ]
     else:
         matches = list(services)
-    return {"found": True, "matches": [_service_payload(service) for service in matches]}
+    yakap = _yakap_payload_for_clinic(clinic)
+    yakap_settings = _enabled_yakap_settings_for_clinic(clinic)
+    return {
+        "found": True,
+        "matches": [
+            _service_payload(service, include_yakap=yakap["is_enabled"], yakap_settings=yakap_settings)
+            for service in matches
+        ],
+    }
 
 
 def match_widget_services(clinic_slug, query):
@@ -343,7 +401,15 @@ def match_widget_services(clinic_slug, query):
         ]
     else:
         matches = list(services)
-    return {"found": True, "matches": [_service_payload(service) for service in matches]}
+    yakap = _yakap_payload_for_clinic(clinic)
+    yakap_settings = _enabled_yakap_settings_for_clinic(clinic)
+    return {
+        "found": True,
+        "matches": [
+            _service_payload(service, include_yakap=yakap["is_enabled"], yakap_settings=yakap_settings)
+            for service in matches
+        ],
+    }
 
 
 def _slots_for_date(clinic, service, date_value):
@@ -359,7 +425,7 @@ def check_availability(page_id, service_id, preferred_starts_at=None, preferred_
 
 def _check_availability_for_clinic(clinic, service_id, preferred_starts_at=None, preferred_date=None):
     try:
-        requested_start = _parse_datetime(preferred_starts_at) if preferred_starts_at else None
+        requested_start = _parse_clinic_datetime(clinic, preferred_starts_at) if preferred_starts_at else None
         if requested_start:
             target_date = requested_start.astimezone(ZoneInfo(clinic.timezone)).date()
         elif preferred_date:
@@ -473,17 +539,23 @@ def _cancel_verified_appointment_for_clinic(clinic, reference_code, phone, confi
     if confirmed is not True:
         return {"cancelled": False, "error": CONFIRMATION_REQUIRED_ERROR}
 
-    with transaction.atomic():
-        locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
-        appointment, error = _verified_appointment_for_clinic(locked_clinic, reference_code, phone)
-        if error:
-            return {"cancelled": False, "error": error}
-        if not appointment.can_transition_to(Appointment.STATUS_CANCELLED):
-            return {"cancelled": False, "error": "This appointment cannot be cancelled through the assistant."}
-        appointment.status = Appointment.STATUS_CANCELLED
-        appointment.cancellation_reason = str(reason or "").strip()[:500]
-        appointment.save(update_fields=["status", "cancellation_reason", "updated_at"])
-        return {"cancelled": True, "appointment": _appointment_summary(locked_clinic, appointment)}
+    try:
+        with transaction.atomic():
+            locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+            appointment, error = _verified_appointment_for_clinic(locked_clinic, reference_code, phone, lock=True)
+            if error:
+                return {"cancelled": False, "error": error}
+            if not appointment.can_transition_to(Appointment.STATUS_CANCELLED):
+                return {"cancelled": False, "error": "This appointment cannot be cancelled through the assistant."}
+            validate_yakap_appointment_cancellation(appointment)
+            appointment.status = Appointment.STATUS_CANCELLED
+            appointment.cancellation_reason = str(reason or "").strip()[:500]
+            appointment.save(update_fields=["status", "cancellation_reason", "updated_at"])
+            cancel_unposted_yakap_snapshot(appointment)
+            summary = _appointment_summary(locked_clinic, appointment)
+    except ValidationError as exc:
+        return {"cancelled": False, "error": _validation_error_text(exc)}
+    return {"cancelled": True, "appointment": summary}
 
 
 def reschedule_verified_appointment(page_id, reference_code, phone, starts_at, confirmed, psid="", turn_token="", input_sequence=None):

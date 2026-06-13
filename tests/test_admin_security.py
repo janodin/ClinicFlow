@@ -53,3 +53,19 @@ def test_non_superuser_staff_cannot_access_messenger_connection_admin(client):
     response = client.get(reverse("admin:messenger_messengerconnection_changelist"))
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_non_superuser_staff_cannot_access_user_admin(client):
+    staff = User.objects.create_user(
+        username="staff-user-admin@example.com",
+        email="staff-user-admin@example.com",
+        password="pass",
+        is_staff=True,
+    )
+    staff.user_permissions.add(Permission.objects.get(codename="view_user"))
+    client.force_login(staff)
+
+    response = client.get(reverse("admin:accounts_user_changelist"))
+
+    assert response.status_code == 403

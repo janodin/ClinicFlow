@@ -45,7 +45,7 @@
             <p class="text-sm font-semibold text-[var(--cf-ink)]">Provider details</p>
             <p class="mt-1 text-xs text-[var(--cf-muted)]">Models refresh automatically from the selected provider.</p>
           </div>
-          <span class="cf-badge cf-badge-info self-start max-w-full overflow-hidden text-ellipsis sm:ml-auto" data-ai-provider-model-status role="status" aria-live="polite">Models will load after provider details are entered.</span>
+          <span class="cf-badge cf-badge-info self-start max-w-full whitespace-normal break-words text-left leading-snug sm:ml-auto" data-ai-provider-model-status role="status" aria-live="polite">Models will load after provider details are entered.</span>
         </div>
         <div data-ai-provider-layout="responsive-grid" class="grid gap-4 lg:grid-cols-2">
           <div data-ai-provider-field="provider" class="cf-field order-1 lg:order-1">
@@ -188,7 +188,7 @@
             {% endif %}
           </div>
         </div>
-        <p class="mt-3 text-xs text-[var(--cf-muted)]">Tone affects wording only. Services, prices, availability, booking rules, and safety checks still come from KliniAssist.</p>
+        <p class="mt-3 text-xs text-[var(--cf-muted)]">Tone affects wording only. Services, availability, booking rules, and safety checks still come from KliniAssist.</p>
       </div>
 
       <div class="cf-field">
@@ -203,7 +203,7 @@
           </button>
         </div>
         {{ ai_form.instructions }}
-        <p class="mt-1 text-xs text-[var(--cf-muted)]">Use this for broader assistant behavior and clinic policies. Tone is controlled above. Services, prices, and availability still come from KliniAssist.</p>
+        <p class="mt-1 text-xs text-[var(--cf-muted)]">Use this for broader assistant behavior and clinic policies. Tone is controlled above. Services and availability still come from KliniAssist.</p>
         {% if ai_form.instructions.errors %}
           <p class="text-sm text-red-600 mt-1">{{ ai_form.instructions.errors.0 }}</p>
         {% endif %}
@@ -429,7 +429,7 @@
           button.type = 'button';
           button.tabIndex = -1;
           button.id = modelOptionId(role, index);
-          button.className = 'block w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--cf-ink)] hover:bg-[var(--cf-surface-muted)]';
+          button.className = 'block w-full break-words whitespace-normal rounded-lg px-3 py-2 text-left text-sm text-[var(--cf-ink)] hover:bg-[var(--cf-surface-muted)]';
           button.setAttribute('data-model-option', model.id);
           button.setAttribute('role', 'option');
           button.setAttribute('aria-selected', String(controls[role].value.value === model.id));

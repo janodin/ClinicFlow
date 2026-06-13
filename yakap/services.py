@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.db.models import Case, DecimalField, F, Sum, When
 from django.utils import timezone
 
+from appointments.models import Appointment
+
 from .models import (
     AppointmentYakapSnapshot,
     ClinicYakapSettings,
@@ -32,10 +34,21 @@ YAKAP_LEDGER_SERVICE_RULE_ALLOWED_STATUSES = {
     ServiceYakapRule.STATUS_POSSIBLY_COVERED,
     ServiceYakapRule.STATUS_REQUIRES_VERIFICATION,
 }
+YAKAP_PUBLIC_REQUEST_ALLOWED_STATUSES = {
+    ServiceYakapRule.STATUS_COVERED,
+    ServiceYakapRule.STATUS_POSSIBLY_COVERED,
+    ServiceYakapRule.STATUS_REQUIRES_VERIFICATION,
+}
+YAKAP_PUBLIC_BADGE_DEFAULT = "YAKAP check available"
 YAKAP_LEDGER_APPOINTMENT_ALLOWED_STATUSES = {
     AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
     AppointmentYakapSnapshot.STATUS_POSTED,
 }
+YAKAP_LEDGER_APPOINTMENT_LIFECYCLE_ALLOWED_STATUSES = {
+    Appointment.STATUS_CONFIRMED,
+    Appointment.STATUS_COMPLETED,
+}
+YAKAP_CANCEL_REQUIRES_REVERSAL_MESSAGE = "Reverse YAKAP usage before cancelling this appointment."
 
 
 def yakap_verification_freshness(profile, *, settings=None, now=None):
@@ -68,6 +81,8 @@ def yakap_verification_freshness(profile, *, settings=None, now=None):
 def validate_yakap_ledger_posting(entry, appointment, profile, *, settings=None, confirm_stale_verification=False):
     if entry.entry_type == YakapLedgerEntry.TYPE_REVERSAL:
         return
+    if appointment.status not in YAKAP_LEDGER_APPOINTMENT_LIFECYCLE_ALLOWED_STATUSES:
+        raise ValidationError("Only confirmed or completed appointments can receive YAKAP usage.")
     if profile is None or profile.pk is None:
         raise ValidationError("Patient YAKAP profile must be active before posting usage.")
     if profile.status not in YAKAP_LEDGER_PROFILE_ALLOWED_STATUSES:
@@ -114,6 +129,38 @@ def ensure_default_yakap_setup(clinic):
 def yakap_profile_for_patient(patient):
     profile, _created = PatientYakapProfile.objects.get_or_create(clinic=patient.clinic, patient=patient)
     return profile
+
+
+def public_yakap_badge_label(rule):
+    label = (getattr(rule, "public_badge_label", "") or "").strip()
+    return label or YAKAP_PUBLIC_BADGE_DEFAULT
+
+
+def is_public_yakap_request_allowed(clinic, service, *, settings=None):
+    if service is None or service.clinic_id != clinic.id:
+        return False
+    if not service.is_active or service.is_archived:
+        return False
+    if settings is None:
+        try:
+            settings = clinic.yakap_settings
+        except ClinicYakapSettings.DoesNotExist:
+            return False
+    if settings.clinic_id != clinic.id:
+        return False
+    if not settings.is_enabled:
+        return False
+    try:
+        rule = service.yakap_rule
+    except ServiceYakapRule.DoesNotExist:
+        return False
+    if rule.clinic_id != clinic.id:
+        return False
+    if rule.coverage_status not in YAKAP_PUBLIC_REQUEST_ALLOWED_STATUSES:
+        return False
+    if not rule.category_id or rule.category.clinic_id != clinic.id or not rule.category.is_active:
+        return False
+    return True
 
 
 def _as_local_date(clinic, value):
@@ -270,3 +317,51 @@ def create_yakap_audit_event(*, clinic, actor, action, obj, summary):
         object_id=str(obj.pk),
         summary=summary,
     )
+
+
+def appointment_has_yakap_ledger(appointment):
+    return appointment.yakap_ledger_entries.exists()
+
+
+def patient_has_yakap_history(patient):
+    return (
+        hasattr(patient, "yakap_profile")
+        or patient.yakap_ledger_entries.exists()
+        or patient.yakap_credit_line_periods.exists()
+        or patient.appointments.filter(yakap_snapshot__isnull=False).exists()
+    )
+
+
+def validate_yakap_appointment_cancellation(appointment):
+    if appointment_has_yakap_ledger(appointment):
+        raise ValidationError(YAKAP_CANCEL_REQUIRES_REVERSAL_MESSAGE)
+    try:
+        snapshot = appointment.yakap_snapshot
+    except AppointmentYakapSnapshot.DoesNotExist:
+        return None
+    if snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_POSTED:
+        raise ValidationError(YAKAP_CANCEL_REQUIRES_REVERSAL_MESSAGE)
+    return snapshot
+
+
+def cancel_unposted_yakap_snapshot(appointment, *, actor=None):
+    try:
+        snapshot = appointment.yakap_snapshot
+    except AppointmentYakapSnapshot.DoesNotExist:
+        return None
+    if snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_POSTED:
+        raise ValidationError(YAKAP_CANCEL_REQUIRES_REVERSAL_MESSAGE)
+    snapshot.coverage_status = AppointmentYakapSnapshot.STATUS_CANCELLED
+    snapshot.requested = False
+    snapshot.verified_at = None
+    snapshot.verified_by = None
+    snapshot.save(update_fields=["coverage_status", "requested", "verified_at", "verified_by", "updated_at"])
+    if actor:
+        create_yakap_audit_event(
+            clinic=appointment.clinic,
+            actor=actor,
+            action=YakapAuditEvent.ACTION_APPOINTMENT_STATUS_CHANGED,
+            obj=snapshot,
+            summary="Cancelled YAKAP request because the appointment was cancelled.",
+        )
+    return snapshot

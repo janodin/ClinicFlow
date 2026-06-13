@@ -35,6 +35,7 @@ def call_assistant_webhook(clinic, message, history, session_id, conversation_id
         },
         headers=headers,
         timeout=getattr(settings, "ASSISTANT_N8N_TIMEOUT_SECONDS", 12),
+        allow_redirects=False,
     )
     response.raise_for_status()
     data = response.json()

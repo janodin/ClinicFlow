@@ -1,5 +1,5 @@
   <div class="cf-page-header">
-    <div class="flex min-w-0 items-center gap-4">
+    <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
       <span class="grid h-14 w-14 place-items-center rounded-full bg-[var(--cf-brand-soft)] text-xl font-black text-[var(--cf-brand)]" aria-hidden="true">{{ patient.full_name|first }}</span>
       <div class="min-w-0">
         <h1 class="cf-page-title ui-page-title cf-mobile-break">{{ patient.full_name }}</h1>
@@ -105,7 +105,7 @@
       </div>
       <span class="cf-badge cf-badge-info">Estimated</span>
     </div>
-    {% if yakap_profile_form %}
+    {% if yakap_profile_form and can_manage_daily_ops %}
       <form method="post" action="{% url 'dashboard:update_patient_yakap_profile' patient.id %}" class="mt-4 grid gap-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4">
         {% csrf_token %}
         {% for error in yakap_profile_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
@@ -181,7 +181,7 @@
                   <p class="cf-mobile-break font-semibold text-[var(--cf-ink)]">{{ entry.category.name }} &middot; {{ entry.get_entry_type_display }}</p>
                   <p class="cf-mobile-break text-xs text-[var(--cf-muted)]">{{ entry.get_verification_status_display }}{% if entry.appointment_id %} &middot; Appointment #{{ entry.appointment_id }}{% endif %}</p>
                 </div>
-                <span class="tabular-nums text-[var(--cf-ink)]">{{ entry.amount|floatformat:2 }}</span>
+                <span class="tabular-nums text-[var(--cf-ink)]">{{ entry.signed_amount|floatformat:2 }}</span>
               </div>
             {% endfor %}
           </div>
@@ -198,7 +198,7 @@
   </div>
 
   <section class="grid gap-4">
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
       <h2 id="visit-history-heading" tabindex="-1" class="cf-section-title">Visit History</h2>
       <div id="visit-history-summary" class="cf-faq-summary" aria-label="Visit history summary">
         <span class="cf-faq-summary-metric">{{ kpi_total }} total</span>

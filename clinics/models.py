@@ -1,6 +1,7 @@
 import re
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
 from django.utils.text import slugify
@@ -80,9 +81,15 @@ class Clinic(TimeStampedModel):
     requires_onboarding = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
+    def clean(self):
+        super().clean()
+        if self.default_appointment_duration < 1 or self.default_appointment_duration > 480:
+            raise ValidationError({"default_appointment_duration": "Default appointment duration must be between 1 and 480 minutes."})
+
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.name)
+        self.full_clean()
         super().save(*args, **kwargs)
 
     def __str__(self):

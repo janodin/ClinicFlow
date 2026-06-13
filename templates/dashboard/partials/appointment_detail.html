@@ -10,7 +10,7 @@
     </div>
     <div class="cf-modal-body space-y-5">
       <div class="grid gap-4 md:grid-cols-2">
-        <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
+        <div class="min-w-0 rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
           <p class="cf-label mb-1">Patient</p>
           <p class="break-words text-[var(--cf-ink)] font-[700]">{{ appointment.patient.full_name }}</p>
           <p class="break-words text-sm text-[var(--cf-muted)]">{{ appointment.patient.phone }}</p>
@@ -136,6 +136,21 @@
             <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="shield-check" class="h-4 w-4"></i>Update YAKAP Status</button>
           </div>
         </form>
+        {% if yakap_ledger_blockers %}
+          <div class="mt-4 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-4">
+            {% for error in yakap_ledger_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+            {% for field in yakap_ledger_form %}
+              {% for error in field.errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+            {% endfor %}
+            <p class="cf-label">YAKAP checklist</p>
+            <ul class="mt-2 space-y-2 text-sm text-[var(--cf-muted)]">
+              {% for blocker in yakap_ledger_blockers %}
+                <li class="flex gap-2"><span aria-hidden="true">-</span><span>{{ blocker }}</span></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+        {% if yakap_can_post_ledger %}
         <form method="post" action="{% url 'dashboard:appointment_yakap_ledger' appointment.id %}" class="mt-4 grid gap-3" hx-post="{% url 'dashboard:appointment_yakap_ledger' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
           {% csrf_token %}
           {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
@@ -146,20 +161,85 @@
               {{ yakap_ledger_form.category }}
               {% if yakap_ledger_form.category.errors %}<p class="cf-error">{{ yakap_ledger_form.category.errors.0 }}</p>{% endif %}
             </div>
+            {% if can_manage_yakap_settings %}
             <div class="cf-field">
               <label for="{{ yakap_ledger_form.entry_type.id_for_label }}" class="cf-label">{{ yakap_ledger_form.entry_type.label }}</label>
               {{ yakap_ledger_form.entry_type }}
               {% if yakap_ledger_form.entry_type.errors %}<p class="cf-error">{{ yakap_ledger_form.entry_type.errors.0 }}</p>{% endif %}
             </div>
+            {% endif %}
+            {% if not can_manage_yakap_settings %}
+              <input type="hidden" name="entry_type" value="service_usage">
+              <input type="hidden" name="verification_status" value="verified">
+            {% endif %}
             <div class="cf-field">
               <label for="{{ yakap_ledger_form.amount.id_for_label }}" class="cf-label">{{ yakap_ledger_form.amount.label }}</label>
               {{ yakap_ledger_form.amount }}
               {% if yakap_ledger_form.amount.errors %}<p class="cf-error">{{ yakap_ledger_form.amount.errors.0 }}</p>{% endif %}
             </div>
+            {% if can_manage_yakap_settings %}
             <div class="cf-field">
               <label for="{{ yakap_ledger_form.verification_status.id_for_label }}" class="cf-label">{{ yakap_ledger_form.verification_status.label }}</label>
               {{ yakap_ledger_form.verification_status }}
               {% if yakap_ledger_form.verification_status.errors %}<p class="cf-error">{{ yakap_ledger_form.verification_status.errors.0 }}</p>{% endif %}
+            </div>
+            {% endif %}
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.occurred_at.id_for_label }}" class="cf-label">{{ yakap_ledger_form.occurred_at.label }}</label>
+              {{ yakap_ledger_form.occurred_at }}
+              {% if yakap_ledger_form.occurred_at.errors %}<p class="cf-error">{{ yakap_ledger_form.occurred_at.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.external_reference.id_for_label }}" class="cf-label">{{ yakap_ledger_form.external_reference.label }}</label>
+              {{ yakap_ledger_form.external_reference }}
+              {% if yakap_ledger_form.external_reference.errors %}<p class="cf-error">{{ yakap_ledger_form.external_reference.errors.0 }}</p>{% endif %}
+            </div>
+            {% if can_manage_yakap_settings %}
+            <div class="cf-field md:col-span-2">
+              <label for="{{ yakap_ledger_form.reversal_of.id_for_label }}" class="cf-label">{{ yakap_ledger_form.reversal_of.label }}</label>
+              {{ yakap_ledger_form.reversal_of }}
+              {% if yakap_ledger_form.reversal_of.errors %}<p class="cf-error">{{ yakap_ledger_form.reversal_of.errors.0 }}</p>{% endif %}
+            </div>
+            {% endif %}
+          </div>
+          <div class="cf-field">
+            <label for="{{ yakap_ledger_form.note.id_for_label }}" class="cf-label">{{ yakap_ledger_form.note.label }}</label>
+            {{ yakap_ledger_form.note }}
+            {% if yakap_ledger_form.note.errors %}<p class="cf-error">{{ yakap_ledger_form.note.errors.0 }}</p>{% endif %}
+          </div>
+          <label class="flex gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">
+            <input type="checkbox" name="confirm_over_limit" class="cf-checkbox mt-0.5">
+            <span>Confirm over-limit posting after clinic verification. This is ignored when hard-block is enabled.</span>
+          </label>
+          {% if yakap_verification_freshness.is_stale %}
+          <label class="flex gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">
+            <input type="checkbox" name="confirm_stale_verification" class="cf-checkbox mt-0.5">
+            <span>YAKAP verification is stale. Confirm refreshed clinic verification before posting usage.</span>
+          </label>
+          {% endif %}
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <p class="text-xs text-[var(--cf-muted)]">Estimated coverage only; this is not an official PhilHealth balance.</p>
+            <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add YAKAP Usage</button>
+          </div>
+        </form>
+        {% else %}
+        {% if can_manage_yakap_settings %}
+        <form method="post" action="{% url 'dashboard:appointment_yakap_ledger' appointment.id %}" class="mt-4 grid gap-3" hx-post="{% url 'dashboard:appointment_yakap_ledger' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
+          {% csrf_token %}
+          {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
+          <input type="hidden" name="entry_type" value="reversal">
+          <input type="hidden" name="verification_status" value="verified">
+          {% for error in yakap_ledger_form.non_field_errors %}<p class="cf-error">{{ error }}</p>{% endfor %}
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.category.id_for_label }}" class="cf-label">{{ yakap_ledger_form.category.label }}</label>
+              {{ yakap_ledger_form.category }}
+              {% if yakap_ledger_form.category.errors %}<p class="cf-error">{{ yakap_ledger_form.category.errors.0 }}</p>{% endif %}
+            </div>
+            <div class="cf-field">
+              <label for="{{ yakap_ledger_form.amount.id_for_label }}" class="cf-label">{{ yakap_ledger_form.amount.label }}</label>
+              {{ yakap_ledger_form.amount }}
+              {% if yakap_ledger_form.amount.errors %}<p class="cf-error">{{ yakap_ledger_form.amount.errors.0 }}</p>{% endif %}
             </div>
             <div class="cf-field">
               <label for="{{ yakap_ledger_form.occurred_at.id_for_label }}" class="cf-label">{{ yakap_ledger_form.occurred_at.label }}</label>
@@ -182,21 +262,13 @@
             {{ yakap_ledger_form.note }}
             {% if yakap_ledger_form.note.errors %}<p class="cf-error">{{ yakap_ledger_form.note.errors.0 }}</p>{% endif %}
           </div>
-          <label class="flex gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">
-            <input type="checkbox" name="confirm_over_limit" class="cf-checkbox mt-0.5">
-            <span>Confirm over-limit posting after clinic verification. This is ignored when hard-block is enabled.</span>
-          </label>
-          {% if yakap_verification_freshness.is_stale %}
-          <label class="flex gap-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-ink)]">
-            <input type="checkbox" name="confirm_stale_verification" class="cf-checkbox mt-0.5">
-            <span>YAKAP verification is stale. Confirm refreshed clinic verification before posting usage.</span>
-          </label>
-          {% endif %}
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <p class="text-xs text-[var(--cf-muted)]">Estimated coverage only; this is not an official PhilHealth balance.</p>
-            <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add YAKAP Usage</button>
+            <p class="text-xs text-[var(--cf-muted)]">Normal YAKAP usage is blocked until the checklist is resolved. Owners may post reversal corrections when appropriate.</p>
+            <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="rotate-ccw" class="h-4 w-4"></i>Post YAKAP Reversal</button>
           </div>
         </form>
+        {% endif %}
+        {% endif %}
         {% endif %}
       </div>
     </div>
@@ -247,13 +319,13 @@
   <!-- Cancel Mode -->
   <div x-show="mode === 'cancel'" x-cloak>
     <div class="cf-modal-header flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="cf-icon-box h-10 w-10 rounded-full">
-          <i data-lucide="alert-triangle" class="h-5 w-5"></i>
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="cf-icon-box h-10 w-10 shrink-0 rounded-full">
+          <i data-lucide="alert-triangle" class="h-5 w-5 shrink-0"></i>
         </div>
-        <div>
-          <h3 id="cancel-appointment-title" class="cf-modal-title">Cancel appointment</h3>
-          <p class="text-sm text-[var(--cf-muted)]">This action cannot be undone</p>
+        <div class="min-w-0">
+          <h3 id="cancel-appointment-title" class="cf-modal-title cf-mobile-break">Cancel appointment</h3>
+          <p class="cf-mobile-break text-sm text-[var(--cf-muted)]">This action cannot be undone</p>
         </div>
       </div>
       <button type="button" @click="detailOpen=false" class="cf-icon-btn" aria-label="Close">
@@ -266,7 +338,7 @@
           hx-swap="innerHTML"
           @htmx:after-request="if ($event.detail.xhr.getResponseHeader('HX-Trigger')) detailOpen = false">
       {% csrf_token %}
-      {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+      {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
       <div class="cf-modal-body space-y-4">
         <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
           <p class="break-words text-sm text-[var(--cf-muted)]">Patient: <strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></p>
@@ -289,13 +361,13 @@
   <!-- Delete Mode -->
   <div x-show="mode === 'delete'" x-cloak>
     <div class="cf-modal-header flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="grid h-10 w-10 place-items-center rounded-full bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]">
-          <i data-lucide="trash-2" class="h-5 w-5"></i>
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--cf-status-cancelled-bg)] text-[var(--cf-status-cancelled-text)]">
+          <i data-lucide="trash-2" class="h-5 w-5 shrink-0"></i>
         </div>
-        <div>
-          <h3 id="delete-appointment-title" class="cf-modal-title">Delete appointment</h3>
-          <p class="text-sm text-[var(--cf-muted)]">This permanently removes the appointment and its internal notes.</p>
+        <div class="min-w-0">
+          <h3 id="delete-appointment-title" class="cf-modal-title cf-mobile-break">Delete appointment</h3>
+          <p class="cf-mobile-break text-sm text-[var(--cf-muted)]">This permanently removes the appointment and its internal notes.</p>
         </div>
       </div>
       <button type="button" @click="detailOpen=false" class="cf-icon-btn" aria-label="Close">
@@ -334,13 +406,13 @@
   <!-- Reschedule Mode -->
   <div x-show="mode === 'reschedule'" x-cloak>
     <div class="cf-modal-header flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="cf-icon-box h-10 w-10 rounded-full">
-          <i data-lucide="calendar-clock" class="h-5 w-5"></i>
+      <div class="flex min-w-0 items-center gap-3">
+        <div class="cf-icon-box h-10 w-10 shrink-0 rounded-full">
+          <i data-lucide="calendar-clock" class="h-5 w-5 shrink-0"></i>
         </div>
-        <div>
-          <h3 id="reschedule-appointment-title" class="cf-modal-title">Reschedule appointment</h3>
-          <p class="text-sm text-[var(--cf-muted)]">Select a new date and time</p>
+        <div class="min-w-0">
+          <h3 id="reschedule-appointment-title" class="cf-modal-title cf-mobile-break">Reschedule appointment</h3>
+          <p class="cf-mobile-break text-sm text-[var(--cf-muted)]">Select a new date and time</p>
         </div>
       </div>
       <button type="button" @click="detailOpen=false" class="cf-icon-btn" aria-label="Close">
@@ -353,7 +425,7 @@
           hx-swap="innerHTML"
           @htmx:after-request="if ($event.detail.xhr.getResponseHeader('HX-Trigger')) detailOpen = false">
       {% csrf_token %}
-      {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+      {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
       <div class="cf-modal-body space-y-4">
         <div class="rounded-[var(--cf-radius)] bg-[var(--cf-surface-muted)] p-4">
           <p class="break-words text-sm text-[var(--cf-muted)]">Patient: <strong class="text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></p>

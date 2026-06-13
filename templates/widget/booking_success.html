@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Booking Confirmed{% endblock %}
 {% block body %}
-<main class="grid min-h-screen place-items-center p-5">
+<main class="grid min-h-dvh place-items-center p-5">
   <section class="cf-card w-full max-w-md p-8 text-center">
     <div class="cf-gradient-mesh rounded-3xl p-6 text-[var(--cf-ink)]">
       {% if clinic.logo %}
@@ -25,14 +25,13 @@
       <div class="flex justify-between gap-3 py-2"><span class="shrink-0 text-[var(--cf-muted)]">Clinic</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ clinic.name }}</strong></div>
       <div class="flex justify-between gap-3 py-2"><span class="shrink-0 text-[var(--cf-muted)]">Date</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.starts_at|date:"M j, Y" }}</strong></div>
       <div class="flex justify-between gap-3 py-2"><span class="shrink-0 text-[var(--cf-muted)]">Time</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.starts_at|time:"g:i A" }}</strong></div>
-      <div class="flex justify-between gap-3 py-2"><span class="shrink-0 text-[var(--cf-muted)]">Patient</span><strong class="min-w-0 text-right break-words text-[var(--cf-ink)]">{{ appointment.patient.full_name }}</strong></div>
     </div>
 
     {% if appointment.yakap_snapshot.requested %}
-    <p class="mt-4 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left text-xs leading-5 text-[var(--cf-muted)]">Your YAKAP request was received. Clinic staff will verify eligibility, registered clinic status, and estimated coverage through the clinic's PhilHealth workflow before service.</p>
+    <p class="mt-4 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left text-xs leading-5 text-[var(--cf-muted)]"><strong class="text-[var(--cf-ink)]">YAKAP check requested.</strong> Clinic staff will verify through the clinic's PhilHealth workflow before your visit. This is an estimate-only request, not official PhilHealth approval or balance.</p>
     {% endif %}
 
-    <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn cf-btn-primary mt-4 w-full"><i data-lucide="calendar-plus" class="h-4 w-4"></i>Book Another Appointment</a>
+    <a href="{% url 'widget:home' clinic.slug %}{% if widget_source == 'embed' %}?source=embed{% endif %}" class="cf-btn cf-btn-primary mt-4 w-full"><i data-lucide="calendar-plus" class="h-4 w-4"></i>Book Another Appointment</a>
   </section>
 </main>
 {% endblock %}

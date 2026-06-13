@@ -75,7 +75,41 @@ class PatientYakapProfileForm(forms.ModelForm):
         }
 
 
+APPOINTMENT_YAKAP_STAFF_STATUS_CHOICES = [
+    (AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION, "Needs verification"),
+    (AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT, "Verified for this visit"),
+    (AppointmentYakapSnapshot.STATUS_NOT_ELIGIBLE, "Not eligible for this visit"),
+    (AppointmentYakapSnapshot.STATUS_CANCELLED, "Cancel YAKAP request"),
+]
+APPOINTMENT_YAKAP_STAFF_STATUS_VALUES = {value for value, _label in APPOINTMENT_YAKAP_STAFF_STATUS_CHOICES}
+APPOINTMENT_YAKAP_EDITABLE_SOURCE_STATUS_VALUES = APPOINTMENT_YAKAP_STAFF_STATUS_VALUES | {
+    AppointmentYakapSnapshot.STATUS_REQUESTED,
+}
+
+
 class AppointmentYakapStatusForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._original_coverage_status = self.instance.coverage_status if self.instance.pk else None
+        self._preserve_original_coverage_status = (
+            self._original_coverage_status
+            and self._original_coverage_status not in APPOINTMENT_YAKAP_EDITABLE_SOURCE_STATUS_VALUES
+        )
+        choices = list(APPOINTMENT_YAKAP_STAFF_STATUS_CHOICES)
+        if self._preserve_original_coverage_status:
+            status_labels = dict(AppointmentYakapSnapshot.STATUS_CHOICES)
+            choices.insert(
+                0,
+                (self._original_coverage_status, status_labels.get(self._original_coverage_status, self._original_coverage_status)),
+            )
+        self.fields["coverage_status"].choices = choices
+
+    def clean_coverage_status(self):
+        coverage_status = self.cleaned_data["coverage_status"]
+        if self._preserve_original_coverage_status and coverage_status != self._original_coverage_status:
+            raise forms.ValidationError("Current YAKAP status cannot be changed from this form.")
+        return coverage_status
+
     class Meta:
         model = AppointmentYakapSnapshot
         fields = [
@@ -95,7 +129,11 @@ class YakapCoverageCategoryForm(forms.ModelForm):
 
     def clean_name(self):
         name = self.cleaned_data["name"].strip()
-        duplicate_categories = self.clinic.yakap_categories.filter(name=name) if self.clinic else YakapCoverageCategory.objects.none()
+        duplicate_categories = (
+            self.clinic.yakap_categories.filter(name__iexact=name)
+            if self.clinic
+            else YakapCoverageCategory.objects.none()
+        )
         if self.instance.pk:
             duplicate_categories = duplicate_categories.exclude(pk=self.instance.pk)
         if duplicate_categories.exists():
@@ -155,11 +193,13 @@ class ServiceYakapRuleForm(forms.ModelForm):
 
 
 class YakapLedgerEntryForm(forms.ModelForm):
-    def __init__(self, clinic, *args, patient=None, category=None, **kwargs):
+    def __init__(self, clinic, *args, patient=None, category=None, allow_privileged_entries=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["category"].queryset = clinic.yakap_categories.filter(is_active=True)
         self.fields["reversal_of"].queryset = YakapLedgerEntry.objects.none()
         self.fields["reversal_of"].required = False
+        if category:
+            self.fields["category"].initial = category
         if patient:
             reversal_choices = clinic.yakap_ledger_entries.filter(patient=patient).exclude(
                 entry_type=YakapLedgerEntry.TYPE_REVERSAL
@@ -167,6 +207,10 @@ class YakapLedgerEntryForm(forms.ModelForm):
             if category:
                 reversal_choices = reversal_choices.filter(category=category)
             self.fields["reversal_of"].queryset = reversal_choices
+        if not allow_privileged_entries:
+            self.fields["entry_type"].choices = [(YakapLedgerEntry.TYPE_SERVICE_USAGE, "Service usage")]
+            self.fields["verification_status"].choices = [(YakapLedgerEntry.VERIFICATION_VERIFIED, "Verified")]
+            self.fields["reversal_of"].queryset = YakapLedgerEntry.objects.none()
 
     class Meta:
         model = YakapLedgerEntry

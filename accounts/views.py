@@ -87,7 +87,7 @@ def signup(request):
                     requires_onboarding=True,
                 )
                 ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-                Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+                Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
                 for weekday in range(0, 5):
                     ClinicBusinessHour.objects.create(
                         clinic=clinic,
@@ -144,7 +144,6 @@ def onboarding(request):
                     service = Service(clinic=clinic)
                 service.name = form.cleaned_data["service_name"]
                 service.duration_minutes = form.cleaned_data["service_duration_minutes"]
-                service.price = form.cleaned_data["service_price"]
                 service.is_active = True
                 service.is_archived = False
                 service.save()

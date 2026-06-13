@@ -27,12 +27,16 @@ class Command(BaseCommand):
                 source=Appointment.SOURCE_MESSENGER,
                 messenger_psid__gt="",
                 status__in=[Appointment.STATUS_PENDING, Appointment.STATUS_CONFIRMED],
+                clinic__is_active=True,
+                clinic__requires_onboarding=False,
+                clinic__messenger_connection__is_active=True,
+                clinic__messenger_connection__page_access_token__gt="",
                 **{f"{sent_field}__isnull": True},
             )
             for appt in appointments:
                 try:
                     conn = appt.clinic.messenger_connection
-                    if not conn or not conn.is_active:
+                    if not conn or not conn.is_active or not conn.page_access_token:
                         continue
                     local_start = appt.starts_at.astimezone(ZoneInfo(appt.clinic.timezone))
                     message = (
@@ -42,10 +46,10 @@ class Command(BaseCommand):
                     )
                     sent = send_messages(conn, appt.messenger_psid, [{"type": "text", "text": message}])
                     if not sent:
-                        self.stdout.write(self.style.ERROR(f"Failed for {appt.reference_code}: Messenger send failed"))
+                        self.stdout.write(self.style.ERROR(f"Failed for appointment {appt.pk}: Messenger send failed"))
                         continue
                     setattr(appt, sent_field, now)
                     appt.save(update_fields=[sent_field, "updated_at"])
-                    self.stdout.write(self.style.SUCCESS(f"Reminder sent for {appt.reference_code}"))
+                    self.stdout.write(self.style.SUCCESS(f"Reminder sent for appointment {appt.pk}"))
                 except Exception as exc:
-                    self.stdout.write(self.style.ERROR(f"Failed for {appt.reference_code}: {exc}"))
+                    self.stdout.write(self.style.ERROR(f"Failed for appointment {appt.pk}: {exc.__class__.__name__}"))

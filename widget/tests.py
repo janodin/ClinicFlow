@@ -19,11 +19,12 @@ User = get_user_model()
 
 class WidgetTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(username="testuser", email="test@test.com", password="testpass")
         self.group = ClinicGroup.objects.create(name="Test Group", owner=self.user)
         self.clinic = Clinic.objects.create(group=self.group, name="Test Clinic", slug="test-clinic", timezone="Asia/Manila")
         Service.objects.create(clinic=self.clinic, name="Dummy", duration_minutes=15)
-        self.service = Service.objects.create(clinic=self.clinic, name="Consultation", duration_minutes=30, price=500)
+        self.service = Service.objects.create(clinic=self.clinic, name="Consultation", duration_minutes=30)
         for wd in range(7):
             ClinicBusinessHour.objects.create(clinic=self.clinic, weekday=wd, is_open=True, open_time=time(9), close_time=time(17))
         self.client = Client()
@@ -91,6 +92,37 @@ class WidgetTests(TestCase):
         self.assertContains(resp, self.service.name)
         self.assertNotContains(resp, "Doctor")
         self.assertNotContains(resp, "First available")
+
+    def test_widget_home_handles_invalid_service_query_param(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]), {"service": "not-a-number"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "widget/widget.html")
+
+    def test_widget_slots_handles_invalid_service_query_param(self):
+        response = self.client.get(reverse("widget:slots", args=[self.clinic.slug]), {"service": "not-a-number"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "widget/partials/slots.html")
+
+    def test_widget_booking_form_guards_against_in_flight_duplicate_submits(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        form_start = content.index('<form hx-post=')
+        form_end = content.index("</form>", form_start)
+        form = content[form_start:form_end]
+        button_start = form.index('<button type="submit"')
+        button_end = form.index("</button>", button_start)
+        submit_button = form[button_start:button_end]
+
+        self.assertIn('hx-target="#booking-form-container"', form)
+        self.assertIn('hx-swap="innerHTML"', form)
+        self.assertIn('hx-sync="this:drop"', form)
+        self.assertIn('hx-disabled-elt="find button[type=\'submit\']"', form)
+        self.assertIn("Confirm Appointment", submit_button)
+        self.assertIn("disabled:cursor-not-allowed", submit_button)
+        self.assertIn("disabled:opacity-60", submit_button)
 
     def test_widget_minimize_preserves_in_memory_state(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
@@ -202,6 +234,14 @@ class WidgetTests(TestCase):
                 response = getattr(self.client, method)(url, data)
                 self.assertEqual(response.status_code, 404)
 
+    def test_chat_api_service_payloads_do_not_include_price_fields(self):
+        response = self.client.get(reverse("widget:chat_api", args=[self.clinic.slug]))
+
+        self.assertEqual(response.status_code, 200)
+        for service in response.json()["services"]:
+            self.assertNotIn("price", service)
+            self.assertNotIn("display_price", service)
+
     def test_widget_home_uses_plain_preview_background(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
 
@@ -241,6 +281,23 @@ class WidgetTests(TestCase):
 
         self.assertContains(response, 'name="reason"')
 
+    def test_widget_clears_selected_slot_before_reloading_slots(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        select_service_start = content.index("selectService(id) {")
+        select_service_end = content.index("selectDate(date)", select_service_start)
+        select_service_block = content[select_service_start:select_service_end]
+
+        load_slots_start = content.index("loadSlots() {")
+        load_slots_end = content.index("goToStep3()", load_slots_start)
+        load_slots_block = content[load_slots_start:load_slots_end]
+
+        self.assertIn("this.slot = '';", select_service_block)
+        self.assertLess(select_service_block.index("this.slot = '';"), select_service_block.index("this.$nextTick"))
+        self.assertIn("this.slot = '';", load_slots_block)
+        self.assertLess(load_slots_block.index("this.slot = '';"), load_slots_block.index("htmx.ajax("))
+
     def test_widget_chat_initial_state_has_no_quick_button_suggestions(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()
@@ -250,6 +307,21 @@ class WidgetTests(TestCase):
         self.assertIn("chatState !== 'collect_info'", content)
         self.assertNotIn("Book an appointment</button>", content)
         self.assertNotIn("Ask about services</button>", content)
+
+    def test_widget_chat_help_message_is_not_swallowed_before_assistant_post(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        send_chat_start = content.index("async sendChat()")
+        send_chat_end = content.index("submitCollectInfo()", send_chat_start)
+        send_chat_block = content[send_chat_start:send_chat_end]
+
+        assistant_post = send_chat_block.index("await this.sendChatAction('text_input', text);")
+        faq_branch_start = send_chat_block.index("if (/^faqs?$/.test(lowerText)")
+        branch_before_post = send_chat_block[faq_branch_start:assistant_post]
+
+        self.assertNotIn("includes('help')", send_chat_block)
+        self.assertNotIn("return;", branch_before_post)
 
     def test_widget_chat_scrolls_conversation_container_after_ai_reply(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
@@ -312,13 +384,33 @@ class WidgetTests(TestCase):
         script_start = content.index("function widgetApp()")
         script = content[script_start:]
 
-        self.assertIn("messageParts(msg.text)", conversation_markup)
+        self.assertIn("messageBlocks(msg.text)", conversation_markup)
+        self.assertIn("messageParts(block.text)", conversation_markup)
         self.assertIn("whitespace-pre-wrap", conversation_markup)
         self.assertIn("font-semibold", conversation_markup)
         self.assertIn('x-text="part.text"', conversation_markup)
         self.assertNotIn("x-html", conversation_markup)
         self.assertIn("messageParts(text) {", script)
         self.assertIn("/\\*\\*([^*]+?)\\*\\*|\\*([^*\\n]+?)\\*/g", script)
+
+    def test_widget_chat_renders_markdown_tables_without_raw_html(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        conversation_start = content.index("<!-- Conversation -->")
+        conversation_end = content.index("<!-- FAQs -->", conversation_start)
+        conversation_markup = content[conversation_start:conversation_end]
+        script_start = content.index("function widgetApp()")
+        script = content[script_start:]
+
+        self.assertIn("messageBlocks(msg.text)", conversation_markup)
+        self.assertIn("block.type === 'table'", conversation_markup)
+        self.assertIn("<table", conversation_markup)
+        self.assertIn("<thead", conversation_markup)
+        self.assertIn("<tbody", conversation_markup)
+        self.assertIn("parseMarkdownTable", script)
+        self.assertIn("isMarkdownTableSeparator", script)
+        self.assertNotIn("x-html", conversation_markup)
 
     def test_widget_chat_toggles_typing_indicator_around_ai_fetch(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
@@ -474,6 +566,25 @@ class WidgetTests(TestCase):
         appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="Jane Doe")
         self.assertEqual(appt.source, Appointment.SOURCE_EMBED)
 
+    def test_embed_booking_success_book_another_preserves_embed_source(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        response = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]) + "?source=embed",
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Embed Again",
+                "phone": "09170001234",
+                "email": "again@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("widget:home", args=[self.clinic.slug]) + "?source=embed")
+
     def test_widget_booking_saves_submitted_reason(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
         slots = generate_slots(self.clinic, self.service, tomorrow)
@@ -535,6 +646,25 @@ class WidgetTests(TestCase):
         self.assertEqual(resp.status_code, 409)
         self.assertFalse(Patient.objects.filter(clinic=self.clinic).exists())
         self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
+
+    def test_embed_booking_error_back_to_booking_preserves_embed_source(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        response = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]) + "?source=embed",
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "",
+                "phone": "",
+                "email": "",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, reverse("widget:home", args=[self.clinic.slug]) + "?source=embed", status_code=409)
 
     def test_widget_booking_rejects_blank_email(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
@@ -608,6 +738,208 @@ class WidgetTests(TestCase):
         self.assertEqual(patient.full_name, "Existing Patient")
         self.assertEqual(patient.email, "existing@example.com")
         self.assertEqual(patient.notes, "Existing notes")
+
+    def test_widget_booking_success_does_not_disclose_existing_patient_name_matched_by_phone(self):
+        Patient.objects.create(
+            clinic=self.clinic,
+            full_name="Private Existing Patient",
+            phone="09123456789",
+            email="existing@example.com",
+        )
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Submitted Booking Name",
+                "phone": "0912-345-6789",
+                "email": "new@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Private Existing Patient")
+
+    def test_widget_booking_rejects_oversized_guest_name_without_creating_records(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        resp = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "A" * 161,
+                "phone": "09170001111",
+                "email": "long-name@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertContains(resp, "Please keep your full name under 160 characters.", status_code=409)
+        self.assertFalse(Patient.objects.filter(clinic=self.clinic).exists())
+        self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
+
+    def test_widget_booking_rejects_oversized_guest_phone_without_creating_records(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        response = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Long Phone",
+                "phone": "1" * 41,
+                "email": "long-phone@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "Please keep your phone number under 40 characters.", status_code=409)
+        self.assertFalse(Patient.objects.filter(clinic=self.clinic).exists())
+        self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
+
+    def test_widget_booking_rejects_malformed_service_without_creating_records(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        response = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": "not-a-number",
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Malformed Service",
+                "phone": "09170001111",
+                "email": "malformed@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "Please choose a valid service.", status_code=409)
+        self.assertFalse(Patient.objects.filter(clinic=self.clinic, full_name="Malformed Service").exists())
+        self.assertFalse(Appointment.objects.filter(clinic=self.clinic).exists())
+
+    @override_settings(WIDGET_PUBLIC_BOOKING_RATE_LIMIT=1, WIDGET_PUBLIC_BOOKING_RATE_WINDOW_SECONDS=60)
+    def test_widget_booking_rate_limit_uses_ip_and_phone_without_session(self):
+        cache.clear()
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slots = generate_slots(self.clinic, self.service, tomorrow)
+        url = reverse("widget:book", args=[self.clinic.slug])
+
+        first = self.client.post(
+            url,
+            {
+                "service": self.service.id,
+                "starts_at": slots[0]["starts_at"].isoformat(),
+                "full_name": "Rate Limited Patient",
+                "phone": "09170001111",
+                "email": "rate@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+            REMOTE_ADDR="203.0.113.10",
+        )
+        second_client = Client()
+        second = second_client.post(
+            url,
+            {
+                "service": self.service.id,
+                "starts_at": slots[1]["starts_at"].isoformat(),
+                "full_name": "Rate Limited Patient",
+                "phone": "09170001111",
+                "email": "rate@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+            REMOTE_ADDR="203.0.113.10",
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertContains(second, "Too many booking attempts", status_code=429)
+        self.assertEqual(Appointment.objects.filter(clinic=self.clinic).count(), 1)
+
+    @override_settings(WIDGET_PUBLIC_BOOKING_RATE_LIMIT=1, WIDGET_PUBLIC_BOOKING_RATE_WINDOW_SECONDS=60)
+    def test_widget_booking_rate_limit_ignores_untrusted_forwarded_for(self):
+        cache.clear()
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slots = generate_slots(self.clinic, self.service, tomorrow)
+        url = reverse("widget:book", args=[self.clinic.slug])
+
+        first = self.client.post(
+            url,
+            {
+                "service": self.service.id,
+                "starts_at": slots[0]["starts_at"].isoformat(),
+                "full_name": "First Spoofed Patient",
+                "phone": "09170001111",
+                "email": "first-spoof@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+            HTTP_X_FORWARDED_FOR="198.51.100.10",
+            REMOTE_ADDR="203.0.113.10",
+        )
+        second_client = Client()
+        second = second_client.post(
+            url,
+            {
+                "service": self.service.id,
+                "starts_at": slots[1]["starts_at"].isoformat(),
+                "full_name": "Second Spoofed Patient",
+                "phone": "09170002222",
+                "email": "second-spoof@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+            HTTP_X_FORWARDED_FOR="198.51.100.20",
+            REMOTE_ADDR="203.0.113.10",
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertContains(second, "Too many booking attempts", status_code=429)
+        self.assertEqual(Appointment.objects.filter(clinic=self.clinic).count(), 1)
+
+    @override_settings(WIDGET_PUBLIC_BOOKING_RATE_LIMIT=1, WIDGET_PUBLIC_BOOKING_RATE_WINDOW_SECONDS=60)
+    def test_invalid_booking_does_not_consume_public_booking_rate_limit(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+        url = reverse("widget:book", args=[self.clinic.slug])
+        identity = {
+            "full_name": "Invalid Then Valid",
+            "phone": "09170002222",
+            "email": "invalid-then-valid@example.com",
+        }
+
+        invalid = self.client.post(
+            url,
+            {
+                **identity,
+                "service": "not-a-service",
+                "starts_at": slot["starts_at"].isoformat(),
+            },
+            HTTP_HX_REQUEST="true",
+            REMOTE_ADDR="203.0.113.20",
+        )
+        valid = self.client.post(
+            url,
+            {
+                **identity,
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+            },
+            HTTP_HX_REQUEST="true",
+            REMOTE_ADDR="203.0.113.20",
+        )
+
+        self.assertEqual(invalid.status_code, 409)
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(Appointment.objects.filter(clinic=self.clinic, patient__phone="09170002222").count(), 1)
 
     def test_widget_booking_ignores_tampered_source(self):
         tomorrow = timezone.localdate() + timedelta(days=1)
@@ -771,6 +1103,38 @@ class WidgetTests(TestCase):
         self.assertEqual(payload["message"], "HELLO")
         self.assertEqual(payload["history"], [])
 
+    @override_settings(
+        ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget",
+        N8N_WEBHOOK_SECRET="secret",
+        WIDGET_AI_CHAT_HISTORY_TIMEOUT_MINUTES=30,
+    )
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_expires_old_ai_history_before_calling_n8n(self, mock_post):
+        ai_settings = ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        history_key = f"widget_chat_history_{self.clinic.id}_default"
+        version_key = f"widget_chat_history_version_{self.clinic.id}_default"
+        updated_key = f"widget_chat_history_updated_at_{self.clinic.id}_default"
+        session = self.client.session
+        session[history_key] = [
+            {"role": "user", "content": "I want to book cleaning next Monday."},
+            {"role": "assistant", "content": "Please confirm the pending appointment."},
+        ]
+        session[version_key] = ai_settings.updated_at.isoformat()
+        session[updated_key] = (timezone.now() - timedelta(days=5)).isoformat()
+        session.save()
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "Hello, how can I help?"}
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "text_input", "value": "hello"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["message"], "hello")
+        self.assertEqual(payload["history"], [])
+
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")
     def test_chat_step_legacy_guided_actions_do_not_enter_guided_state_when_ai_enabled(self, mock_post):
@@ -922,6 +1286,18 @@ class WidgetTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("under 12 characters", response.json()["message"])
         mock_post.assert_not_called()
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
+    @patch("widget.ai_client.requests.post")
+    def test_assistant_webhook_does_not_follow_secret_bearing_redirects(self, mock_post):
+        from widget.ai_client import call_assistant_webhook
+
+        mock_post.return_value.json.return_value = {"reply": "Safe reply"}
+
+        reply = call_assistant_webhook(self.clinic, "Hello", [], "session-1")
+
+        self.assertEqual(reply, "Safe reply")
+        self.assertFalse(mock_post.call_args.kwargs["allow_redirects"])
 
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret", WIDGET_AI_CHAT_RATE_LIMIT=1, WIDGET_AI_CHAT_RATE_WINDOW_SECONDS=60)
     @patch("widget.ai_client.requests.post")

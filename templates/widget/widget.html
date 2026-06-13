@@ -22,18 +22,18 @@
       </div>
     </header>
 
-    <div class="cf-widget-scroll flex-1 overflow-y-auto p-4">
+    <div class="cf-widget-scroll min-h-0 flex-1 overflow-y-auto p-4">
       <!-- HOME -->
-      <div x-show="mode==='home'" class="rounded-3xl p-4 text-center text-[var(--cf-ink)]" x-transition>
+      <div x-show="mode==='home'" class="min-h-0 rounded-3xl p-4 text-center text-[var(--cf-ink)]" x-transition>
         <div class="mx-auto grid h-16 w-16 place-items-center rounded-3xl" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="bot" class="h-8 w-8"></i></div>
-        <h2 class="mt-5 text-xl font-black text-[var(--cf-ink)]">{{ clinic.name }}</h2>
-        <p class="mx-auto mt-2 max-w-xs text-sm leading-6 text-[var(--cf-muted)]">{{ clinic.widget_welcome_message }}</p>
-        {% if yakap_settings %}
+        <h2 class="cf-mobile-break mt-5 text-xl font-black text-[var(--cf-ink)]">{{ clinic.name }}</h2>
+        <p class="cf-mobile-break mx-auto mt-2 max-w-xs break-words text-sm leading-6 text-[var(--cf-muted)]">{{ clinic.widget_welcome_message }}</p>
+        {% if yakap_settings and has_public_yakap_services %}
         <div class="mt-4 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left text-[var(--cf-ink)]">
-          <p class="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--cf-brand-strong)]">YAKAP estimates</p>
-          <h3 class="mt-1 text-sm font-bold text-[var(--cf-ink)]">{{ yakap_settings.public_promo_headline }}</h3>
-          <p class="mt-1 text-xs leading-5 text-[var(--cf-muted)]">{{ yakap_settings.public_promo_body }}</p>
-          <p class="mt-2 text-[11px] leading-4 text-[var(--cf-muted)]">{{ yakap_settings.public_disclaimer }}</p>
+          <p class="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--cf-brand-strong)]">YAKAP estimate</p>
+          <h3 class="mt-1 text-sm font-bold text-[var(--cf-ink)]">Ask the clinic to check YAKAP for your visit</h3>
+          <p class="cf-mobile-break mt-1 break-words text-xs leading-5 text-[var(--cf-muted)]">{{ yakap_settings.public_promo_body }}</p>
+          <p class="cf-mobile-break mt-2 break-words text-[11px] leading-4 text-[var(--cf-muted)]">{{ yakap_settings.public_disclaimer }}</p>
         </div>
         {% endif %}
         <button @click="startBook()" class="mt-6 flex w-full items-center gap-3 rounded-2xl border bg-white/90 p-3 text-left transition hover:bg-white" :style="'border-color:' + accentColor">
@@ -63,9 +63,9 @@
             <span class="grid h-10 w-10 place-items-center rounded-xl bg-[var(--cf-brand-soft)] text-sm font-black text-[var(--cf-brand-strong)]">{{ item.name|first }}</span>
             <div class="min-w-0 flex-1">
               <p class="break-words font-bold text-sm text-[var(--cf-ink)]">{{ item.name }}</p>
-              <p class="break-words text-xs text-[var(--cf-muted)]">{{ item.effective_duration }} min{% if item.display_price %} · ₱{{ item.price }}{% endif %}</p>
-              {% if yakap_settings and item.yakap_rule and item.yakap_rule.category and item.yakap_rule.is_publicly_promotable and item.yakap_rule.public_badge_label %}
-                <span class="mt-2 inline-flex rounded-full border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--cf-brand-strong)]">{{ item.yakap_rule.public_badge_label }}</span>
+              <p class="break-words text-xs text-[var(--cf-muted)]">{{ item.effective_duration }} min</p>
+              {% if item.id in yakap_promotable_service_ids %}
+                <span class="mt-2 inline-flex max-w-full whitespace-normal break-words rounded-full border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] px-2 py-0.5 text-left text-[11px] font-semibold text-[var(--cf-brand-strong)]">{{ item.public_yakap_badge_label }}</span>
               {% endif %}
             </div>
             <i data-lucide="chevron-right" class="h-4 w-4 text-[var(--cf-muted)]"></i>
@@ -111,7 +111,7 @@
             <h3 class="font-black text-lg text-[var(--cf-ink)]">Your Details</h3>
           </div>
           <div id="booking-form-container">
-            <form hx-post="{% url 'widget:book' clinic.slug %}{% if widget_source == 'embed' %}?source=embed{% endif %}" hx-target="#booking-form-container" hx-swap="innerHTML" class="space-y-3">
+            <form hx-post="{% url 'widget:book' clinic.slug %}{% if widget_source == 'embed' %}?source=embed{% endif %}" hx-target="#booking-form-container" hx-swap="innerHTML" hx-sync="this:drop" hx-disabled-elt="find button[type='submit']" class="space-y-3">
               {% csrf_token %}
               <input type="hidden" name="service" :value="selectedService">
               <input type="hidden" name="starts_at" :value="slot">
@@ -119,23 +119,23 @@
               <div class="cf-field"><label for="widget-phone" class="cf-label">Phone</label><input id="widget-phone" name="phone" type="tel" required autocomplete="tel" class="cf-input"></div>
               <div class="cf-field"><label for="widget-email" class="cf-label">Email</label><input id="widget-email" name="email" type="email" required autocomplete="email" class="cf-input"></div>
               <div class="cf-field"><label for="widget-reason" class="cf-label">Reason for visit</label><textarea id="widget-reason" name="reason" rows="3" class="cf-textarea" placeholder="Optional details for the clinic"></textarea></div>
-              {% if yakap_settings %}
-              <label class="flex gap-3 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left">
-                <input type="checkbox" name="yakap_requested" class="cf-checkbox mt-0.5">
+              {% if yakap_settings and has_public_yakap_services %}
+              <label x-show="selectedServiceAllowsYakap()" x-cloak class="flex gap-3 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-3 text-left">
+                <input type="checkbox" name="yakap_requested" x-model="yakapRequested" :disabled="!selectedServiceAllowsYakap()" class="cf-checkbox mt-0.5">
                 <span>
-                  <span class="block text-sm font-bold text-[var(--cf-ink)]">I want to use YAKAP benefits if eligible</span>
-                  <span class="mt-1 block text-xs leading-5 text-[var(--cf-muted)]">Subject to PhilHealth and clinic verification.</span>
+                  <span class="block text-sm font-bold text-[var(--cf-ink)]">Ask the clinic to check if YAKAP can apply</span>
+                  <span class="mt-1 block text-xs leading-5 text-[var(--cf-muted)]">Bring your PhilHealth details. Clinic staff will verify eligibility, registered clinic status, and estimated coverage before service.</span>
                 </span>
               </label>
               {% endif %}
-              <button type="submit" class="cf-btn w-full" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="check-circle-2" class="h-4 w-4"></i>Confirm Appointment</button>
+              <button type="submit" class="cf-btn w-full disabled:cursor-not-allowed disabled:opacity-60" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="check-circle-2" class="h-4 w-4"></i>Confirm Appointment</button>
             </form>
           </div>
         </div>
       </div>
 
       <!-- CHAT MODE -->
-      <div x-show="mode==='chat'" class="flex h-full flex-col" x-transition>
+      <div x-show="mode==='chat'" class="flex h-full min-h-0 flex-col" x-transition>
         <!-- Tabs -->
         <div class="mb-3 flex gap-1 rounded-xl bg-[var(--cf-surface-muted)] p-1">
           <button @click="chatTab='conversation'" class="min-h-10 flex-1 rounded-lg py-1.5 text-xs font-bold transition" :class="chatTab==='conversation' ? 'bg-white text-[var(--cf-ink)] shadow-sm' : 'text-[var(--cf-muted)]'" :style="chatTab==='conversation' ? 'color: var(--cf-brand-strong)' : ''">Conversation</button>
@@ -143,12 +143,42 @@
         </div>
 
         <!-- Conversation -->
-        <div x-show="chatTab==='conversation'" x-ref="chatConversation" class="flex-1 overflow-y-auto space-y-3 pr-1">
+        <div x-show="chatTab==='conversation'" x-ref="chatConversation" class="min-h-0 flex-1 overflow-y-auto space-y-3 pr-1">
           <template x-for="msg in chatHistory" :key="msg.id">
             <div class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
               <div class="max-w-[85%] break-words rounded-2xl px-4 py-2.5 text-sm leading-5" :class="msg.role === 'user' ? '' : 'border border-[var(--cf-line)] bg-white text-[var(--cf-ink)]'" :style="msg.role === 'user' ? 'background-color:' + accentColor + '; color:' + accentForeground() : ''">
                 <template x-if="msg.role === 'assistant'">
-                  <p class="whitespace-pre-wrap"><template x-for="part in messageParts(msg.text)" :key="part.key"><span :class="part.strong ? 'font-semibold text-[var(--cf-ink)]' : ''" x-text="part.text"></span></template></p>
+                  <div class="space-y-3">
+                    <template x-for="block in messageBlocks(msg.text)" :key="block.key">
+                      <div>
+                        <template x-if="block.type === 'paragraph'">
+                          <p class="whitespace-pre-wrap"><template x-for="part in messageParts(block.text)" :key="part.key"><span :class="part.strong ? 'font-semibold text-[var(--cf-ink)]' : ''" x-text="part.text"></span></template></p>
+                        </template>
+                        <template x-if="block.type === 'table'">
+                          <div class="overflow-x-auto rounded-xl border border-[var(--cf-line)]">
+                            <table class="min-w-full text-left text-xs">
+                              <thead class="bg-[var(--cf-surface-muted)] text-[var(--cf-ink)]">
+                                <tr>
+                                  <template x-for="header in block.headers" :key="header.key">
+                                    <th class="px-3 py-2 font-semibold" x-text="header.text"></th>
+                                  </template>
+                                </tr>
+                              </thead>
+                              <tbody class="divide-y divide-[var(--cf-line)]">
+                                <template x-for="row in block.rows" :key="row.key">
+                                  <tr>
+                                    <template x-for="cell in row.cells" :key="cell.key">
+                                      <td class="px-3 py-2 align-top" x-text="cell.text"></td>
+                                    </template>
+                                  </tr>
+                                </template>
+                              </tbody>
+                            </table>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
                 </template>
                 <template x-if="msg.role === 'user'">
                   <p x-text="msg.text"></p>
@@ -170,7 +200,7 @@
 
           <div x-show="chatOptions.length" class="flex flex-wrap gap-2">
             <template x-for="opt in chatOptions" :key="opt.value">
-              <button @click="selectChatOption(opt)" class="min-h-10 rounded-xl border px-3 py-1.5 text-xs font-semibold transition" :style="'border-color:' + accentColor + '; color: var(--cf-brand-strong)'" x-text="opt.label"></button>
+              <button @click="selectChatOption(opt)" class="min-h-10 max-w-full break-words whitespace-normal rounded-xl border px-3 py-1.5 text-left text-xs font-semibold transition" :style="'border-color:' + accentColor + '; color: var(--cf-brand-strong)'" x-text="opt.label"></button>
             </template>
           </div>
 
@@ -184,7 +214,7 @@
         </div>
 
         <!-- FAQs -->
-        <div x-show="chatTab==='faqs'" class="flex-1 overflow-y-auto space-y-2 pr-1">
+        <div x-show="chatTab==='faqs'" class="min-h-0 flex-1 overflow-y-auto space-y-2 pr-1">
           <input x-model="faqQuery" aria-label="Search FAQs" placeholder="Search FAQs..." class="cf-input">
           <template x-for="faq in filteredFaqs" :key="faq.id">
             <div class="overflow-hidden rounded-2xl border border-[var(--cf-line)] bg-white">
@@ -192,7 +222,7 @@
                 <span class="min-w-0 break-words pr-2" x-text="faq.question"></span>
                 <i data-lucide="chevron-down" class="h-4 w-4 text-[var(--cf-muted)] transition" :class="faq.open ? 'rotate-180' : ''"></i>
               </button>
-              <div x-show="faq.open" class="px-4 pb-3 text-sm text-[var(--cf-muted)]" x-text="faq.answer"></div>
+              <div x-show="faq.open" class="cf-mobile-break px-4 pb-3 text-sm text-[var(--cf-muted)]" x-text="faq.answer"></div>
             </div>
           </template>
           <p x-show="filteredFaqs.length === 0" class="py-4 text-center text-xs text-[var(--cf-muted)]">No FAQs found.</p>
@@ -217,6 +247,8 @@
       mode: 'home',
       bookStep: 1,
       selectedService: '',
+      yakapServiceIds: {{ yakap_promotable_service_ids|default:'[]'|safe }},
+      yakapRequested: false,
       date: '{{ selected_date|date:"Y-m-d" }}',
       slot: '',
       chatTab: 'conversation',
@@ -284,6 +316,81 @@
         }
         return parts;
       },
+      splitMarkdownTableRow(line) {
+        return String(line || '')
+          .trim()
+          .replace(/^\|/, '')
+          .replace(/\|$/, '')
+          .split('|')
+          .map((cell) => cell.trim());
+      },
+      isMarkdownTableSeparator(line) {
+        const cells = this.splitMarkdownTableRow(line);
+        return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+      },
+      parseMarkdownTable(lines, startIndex) {
+        const headerLine = lines[startIndex] || '';
+        const separatorLine = lines[startIndex + 1] || '';
+        if (!headerLine.includes('|') || !this.isMarkdownTableSeparator(separatorLine)) return null;
+
+        const headers = this.splitMarkdownTableRow(headerLine);
+        if (headers.length < 2) return null;
+
+        const rows = [];
+        let cursor = startIndex + 2;
+        while (cursor < lines.length) {
+          const line = lines[cursor] || '';
+          if (!line.trim() || !line.includes('|')) break;
+          if (!this.isMarkdownTableSeparator(line)) {
+            const cells = this.splitMarkdownTableRow(line);
+            if (cells.length < 2) break;
+            while (cells.length < headers.length) cells.push('');
+            rows.push(cells.slice(0, headers.length));
+          }
+          cursor += 1;
+        }
+        if (rows.length === 0) return null;
+
+        return {
+          nextIndex: cursor,
+          block: {
+            type: 'table',
+            key: 'table-' + startIndex,
+            headers: headers.map((text, index) => ({key: 'h-' + index, text})),
+            rows: rows.map((cells, rowIndex) => ({
+              key: 'r-' + rowIndex,
+              cells: cells.map((text, cellIndex) => ({key: rowIndex + '-' + cellIndex, text})),
+            })),
+          },
+        };
+      },
+      messageBlocks(text) {
+        const lines = String(text || '').split('\n');
+        const blocks = [];
+        let paragraph = [];
+        const flushParagraph = () => {
+          const value = paragraph.join('\n').trim();
+          if (value) {
+            blocks.push({type: 'paragraph', key: 'paragraph-' + blocks.length, text: value});
+          }
+          paragraph = [];
+        };
+
+        let index = 0;
+        while (index < lines.length) {
+          const table = this.parseMarkdownTable(lines, index);
+          if (table) {
+            flushParagraph();
+            blocks.push(table.block);
+            index = table.nextIndex;
+            continue;
+          }
+          paragraph.push(lines[index]);
+          index += 1;
+        }
+        flushParagraph();
+        return blocks.length ? blocks : [{type: 'paragraph', key: 'paragraph-empty', text: ''}];
+      },
       init() {
         this.conversationId = this.newConversationId();
       },
@@ -291,19 +398,26 @@
         this.mode = 'book';
         this.bookStep = 1;
         this.selectedService = '';
+        this.yakapRequested = false;
         this.date = '{{ selected_date|date:"Y-m-d" }}';
         this.slot = '';
       },
       selectService(id) {
         this.selectedService = String(id);
+        this.yakapRequested = false;
+        this.slot = '';
         this.bookStep = 2;
         this.$nextTick(() => this.loadSlots());
+      },
+      selectedServiceAllowsYakap() {
+        return this.yakapServiceIds.includes(Number(this.selectedService));
       },
       selectDate(date) {
         this.date = date;
         this.loadSlots();
       },
       loadSlots() {
+        this.slot = '';
         if (!this.selectedService || !this.date) return;
         const url = '{% url "widget:slots" clinic.slug %}?service=' + this.selectedService + '&date=' + this.date;
         htmx.ajax('GET', url, {target: '#slots-container', swap: 'innerHTML'});
@@ -323,6 +437,7 @@
         this.mode = 'home';
         this.bookStep = 1;
         this.selectedService = '';
+        this.yakapRequested = false;
         this.date = '{{ selected_date|date:"Y-m-d" }}';
         this.slot = '';
         this.chatTab = 'conversation';
@@ -428,9 +543,9 @@
         if (!text) return;
         this.chatHistory.push({id: this.nextId++, role: 'user', text: text});
         this.chatInput = '';
-        if ((text.toLowerCase().includes('faq') || text.toLowerCase().includes('help')) && this.chatState === 'greeting') {
+        const lowerText = text.toLowerCase();
+        if (/^faqs?$/.test(lowerText) && this.chatState === 'greeting') {
           this.chatTab = 'faqs';
-          return;
         }
         await this.sendChatAction('text_input', text);
       },

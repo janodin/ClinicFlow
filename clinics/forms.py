@@ -51,6 +51,12 @@ class ClinicSettingsForm(forms.ModelForm):
             "booking_approval_mode": forms.Select(attrs={"class": _SELECT}),
         }
 
+    def clean_default_appointment_duration(self):
+        duration = self.cleaned_data["default_appointment_duration"]
+        if duration < 1 or duration > 480:
+            raise forms.ValidationError("Default appointment duration must be between 1 and 480 minutes.")
+        return duration
+
 
 class WidgetSettingsForm(forms.ModelForm):
     class Meta:
@@ -102,8 +108,8 @@ class SharedAISettingsForm(forms.ModelForm):
         }
         help_texts = {
             "communication_tone": "Sets the assistant's patient-facing style for website Assistant and Messenger AI mode.",
-            "custom_tone_instructions": "Optional style-only notes. Tone cannot override services, prices, availability, booking rules, or safety checks.",
-            "instructions": "Used by the website Assistant and Messenger AI mode for broader clinic policies. Tone is controlled above. Services, prices, and availability still come from KliniAssist.",
+            "custom_tone_instructions": "Optional style-only notes. Tone cannot override services, availability, booking rules, or safety checks.",
+            "instructions": "Used by the website Assistant and Messenger AI mode for broader clinic policies. Tone is controlled above. Services and availability still come from KliniAssist.",
             "fallback_message": "Shown when AI replies are disabled or unavailable.",
         }
 

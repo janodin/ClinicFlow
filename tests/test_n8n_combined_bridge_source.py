@@ -15,7 +15,7 @@ def _extract_prepare_channel_reply_js(source):
     return source[js_start:js_end]
 
 
-def _run_prepare_channel_reply(agent_output, channel="messenger"):
+def _run_prepare_channel_reply_json(agent_output, channel="messenger"):
     source = SOURCE.read_text(encoding="utf-8")
     js_code = _extract_prepare_channel_reply_js(source)
     shared_items = json.dumps([
@@ -23,12 +23,20 @@ def _run_prepare_channel_reply(agent_output, channel="messenger"):
             "json": {
                 "channel": channel,
                 "psid": "PSID123",
-                "access_token": "PAGE_TOKEN",
                 "context": {},
             }
         }
     ])
-    input_items = json.dumps([{"json": {"output": agent_output}}])
+    input_items = json.dumps([
+        {
+            "json": {
+                "channel": channel,
+                "psid": "PSID123",
+                "context": {},
+                "output": agent_output,
+            }
+        }
+    ])
     wrapper = f"""
 const MESSENGER_FALLBACK = 'Messenger fallback';
 const WIDGET_FALLBACK = 'Widget fallback';
@@ -47,7 +55,11 @@ process.stdout.write(JSON.stringify(result));
         capture_output=True,
         check=True,
     )
-    return json.loads(result.stdout)[0]["json"]["reply_text"]
+    return json.loads(result.stdout)[0]["json"]
+
+
+def _run_prepare_channel_reply(agent_output, channel="messenger"):
+    return _run_prepare_channel_reply_json(agent_output, channel)["reply_text"]
 
 
 def _extract_django_ai_gateway_block(source):
@@ -89,7 +101,7 @@ def test_combined_bridge_uses_django_ai_gateway_for_clinic_owned_model_calls():
     assert "name: 'Call Django AI Gateway'" in source
     assert "DJANGO_AI_GATEWAY_REPLY_URL_EXPR" in source
     assert "/messenger/ai/gateway/reply/" in source
-    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .to(attachDjangoAiGatewayInput)\n  .to(resolveDjangoAiGatewayRoute)\n  .to(djangoAiGatewayResponseRoute)" in source
+    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .onError(messengerAiGatewayErrorBranch)\n  .to(attachDjangoAiGatewayInput)\n  .to(resolveDjangoAiGatewayRoute)\n  .to(djangoAiGatewayResponseRoute)" in source
     assert "name: 'Shared Chat Model'" not in source
     assert "name: 'Shared Conversation Memory'" not in source
     assert "name: 'KliniAssist Shared AI Agent'" not in source
@@ -118,7 +130,7 @@ def test_combined_bridge_routes_provider_gateway_fallbacks_to_forced_quick_repli
     route_branch_block = source[branch_start:branch_end]
 
     assert "name: 'Resolve Django AI Gateway Route'" in source
-    assert "const providerFallbackErrors = new Set(['ai_provider_unconfigured', 'ai_provider_error', 'empty_provider_reply', 'tool_loop_exceeded']);" in source
+    assert "const providerFallbackErrors = new Set(['ai_provider_unconfigured', 'ai_provider_error', 'empty_provider_reply', 'tool_loop_exceeded', 'ai_gateway_transport_error']);" in source
     assert "force_quick_replies: providerFallback" in source
     assert "name: 'Get Forced Messenger Quick Replies'" in source
     assert "force_quick_replies: true" in source
@@ -128,6 +140,7 @@ def test_combined_bridge_routes_provider_gateway_fallbacks_to_forced_quick_repli
     assert "outputKey: 'channel_reply'" in route_node_block
     assert ".onCase(0, forcedMessengerQuickReplyBranch)" in route_branch_block
     assert ".onCase(1, prepareChannelReply.to(sharedChannelReplyRoute))" in route_branch_block
+    assert "const messengerAiGatewayErrorBranch = handleDjangoAiGatewayError" in route_branch_block
 
 
 def test_n8n_sync_script_validates_gateway_route_instead_of_old_prompt_phrases():
@@ -149,7 +162,7 @@ def test_combined_bridge_uses_kliniassist_technical_namespace():
     assert "path: 'kliniassist-messenger'" in source
     assert "path: 'kliniassist-widget-assistant'" in source
     assert "const callDjangoAiGateway" in source
-    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .to(attachDjangoAiGatewayInput)\n  .to(resolveDjangoAiGatewayRoute)\n  .to(djangoAiGatewayResponseRoute)" in source
+    assert "const messengerAiReplyBranch = callDjangoAiGateway\n  .onError(messengerAiGatewayErrorBranch)\n  .to(attachDjangoAiGatewayInput)\n  .to(resolveDjangoAiGatewayRoute)\n  .to(djangoAiGatewayResponseRoute)" in source
     assert ".onCase(0, messengerAiReplyBranch)" in source
     assert f"path: '{legacy_prefix}-messenger'" not in source
     assert f"path: '{legacy_prefix}-widget-assistant'" not in source
@@ -176,14 +189,17 @@ def test_combined_bridge_builds_django_urls_from_one_base_url_constant():
     assert "$env.DJANGO_BASE_URL" not in source
     assert "$env" not in source
     assert "process.env" not in source
-    assert "const DJANGO_BASE_URL_FALLBACK =" in source
     assert "const DJANGO_BASE_URL_EXPR =" in source
     assert "$vars.DJANGO_BASE_URL" in source
+    assert "new URL(base)" in source
+    assert "url.protocol !== \"https:\"" in source
+    assert "DJANGO_BASE_URL must use https" in source
     assert "DJANGO_MESSENGER_WEBHOOK_URL_EXPR" in source
     assert "DJANGO_AI_GATEWAY_REPLY_URL_EXPR" in source
     assert "url: DJANGO_MESSENGER_WEBHOOK_URL_EXPR" in source
     assert "url: DJANGO_AI_GATEWAY_REPLY_URL_EXPR" in source
-    assert source.count("https://178-105-83-211.nip.io") == 1
+    assert "DJANGO_BASE_URL_FALLBACK" not in source
+    assert "https://178-105-83-211.nip.io" not in source
     assert "https://157-90-164-203.nip.io" not in source
 
 
@@ -227,7 +243,11 @@ def test_combined_bridge_gateway_payload_uses_shared_context_identity():
     assert "name: 'check_availability'" not in source
     assert "name: 'book_confirmed_appointment'" not in source
     assert "/messenger/ai/book/" not in source
+    assert "/messenger/ai/appointment/cancel/" not in source
+    assert "/messenger/ai/appointment/reschedule/" not in source
     assert "/messenger/ai/widget/book/" not in source
+    assert "/messenger/ai/widget/appointment/cancel/" not in source
+    assert "/messenger/ai/widget/appointment/reschedule/" not in source
     _assert_gateway_payload_identity_fields(gateway_block)
 
 
@@ -251,15 +271,33 @@ def test_combined_bridge_keeps_page_token_out_of_ai_prompt_context():
     messenger_block = source[messenger_start:widget_start]
     prepare_block = source[prepare_start:route_start]
 
-    assert "const { page_token: pageToken, page_token_available: pageTokenAvailable, ...safeContext } = rawContext;" in messenger_block
-    assert "access_token: pageToken || input.access_token || ''" in messenger_block
-    assert "context: safeContext" in messenger_block
+    assert "page_token" not in source
+    assert "page_access_token" not in source
+    assert "access_token" not in source
+    assert "PAGE_TOKEN" not in source
+    assert "context: sanitizedContext" in messenger_block
     assert 'context: $json.context || {}' in gateway_block
-    assert "access_token" not in gateway_block
-    assert "page_token" not in gateway_block
-    assert "access_token: shared.access_token || ''" in prepare_block
     assert "context.page_token" not in gateway_block
     assert "context.page_token" not in prepare_block
+
+
+def test_combined_bridge_sanitizes_service_pricing_from_shared_contexts():
+    source = SOURCE.read_text(encoding="utf-8")
+    messenger_start = source.index("name: 'Build Messenger Shared Input'")
+    widget_start = source.index("name: 'Build Widget Shared Input'")
+    shared_input_start = source.index("const sharedAiInput")
+    messenger_block = source[messenger_start:widget_start]
+    widget_block = source[widget_start:shared_input_start]
+
+    for block in (messenger_block, widget_block):
+        assert "function sanitizeServicePricing(value)" in block
+        assert "delete clone.price;" in block
+        assert "delete clone.display_price;" in block
+        assert "sanitizeServicePricing(clone[key])" in block
+        assert "context: sanitizedContext" in block
+
+    assert "const sanitizedContext = sanitizeServicePricing(rawContext);" in messenger_block
+    assert "const sanitizedContext = sanitizeServicePricing(context);" in widget_block
 
 
 def test_combined_bridge_keeps_clinic_provider_secret_out_of_n8n_payloads():
@@ -429,7 +467,7 @@ def test_combined_bridge_versions_upstream_session_key_by_ai_settings():
     messenger_block = source[messenger_start:widget_start]
     widget_block = source[widget_start:shared_input_start]
 
-    assert "const aiVersion = safeContext.ai?.settings_updated_at || 'unversioned';" in messenger_block
+    assert "const aiVersion = rawContext.ai?.settings_updated_at || 'unversioned';" in messenger_block
     assert "session_key: input.session_key + ':ai-settings:' + aiVersion" in messenger_block
     assert "const aiVersion = context.ai?.settings_updated_at || 'unversioned';" in widget_block
     assert "session_key: source.session_key + ':ai-settings:' + aiVersion" in widget_block
@@ -477,6 +515,18 @@ Please send the reference code and phone number used for the booking.
 
     assert reply.startswith("I need to verify your appointment")
     assert "Please send the reference code" in reply
+
+
+def test_channel_reply_strips_markdown_asterisks_for_messenger_only():
+    markdown_reply = """Please confirm your appointment:\n\n**Service:** Dental Cleaning\n*Date:* June 15, 2026\n"""
+
+    messenger = _run_prepare_channel_reply_json(markdown_reply, channel="messenger")
+    widget = _run_prepare_channel_reply_json(markdown_reply, channel="widget")
+
+    assert messenger["reply_text"] == "Please confirm your appointment:\n\nService: Dental Cleaning\nDate: June 15, 2026"
+    assert messenger["facebook_body"]["message"]["text"] == messenger["reply_text"]
+    assert "*" not in messenger["facebook_body"]["message"]["text"]
+    assert widget["widget_body"]["reply"] == markdown_reply.strip()
 
 
 def test_channel_reply_redacts_failed_appointment_verification_phone_numbers():
@@ -606,6 +656,16 @@ def test_meta_messenger_signature_verification_sends_message_identity_to_django(
     assert "psid: $json.psid" in verify_block
 
 
+def test_meta_messenger_signature_verification_treats_backend_rejections_as_data():
+    source = SOURCE.read_text(encoding="utf-8")
+    verify_start = source.index("name: 'Verify Meta Signature'")
+    verify_end = source.index("const prepareMetaWebhookResponse")
+    verify_block = source[verify_start:verify_end]
+
+    assert "neverError: true" in verify_block
+    assert "responseFormat: 'json'" in verify_block
+
+
 def test_meta_messenger_invalid_signature_returns_403_without_acknowledging_event():
     source = SOURCE.read_text(encoding="utf-8")
     invalid_start = source.index("const returnInvalidMetaSignature")
@@ -661,6 +721,19 @@ def test_meta_messenger_registers_and_claims_turn_before_ai_context_lookup():
     assert "acknowledgeQueuedMessengerTurn.to(getMessengerClinicContext" not in source
 
 
+def test_combined_bridge_binds_messenger_turn_registration_and_context_requests():
+    source = SOURCE.read_text(encoding="utf-8")
+    register_block = source[source.index("name: 'Register Messenger Turn'"):source.index("const attachMessengerTurnRegistration")]
+    context_block = source[source.index("name: 'Get Messenger Clinic Context'"):source.index("const attachMessengerContext")]
+
+    assert "raw_body: $json.raw_body" in register_block
+    assert "signature: $json.signature" in register_block
+    assert "page_id: $json.page_id" in context_block
+    assert "psid: $json.psid" in context_block
+    assert "turn_token: $json.turn_token || \"\"" in context_block
+    assert "input_sequence: $json.input_sequence || 0" in context_block
+
+
 def test_combined_bridge_uses_claimed_messenger_batch_as_ai_input():
     source = SOURCE.read_text(encoding="utf-8")
     claim_start = source.index("name: 'Attach Messenger Turn Claim'")
@@ -681,22 +754,28 @@ def test_combined_bridge_uses_claimed_messenger_batch_as_ai_input():
     assert "':turn:' + (claim.turn_token || input.turn_token || 'no-turn')" in messenger_block
 
 
-def test_combined_bridge_completes_messenger_turn_before_facebook_send():
+def test_combined_bridge_finalizes_messenger_turn_with_django_send_endpoint():
     source = SOURCE.read_text(encoding="utf-8")
     workflow_block = source[source.index("export default workflow"):]
-    complete_start = source.index("name: 'Complete Messenger Turn'")
     prepare_current_start = source.index("name: 'Prepare Current Messenger Reply'")
-    send_start = source.index("name: 'Send Facebook Reply'")
-    complete_block = source[complete_start:prepare_current_start]
+    send_start = source.index("name: 'Send Messenger Reply via Django'")
+    send_end = source.index("const returnWidgetReply")
     prepare_current_block = source[prepare_current_start:send_start]
+    send_block = source[send_start:send_end]
 
-    assert "DJANGO_MESSENGER_AI_TURN_COMPLETE_URL_EXPR" in source
-    assert "/messenger/ai/turn/complete/" in source
-    assert "reply_text: $json.reply_text" in complete_block
-    assert "turn_token: $json.turn_token" in complete_block
-    assert "input_sequence: $json.input_sequence" in complete_block
-    assert "completion.send_reply" in prepare_current_block
-    assert ".onCase(0, completeMessengerTurn.to(authorizeMessengerSend).to(prepareCurrentMessengerReply).to(sendFacebookReply))" in source
+    assert "DJANGO_MESSENGER_AI_TURN_SEND_REPLY_URL_EXPR" in source
+    assert "/messenger/ai/turn/send-reply/" in source
+    assert "reply_text: $json.reply_text" in send_block
+    assert "facebook_body: $json.facebook_body" in send_block
+    assert "facebook_bodies: $json.facebook_bodies || []" in send_block
+    assert "turn_token: $json.turn_token" in send_block
+    assert "input_sequence: $json.input_sequence" in send_block
+    assert "completion.send_reply" not in prepare_current_block
+    assert "page_id: 'PAGE123'" in prepare_current_block
+    assert "psid: 'PSID123'" in prepare_current_block
+    assert "turn_token: 'turn-token'" in prepare_current_block
+    assert "input_sequence: 2" in prepare_current_block
+    assert ".onCase(0, prepareCurrentMessengerReply.to(sendMessengerReplyViaDjango))" in source
     assert ".onCase(0, sendFacebookReply)" not in workflow_block
 
 
@@ -710,6 +789,17 @@ def test_combined_bridge_gateway_payload_sends_turn_metadata_for_server_side_mut
     assert "name: 'book_confirmed_appointment'" not in source
     assert "name: 'cancel_verified_appointment'" not in source
     assert "name: 'reschedule_verified_appointment'" not in source
+
+
+def test_combined_bridge_ai_gateway_transport_errors_use_existing_fallback_routes():
+    source = SOURCE.read_text(encoding="utf-8")
+    gateway_block = _extract_django_ai_gateway_block(source)
+
+    assert "onError: 'continueErrorOutput'" in gateway_block
+    assert "name: 'Handle Django AI Gateway Error'" in source
+    assert "ai_gateway_transport_error" in source
+    assert "const messengerAiGatewayErrorBranch = handleDjangoAiGatewayError\n  .to(resolveDjangoAiGatewayRoute)\n  .to(djangoAiGatewayResponseRoute);" in source
+    assert ".onError(messengerAiGatewayErrorBranch)" in source
 
 
 def test_meta_messenger_ignored_events_are_acknowledged_without_context_lookup():
@@ -769,17 +859,16 @@ def test_combined_bridge_routes_messenger_quick_replies_without_ai_agent():
     assert "name: 'Route Assistant Mode'" in source
     assert "name: 'Get Messenger Quick Replies'" in source
     assert "name: 'Attach Messenger Quick Replies Input'" in source
-    assert "name: 'Complete Messenger Quick Reply Turn'" in source
+    assert "name: 'Send Messenger Reply via Django'" in source
     assert "name: 'Prepare Messenger Quick Replies'" in source
     assert "/messenger/n8n-webhook/" in source
     assert "messenger_response_mode" in source
     assert "should_use_quick_replies" in source
     assert "messaging.postback?.payload" in source
     assert "messaging.message?.quick_reply?.payload" in source
-    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(attachMessengerQuickRepliesInput)\n  .to(completeMessengerQuickReplyTurn)\n  .to(authorizeMessengerQuickReplySend)\n  .to(prepareMessengerQuickReplies)\n  .to(sendFacebookReply);" in source
+    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(attachMessengerQuickRepliesInput)\n  .to(prepareMessengerQuickReplies)\n  .to(sendMessengerReplyViaDjango);" in source
     assert "getMessengerQuickReplies\n  .to(completeMessengerTurn)" not in source
     assert ".onCase(1, messengerQuickReplyBranch)" in source
-    assert "const replyItems = $items('Attach Messenger Quick Replies Input');" in source
     shared_input_start = source.index("name: 'Build Messenger Shared Input'")
     shared_input_end = source.index("name: 'Build Widget Shared Input'")
     shared_input_block = source[shared_input_start:shared_input_end]
@@ -793,31 +882,40 @@ def test_combined_bridge_routes_messenger_quick_replies_without_ai_agent():
     assert "postback: $json.raw_postback || $json.postback || \"\"" in quick_reply_block
     assert "turn_token: $json.turn_token || \"\"" in quick_reply_block
     assert "input_sequence: $json.input_sequence || 0" in quick_reply_block
+    assert "const input = inputItem.json || {};" in source
 
 
-def test_complete_messenger_quick_reply_turn_uses_current_item_identity():
+def test_prepare_messenger_quick_replies_preserves_current_turn_identity_for_django_send():
     source = SOURCE.read_text(encoding="utf-8")
-    complete_start = source.index("name: 'Complete Messenger Quick Reply Turn'")
-    prepare_current_start = source.index("name: 'Prepare Current Messenger Reply'")
-    complete_block = source[complete_start:prepare_current_start]
+    prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
+    prepare_end = source.index("const callDjangoAiGateway")
+    prepare_block = source[prepare_start:prepare_end]
 
-    assert 'page_id: $json.page_id' in complete_block
-    assert 'psid: $json.psid' in complete_block
-    assert 'turn_token: $json.turn_token' in complete_block
-    assert 'input_sequence: $json.input_sequence || 0' in complete_block
-    assert 'reply_text: (($json.replies || []).map((reply) => reply.text || "").filter(Boolean).join("\\\\n"))' in complete_block
-    assert '$("Shared AI Input").item' not in complete_block
-    assert '$json.reply_text ||' not in complete_block
+    assert "page_id: input.page_id || ''" in prepare_block
+    assert "const psid = input.psid || '';" in prepare_block
+    assert "recipient: { id: psid }" in prepare_block
+    assert "turn_token: input.turn_token || ''" in prepare_block
+    assert "input_sequence: input.input_sequence || 0" in prepare_block
+    assert "const facebookBodies = [];" in prepare_block
+    assert "const replyTexts = [];" in prepare_block
+    assert "facebook_bodies: facebookBodies" in prepare_block
+    assert "reply_text: replyTexts.filter(Boolean).join('\\n')" in prepare_block
+    assert "page_id: 'PAGE123'" in prepare_block
+    assert "psid: 'PSID123'" in prepare_block
+    assert "turn_token: 'turn-token'" in prepare_block
+    assert "input_sequence: 2" in prepare_block
+    assert '$("Shared AI Input").item' not in prepare_block
 
 
-def test_combined_bridge_facebook_send_errors_are_not_silenced():
+def test_combined_bridge_delegates_facebook_send_error_handling_to_django():
     source = SOURCE.read_text(encoding="utf-8")
-    send_start = source.index("name: 'Send Facebook Reply'")
+    send_start = source.index("name: 'Send Messenger Reply via Django'")
     send_end = source.index("const returnWidgetReply")
     send_block = source[send_start:send_end]
 
     assert "responseFormat: 'json'" in send_block
     assert "neverError: true" not in send_block
+    assert "name: 'Send Facebook Reply'" not in source
 
 
 def test_combined_bridge_caps_messenger_quick_replies_for_meta_limit():
@@ -837,17 +935,18 @@ def test_combined_bridge_facebook_bodies_include_messaging_type_response():
     assert "messaging_type: 'RESPONSE'" in source
 
 
-def test_combined_bridge_authorizes_messenger_turn_immediately_before_facebook_send():
+def test_combined_bridge_sends_messenger_turns_through_django_finalize_endpoint():
     source = SOURCE.read_text(encoding="utf-8")
 
-    assert "DJANGO_MESSENGER_AI_TURN_AUTHORIZE_SEND_URL_EXPR" in source
-    assert "/messenger/ai/turn/authorize-send/" in source
-    assert "name: 'Authorize Messenger Send'" in source
-    assert "name: 'Authorize Messenger Quick Reply Send'" in source
-    assert "name: 'Authorize Forced Messenger Quick Reply Send'" in source
-    assert "const sharedChannelReplyRoute = routeChannelReply\n  .onCase(0, completeMessengerTurn.to(authorizeMessengerSend).to(prepareCurrentMessengerReply).to(sendFacebookReply))" in source
-    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(attachMessengerQuickRepliesInput)\n  .to(completeMessengerQuickReplyTurn)\n  .to(authorizeMessengerQuickReplySend)\n  .to(prepareMessengerQuickReplies)\n  .to(sendFacebookReply)" in source
-    assert "const forcedMessengerQuickReplyBranch = getForcedMessengerQuickReplies\n  .to(attachForcedMessengerQuickRepliesInput)\n  .to(completeForcedMessengerQuickReplyTurn)\n  .to(authorizeForcedMessengerQuickReplySend)\n  .to(prepareForcedMessengerQuickReplies)\n  .to(sendFacebookReply)" in source
+    assert "DJANGO_MESSENGER_AI_TURN_SEND_REPLY_URL_EXPR" in source
+    assert "/messenger/ai/turn/send-reply/" in source
+    assert "name: 'Send Messenger Reply via Django'" in source
+    assert "const sharedChannelReplyRoute = routeChannelReply\n  .onCase(0, prepareCurrentMessengerReply.to(sendMessengerReplyViaDjango))" in source
+    assert "const messengerQuickReplyBranch = getMessengerQuickReplies\n  .to(attachMessengerQuickRepliesInput)\n  .to(prepareMessengerQuickReplies)\n  .to(sendMessengerReplyViaDjango)" in source
+    assert "const forcedMessengerQuickReplyBranch = getForcedMessengerQuickReplies\n  .to(attachForcedMessengerQuickRepliesInput)\n  .to(prepareForcedMessengerQuickReplies)\n  .to(sendMessengerReplyViaDjango)" in source
+    assert "completeMessengerTurn.to(" not in source
+    assert "completeMessengerQuickReplyTurn" not in source
+    assert "authorizeMessengerSend" not in source
 
 
 def test_combined_bridge_uses_django_response_identity_for_messenger_quick_replies():
@@ -855,11 +954,23 @@ def test_combined_bridge_uses_django_response_identity_for_messenger_quick_repli
     prepare_start = source.index("name: 'Prepare Messenger Quick Replies'")
     prepare_end = source.index("const callDjangoAiGateway")
     prepare_block = source[prepare_start:prepare_end]
+    forced_prepare_start = source.index("name: 'Prepare Forced Messenger Quick Replies'")
+    forced_prepare_end = source.index("const prepareChannelReply")
+    forced_prepare_block = source[forced_prepare_start:forced_prepare_end]
 
     assert "$items('Resolve Assistant Mode')[0]" not in prepare_block
     assert "sources[itemIndex]" not in prepare_block
     assert "const psid = input.psid || '';" in prepare_block
-    assert "if (!pageToken || !psid) { continue; }" in prepare_block
+    assert "const psid = input.psid || '';" in forced_prepare_block
+    assert "facebook_bodies: facebookBodies" in forced_prepare_block
+    assert "page_id: 'PAGE123'" in forced_prepare_block
+    assert "psid: 'PSID123'" in forced_prepare_block
+    assert "turn_token: 'turn-token'" in forced_prepare_block
+    assert "input_sequence: 2" in forced_prepare_block
+    assert "if (!psid) { continue; }" in prepare_block
+    assert "if (!psid) { continue; }" in forced_prepare_block
+    assert "if (!pageToken || !psid) { continue; }" not in prepare_block
+    assert "if (!pageToken || !psid) { continue; }" not in forced_prepare_block
 
 
 def test_combined_bridge_omits_empty_messenger_quick_replies_for_meta():
@@ -913,32 +1024,29 @@ def test_combined_bridge_carries_messenger_identity_after_turn_filters():
 def test_combined_bridge_reply_paths_use_current_item_after_assistant_mode_filter():
     source = SOURCE.read_text(encoding="utf-8")
     gateway_block = _extract_django_ai_gateway_block(source)
-    quick_start = source.index("name: 'Complete Messenger Quick Reply Turn'")
-    quick_end = source.index("name: 'Prepare Messenger Quick Replies'")
-    quick_complete_block = source[quick_start:quick_end]
+    quick_start = source.index("name: 'Prepare Messenger Quick Replies'")
+    quick_end = source.index("const callDjangoAiGateway")
+    quick_prepare_block = source[quick_start:quick_end]
     prepare_start = source.index("name: 'Prepare Channel Reply'")
     route_start = source.index("const routeChannelReply")
     prepare_block = source[prepare_start:route_start]
-    complete_start = source.index("name: 'Complete Messenger Turn'")
     current_start = source.index("name: 'Prepare Current Messenger Reply'")
-    complete_block = source[complete_start:current_start]
-    current_end = source.index("const sendFacebookReply")
+    current_end = source.index("const sendMessengerReplyViaDjango")
     current_block = source[current_start:current_end]
 
     assert "name: 'Attach Django AI Gateway Input'" in source
     assert "name: 'Attach Messenger Quick Replies Input'" in source
     assert '$("Shared AI Input").item' not in gateway_block
-    assert '$("Shared AI Input").item' not in quick_complete_block
-    assert '$("Shared AI Input").item' not in complete_block
+    assert '$("Shared AI Input").item' not in quick_prepare_block
     assert "$items('Shared AI Input')" not in prepare_block
     assert "$items('Prepare Channel Reply')" not in current_block
     assert "$items('Route Assistant Mode', 0)" in source
     assert "$items('Route Assistant Mode', 1)" in source
-    assert "$items('Route Channel Reply', 0)" in current_block
+    assert "$input.all().map((input)" in current_block
     assert 'channel: $json.channel' in gateway_block
     assert 'page_id: $json.page_id || ""' in gateway_block
     assert 'turn_token: $json.turn_token || ""' in gateway_block
-    assert 'reply_text: $json.reply_text || ""' in complete_block
+    assert 'reply_text: $json.reply_text || ""' in source
 
 
 def test_legacy_messenger_workflow_source_is_not_checked_in():

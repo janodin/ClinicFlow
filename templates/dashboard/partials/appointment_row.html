@@ -1,9 +1,9 @@
 <tr id="appointment-row-{{ appointment.id }}" class="hover:bg-[var(--cf-brand-soft)]">
   <td class="p-5 font-semibold text-[var(--cf-ink)]">
-    <a href="#" @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body">{{ appointment.patient.full_name }}</a>
-    <div class="font-normal text-[var(--cf-muted)]">{{ appointment.patient.phone }}</div>
+    <a href="#" @click.prevent="detailOpen=true" hx-get="{% url 'dashboard:appointment_detail' appointment.id %}" hx-target="#detail-modal-body" class="cf-mobile-break">{{ appointment.patient.full_name }}</a>
+    <div class="cf-mobile-break font-normal text-[var(--cf-muted)]">{{ appointment.patient.phone }}</div>
   </td>
-  <td class="text-[var(--cf-muted)]">{{ appointment.service.name }}<div class="text-[var(--cf-muted)]">{{ appointment.service.effective_duration }} min</div></td>
+  <td class="cf-mobile-break text-[var(--cf-muted)]">{{ appointment.service.name }}<div class="text-[var(--cf-muted)]">{{ appointment.service.effective_duration }} min</div></td>
   <td class="text-[var(--cf-muted)]">{{ appointment.starts_at|date:"M j, Y" }}<div class="text-[var(--cf-muted)]">{{ appointment.starts_at|time:"g:i A" }} - {{ appointment.ends_at|time:"g:i A" }}</div></td>
   <td><span class="cf-badge cf-badge-info">{{ appointment.get_source_display }}</span></td>
   <td><span class="cf-badge cf-badge-info">{{ appointment.get_payment_state_display }}</span></td>

@@ -19,7 +19,7 @@
           <i data-lucide="stethoscope" class="h-4 w-4 cf-muted"></i>
           <div class="min-w-0 flex-1">
             <div class="cf-mobile-break font-semibold text-[var(--cf-ink)]">{{ service.name }}</div>
-            <div class="cf-mobile-break text-xs cf-muted">{{ service.duration_minutes }} min{% if service.price %} · ₱{{ service.price }}{% endif %}</div>
+            <div class="cf-mobile-break text-xs cf-muted">{{ service.effective_duration }} min</div>
           </div>
         </a>
       {% endfor %}

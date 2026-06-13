@@ -148,6 +148,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   const calendar = new FullCalendar.Calendar(calendarEl, {
     initialView: 'dayGridMonth',
+    timeZone: '{{ clinic.timezone|escapejs }}',
     height: isPhone() ? 'auto' : '100%',
     expandRows: true,
     dayMaxEvents: isPhone() ? 2 : 5,
@@ -178,7 +179,7 @@ document.addEventListener('DOMContentLoaded', function() {
       setCalendarBusy(true);
       const formData = new FormData();
       formData.append('appointment_id', info.event.id);
-      formData.append('starts_at', info.event.start.toISOString());
+      formData.append('starts_at', info.event.startStr);
       formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
 
       fetch('{% url "dashboard:calendar_reschedule" %}', {

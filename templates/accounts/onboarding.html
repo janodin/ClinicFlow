@@ -11,7 +11,7 @@
           </span>
           KliniAssist
         </div>
-        <h1 class="mt-6 text-3xl font-light leading-tight text-[var(--cf-ink)]">Complete {{ clinic.name }} setup</h1>
+        <h1 class="cf-mobile-break mt-6 text-3xl font-light leading-tight text-[var(--cf-ink)]">Complete {{ clinic.name }} setup</h1>
         <p class="mt-3 max-w-2xl text-base leading-7 text-[var(--cf-muted)]">Confirm your contact details, first service, booking behavior, and weekly business hours before opening bookings.</p>
       </div>
     </div>
@@ -55,7 +55,7 @@
 
       <section class="cf-card bg-[var(--cf-bg)] p-6">
         <h2 class="text-xl font-light text-[var(--cf-ink)]">First Service</h2>
-        <div class="mt-5 grid gap-4 md:grid-cols-3">
+        <div class="mt-5 grid gap-4 md:grid-cols-2">
           <div>
             <label for="{{ form.service_name.id_for_label }}" class="cf-label">Service Name</label>
             {{ form.service_name }}
@@ -65,11 +65,6 @@
             <label for="{{ form.service_duration_minutes.id_for_label }}" class="cf-label">Duration Minutes</label>
             {{ form.service_duration_minutes }}
             {% if form.service_duration_minutes.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.service_duration_minutes.errors.0 }}</p>{% endif %}
-          </div>
-          <div>
-            <label for="{{ form.service_price.id_for_label }}" class="cf-label">Price</label>
-            {{ form.service_price }}
-            {% if form.service_price.errors %}<p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ form.service_price.errors.0 }}</p>{% endif %}
           </div>
         </div>
       </section>
@@ -86,6 +81,7 @@
       <section class="cf-card bg-[var(--cf-bg)] p-6">
         <h2 class="text-xl font-light text-[var(--cf-ink)]">Business Hours</h2>
         <div class="mt-5 cf-table-wrap">
+          <p class="cf-mobile-scroll-hint mb-2 sm:hidden">Scroll sideways to review each day's hours and breaks.</p>
           <div class="cf-table-scroll" tabindex="0" aria-label="Weekly business hours">
             <table class="cf-table cf-table-form">
               <thead>

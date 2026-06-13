@@ -839,7 +839,12 @@ def test_yakap_ledger_entry_form_scopes_reversal_choices(clinic_setup):
     assert not default_form.fields["reversal_of"].required
     assert not default_form.fields["reversal_of"].queryset.exists()
     try:
-        scoped_form = yakap_forms.YakapLedgerEntryForm(clinic, patient=patient, category=category)
+        scoped_form = yakap_forms.YakapLedgerEntryForm(
+            clinic,
+            patient=patient,
+            category=category,
+            allow_privileged_entries=True,
+        )
     except TypeError as exc:
         pytest.fail(str(exc))
 
@@ -937,3 +942,214 @@ def test_yakap_export_form_validates_date_range():
     assert valid_form.is_valid(), valid_form.errors
     assert valid_form.cleaned_data["started_at"] == date(2026, 8, 1)
     assert valid_form.cleaned_data["ended_at"] == date(2026, 8, 2)
+
+
+@pytest.mark.django_db
+def test_public_yakap_request_allowed_requires_enabled_promotable_category(clinic_setup):
+    clinic, service = clinic_setup
+    settings, categories = ensure_default_yakap_setup(clinic)
+    category = next(item for item in categories if item.name == "Primary Care")
+
+    assert yakap_services.is_public_yakap_request_allowed(clinic, service) is False
+
+    settings.is_enabled = True
+    settings.save(update_fields=["is_enabled", "updated_at"])
+    rule = ServiceYakapRule.objects.create(
+        clinic=clinic,
+        service=service,
+        category=category,
+        coverage_status=ServiceYakapRule.STATUS_COVERED,
+        public_badge_label="",
+    )
+
+    assert yakap_services.is_public_yakap_request_allowed(clinic, service) is True
+    assert yakap_services.public_yakap_badge_label(rule) == "YAKAP check available"
+
+    rule.coverage_status = ServiceYakapRule.STATUS_CASH_ONLY
+    rule.save(update_fields=["coverage_status", "updated_at"])
+    assert yakap_services.is_public_yakap_request_allowed(clinic, service) is False
+
+    rule.coverage_status = ServiceYakapRule.STATUS_COVERED
+    rule.category = None
+    rule.save(update_fields=["coverage_status", "category", "updated_at"])
+    assert yakap_services.is_public_yakap_request_allowed(clinic, service) is False
+
+
+@pytest.mark.django_db
+def test_public_yakap_request_allowed_rejects_settings_from_another_clinic(clinic_setup):
+    clinic, service = clinic_setup
+    _settings, categories = ensure_default_yakap_setup(clinic)
+    category = next(item for item in categories if item.name == "Primary Care")
+    ServiceYakapRule.objects.create(
+        clinic=clinic,
+        service=service,
+        category=category,
+        coverage_status=ServiceYakapRule.STATUS_COVERED,
+    )
+    other_clinic = create_other_clinic(clinic, slug="other-yakap-settings-clinic")
+    other_settings, _other_categories = ensure_default_yakap_setup(other_clinic)
+    other_settings.is_enabled = True
+    other_settings.save(update_fields=["is_enabled", "updated_at"])
+
+    assert yakap_services.is_public_yakap_request_allowed(clinic, service, settings=other_settings) is False
+
+
+@pytest.mark.django_db
+def test_appointment_yakap_status_form_exposes_only_staff_visit_decisions():
+    form = yakap_forms.AppointmentYakapStatusForm()
+
+    exposed_values = {value for value, _label in form.fields["coverage_status"].choices}
+
+    assert exposed_values == {
+        AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION,
+        AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
+        AppointmentYakapSnapshot.STATUS_NOT_ELIGIBLE,
+        AppointmentYakapSnapshot.STATUS_CANCELLED,
+    }
+    assert AppointmentYakapSnapshot.STATUS_POSTED not in exposed_values
+    assert AppointmentYakapSnapshot.STATUS_VERIFIED not in exposed_values
+
+
+@pytest.mark.django_db
+def test_appointment_yakap_status_form_preserves_posted_snapshot_status(clinic_setup):
+    clinic, service = clinic_setup
+    patient = Patient.objects.create(clinic=clinic, full_name="Posted Yakap Patient", phone="09170009992")
+    appointment = create_appointment(clinic, patient, service)
+    snapshot = AppointmentYakapSnapshot.objects.create(
+        clinic=clinic,
+        appointment=appointment,
+        requested=True,
+        coverage_status=AppointmentYakapSnapshot.STATUS_POSTED,
+    )
+
+    display_form = yakap_forms.AppointmentYakapStatusForm(instance=snapshot)
+    display_choices = list(display_form.fields["coverage_status"].choices)
+    assert display_choices[0][0] == AppointmentYakapSnapshot.STATUS_POSTED
+
+    demotion_form = yakap_forms.AppointmentYakapStatusForm(
+        data={
+            "coverage_status": AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION,
+            "verification_note": "Browser submitted the first staff choice.",
+        },
+        instance=snapshot,
+    )
+
+    assert demotion_form.is_valid() is False
+    assert "cannot be changed" in demotion_form.errors["coverage_status"][0]
+
+    preserve_form = yakap_forms.AppointmentYakapStatusForm(
+        data={
+            "coverage_status": AppointmentYakapSnapshot.STATUS_POSTED,
+            "verification_note": "Keep posted status.",
+        },
+        instance=snapshot,
+    )
+    assert preserve_form.is_valid(), preserve_form.errors
+
+
+@pytest.mark.django_db
+def test_yakap_coverage_category_form_rejects_case_insensitive_duplicate(clinic_setup):
+    clinic, _service = clinic_setup
+    YakapCoverageCategory.objects.create(
+        clinic=clinic,
+        name="Primary Care",
+        category_type=YakapCoverageCategory.TYPE_PRIMARY_CARE,
+        annual_limit=Decimal("0.00"),
+    )
+
+    form = yakap_forms.YakapCoverageCategoryForm(
+        data={
+            "name": " primary care ",
+            "category_type": YakapCoverageCategory.TYPE_PRIMARY_CARE,
+            "annual_limit": "0.00",
+            "is_active": "on",
+            "notes": "Duplicate by case.",
+            "sort_order": "1",
+        },
+        clinic=clinic,
+    )
+
+    assert form.is_valid() is False
+    assert "already exists" in form.errors["name"][0]
+
+
+@pytest.mark.django_db
+def test_yakap_ledger_reversal_link_only_allowed_for_reversal_entries(clinic_setup):
+    clinic, service = clinic_setup
+    _settings, categories = ensure_default_yakap_setup(clinic)
+    category = next(item for item in categories if item.name == "Primary Care")
+    patient = Patient.objects.create(clinic=clinic, full_name="Reversal Domain Patient", phone="09170009991")
+    profile = yakap_profile_for_patient(patient)
+    appointment = create_appointment(clinic, patient, service)
+    original_entry = YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=patient,
+        profile=profile,
+        appointment=appointment,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("300.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        note="Original usage.",
+    )
+    invalid_entry = YakapLedgerEntry(
+        clinic=clinic,
+        patient=patient,
+        profile=profile,
+        appointment=appointment,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("50.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        reversal_of=original_entry,
+        note="Invalid reversal metadata.",
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        invalid_entry.full_clean()
+
+    assert "Reversal link is only allowed for reversal entries" in str(exc.value)
+    assert "Service usage" in str(original_entry)
+    assert "300.00" in str(original_entry)
+
+
+@pytest.mark.django_db
+def test_yakap_ledger_reversal_link_guard_is_not_masked_by_metadata_mismatch(clinic_setup):
+    clinic, service = clinic_setup
+    _settings, categories = ensure_default_yakap_setup(clinic)
+    category = next(item for item in categories if item.name == "Primary Care")
+    patient = Patient.objects.create(clinic=clinic, full_name="Mismatch Reversal Patient", phone="09170009993")
+    profile = yakap_profile_for_patient(patient)
+    appointment = create_appointment(clinic, patient, service)
+    other_patient = Patient.objects.create(clinic=clinic, full_name="Other Reversal Patient", phone="09170009994")
+    other_profile = yakap_profile_for_patient(other_patient)
+    original_entry = YakapLedgerEntry.objects.create(
+        clinic=clinic,
+        patient=other_patient,
+        profile=other_profile,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("300.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        note="Original usage for another patient.",
+    )
+    invalid_entry = YakapLedgerEntry(
+        clinic=clinic,
+        patient=patient,
+        profile=profile,
+        appointment=appointment,
+        service=service,
+        category=category,
+        entry_type=YakapLedgerEntry.TYPE_SERVICE_USAGE,
+        amount=Decimal("50.00"),
+        verification_status=YakapLedgerEntry.VERIFICATION_VERIFIED,
+        reversal_of=original_entry,
+        note="Invalid non-reversal metadata with mismatched original.",
+    )
+
+    with pytest.raises(ValidationError) as exc:
+        invalid_entry.full_clean()
+
+    assert "Reversal link is only allowed for reversal entries" in str(exc.value)

@@ -109,6 +109,71 @@ def div_block_containing(template, marker):
     raise AssertionError(f"Could not find containing div for {marker}")
 
 
+def tag_block_containing(template, tag, marker):
+    marker_index = template.index(marker)
+    start = template.rfind(f"<{tag}", 0, marker_index + len(marker))
+    assert start != -1, f"Could not find opening <{tag}> before {marker}"
+    depth = 0
+    for match in re.finditer(rf"<(/?){tag}\b[^>]*>", template[start:], re.IGNORECASE | re.DOTALL):
+        if match.group(1):
+            depth -= 1
+            if depth == 0:
+                block = template[start : start + match.end()]
+                assert marker in block, f"Returned <{tag}> block does not contain {marker}"
+                return block
+        else:
+            depth += 1
+    raise AssertionError(f"Could not find containing {tag} for {marker}")
+
+
+def tag_block_after(template, tag, marker):
+    marker_index = template.index(marker)
+    start = template.index(f"<{tag}", marker_index)
+    depth = 0
+    for match in re.finditer(rf"<(/?){tag}\b[^>]*>", template[start:], re.IGNORECASE | re.DOTALL):
+        if match.group(1):
+            depth -= 1
+            if depth == 0:
+                return template[start : start + match.end()]
+        else:
+            depth += 1
+    raise AssertionError(f"Could not find {tag} after {marker}")
+
+
+def opening_tag_containing(template, tag, marker):
+    marker_index = template.index(marker)
+    for match in re.finditer(rf"<{tag}\b[^>]*>", template, re.IGNORECASE | re.DOTALL):
+        if match.start() <= marker_index < match.end():
+            return match.group(0)
+    start = template.rfind(f"<{tag}", 0, marker_index)
+    assert start != -1, f"Could not find opening <{tag}> before {marker}"
+    end = template.index(">", start) + 1
+    opening = template[start:end]
+    assert marker in opening, f"Returned <{tag}> opening tag does not contain {marker}"
+    return opening
+
+
+def class_tokens_from_value(class_value):
+    return set(class_value.split())
+
+
+def class_tokens_from_markup(markup):
+    match = re.search(r'\bclass="([^"]*)"', markup)
+    assert match is not None, f"Could not find class attribute in {markup[:120]}"
+    return class_tokens_from_value(match.group(1))
+
+
+def assert_class_tokens(tokens, *expected):
+    missing = [token for token in expected if token not in tokens]
+    assert not missing, f"Missing class tokens {missing} from {sorted(tokens)}"
+
+
+def assert_not_class_token_group(tokens, *unexpected):
+    assert not all(token in tokens for token in unexpected), (
+        f"Unexpected class token group {unexpected} found in {sorted(tokens)}"
+    )
+
+
 def legacy_utility_patterns(*, include_font_weight=False):
     patterns = [
         f"text-{'slate'}-",
@@ -260,14 +325,30 @@ def test_mobile_responsive_css_has_shared_baseline_contracts():
     mobile_break = css_rule_block(".cf-mobile-break")
     scroll_hint = css_rule_block(".cf-mobile-scroll-hint")
     table_scroll_hint = css_rule_block(".cf-table-scroll::after")
+    secret_toggle = css_rule_block(".cf-secret-toggle")
+    auth_panel_after = css_rule_block(".cf-auth-panel::after")
     mobile_block = css_media_block("max-width: 640px")
+    page_actions_mobile = re.search(r"(?ms)^\s*\.cf-page-actions\s*\{(?P<body>.*?)^\s*\}", mobile_block)
+    topbar_search_panel_mobile = re.search(
+        r"(?ms)^\s*\.cf-topbar-search \.cf-search-panel\s*\{(?P<body>.*?)^\s*\}",
+        mobile_block,
+    )
 
+    assert css_rule_block(".cf-page-header > :first-child") is not None
     assert "min-width: 0;" in mobile_break
     assert "overflow-wrap: anywhere;" in mobile_break
     assert "word-break: break-word;" in mobile_break
     assert "color: var(--cf-muted);" in scroll_hint
     assert "background: linear-gradient(90deg, transparent, var(--cf-surface));" in table_scroll_hint
+    assert "width: 2.5rem;" in secret_toggle
+    assert "min-height: 2.5rem;" in secret_toggle
+    assert "pointer-events: none;" in auth_panel_after
     assert ".cf-sticky-action-col" not in css
+    assert page_actions_mobile is not None
+    assert "width: 100%;" in page_actions_mobile.group("body")
+    assert "align-items: stretch;" in page_actions_mobile.group("body")
+    assert topbar_search_panel_mobile is not None
+    assert "position: fixed;" in topbar_search_panel_mobile.group("body")
     assert ".cf-row-actions .cf-btn-xs" in mobile_block
     assert "min-height: 2.75rem;" in mobile_block
     assert "min-height: 2.5rem;" in mobile_block
@@ -279,12 +360,26 @@ def test_mobile_dashboard_shell_contracts():
     overlay_start = template.index("<!-- Mobile overlay -->")
     overlay_end = template.index("<aside", overlay_start)
     overlay_block = template[overlay_start:overlay_end]
+    sidebar_opening = re.search(r"<aside\b(?P<attrs>[^>]*)>", template, re.DOTALL)
+    assert sidebar_opening is not None
+    sidebar_attrs = sidebar_opening.group("attrs")
+    sidebar_tokens = class_tokens_from_markup(sidebar_attrs)
+    sidebar_end = template.index("</aside>", sidebar_opening.start()) + len("</aside>")
+    sidebar_block = template[sidebar_opening.start() : sidebar_end]
+    sidebar_nav = re.search(r"<nav\b(?P<attrs>[^>]*)>", sidebar_block, re.DOTALL)
     assert "z-[45]" in overlay_block
+    assert_not_class_token_group(sidebar_tokens, "-translate-x-full", "lg:translate-x-0")
+    assert "sidebarOpen || isDesktop" in sidebar_attrs
+    assert sidebar_nav is not None
+    assert_class_tokens(class_tokens_from_markup(sidebar_nav.group("attrs")), "pb-safe")
 
     nav_start = template.index("<!-- Bottom mobile nav -->")
     nav_end = template.index("</nav>", nav_start) + len("</nav>")
     bottom_nav_block = template[nav_start:nav_end]
     assert "fixed bottom-0" in bottom_nav_block
+    for label in ["Overview", "Appts", "Calendar", "Patients", "Services", "More"]:
+        nav_label = tag_block_containing(bottom_nav_block, "span", f">{label}<")
+        assert_class_tokens(class_tokens_from_markup(nav_label), "block", "max-w-full", "truncate")
 
     settings_href = "{% url 'dashboard:settings' %}"
     settings_href_index = bottom_nav_block.index(settings_href)
@@ -308,6 +403,62 @@ def test_mobile_more_nav_marks_yakap_as_setup_active():
     settings_anchor = bottom_nav_block[settings_anchor_start:settings_anchor_end]
 
     assert "request.resolver_match.url_name == 'yakap'" in settings_anchor
+
+
+def test_mobile_responsive_page_specific_contracts():
+    home = source_text("templates/dashboard/home.html")
+    appointment_list = partial_text("appointment_list.html")
+    appointment_row = partial_text("appointment_row.html")
+    appointment_detail = partial_text("appointment_detail.html")
+    patient_row = partial_text("patient_row.html")
+    patient_detail = partial_text("patient_detail_content.html")
+    yakap = source_text("templates/dashboard/yakap.html")
+    css = css_text()
+    tablet_css = css_media_block("max-width: 768px")
+    calendar_card = re.search(r"(?ms)^\s*\.cf-calendar-card\s*\{(?P<body>.*?)^\s*\}", tablet_css)
+    home_header_copy = div_block_containing(home, "Today at {{ clinic.name }}")
+    home_title = tag_block_containing(home_header_copy, "h1", "Today at {{ clinic.name }}")
+    appointment_patient_cell = tag_block_containing(appointment_row, "td", "{{ appointment.patient.full_name }}")
+    appointment_service_cell = tag_block_containing(appointment_row, "td", "{{ appointment.service.name }}")
+    appointment_detail_patient_card = div_block_containing(appointment_detail, "{{ appointment.patient.full_name }}")
+    patient_identity_link = tag_block_containing(patient_row, "a", "{{ patient.full_name }}")
+    patient_identity_name = tag_block_containing(patient_identity_link, "span", "max-w-[14rem]")
+    patient_header_identity = div_block_containing(patient_detail, '<span class="grid h-14')
+    yakap_export_form = tag_block_containing(yakap, "form", "Export CSV")
+    yakap_export_button = tag_block_containing(yakap_export_form, "button", "Export CSV")
+    yakap_upcoming_section = tag_block_containing(yakap, "section", "Appointments where patients asked the clinic to check if YAKAP can apply.")
+    yakap_services_missing_section = tag_block_containing(yakap, "section", "Classify active services so staff and booking flows show consistent estimates.")
+    yakap_ledger_section = tag_block_containing(yakap, "section", "Latest manual estimated usage and reversals for this clinic.")
+    yakap_services_missing_table = opening_tag_containing(yakap_services_missing_section, "table", "cf-table-compact")
+    yakap_ledger_table = opening_tag_containing(yakap_ledger_section, "table", "cf-table-wide")
+
+    assert 'class="min-w-0"' in home_header_copy
+    assert_class_tokens(class_tokens_from_markup(home_title), "cf-page-title", "ui-page-title", "cf-mobile-break")
+    assert "cf-mobile-scroll-hint" in appointment_list
+    assert "cf-mobile-break" in appointment_patient_cell
+    assert "cf-mobile-break" in appointment_service_cell
+    assert "min-w-0" in appointment_detail_patient_card
+    assert_class_tokens(class_tokens_from_markup(patient_identity_name), "max-w-[14rem]", "break-all")
+    assert_class_tokens(
+        class_tokens_from_markup(patient_header_identity),
+        "flex",
+        "flex-col",
+        "items-start",
+        "gap-3",
+        "sm:flex-row",
+    )
+    for table in re.findall(r"<table\b[^>]*>", yakap_upcoming_section):
+        assert_not_class_token_group(class_tokens_from_markup(table), "cf-table", "cf-table-compact")
+    assert_class_tokens(class_tokens_from_markup(yakap_services_missing_table), "cf-table", "cf-table-compact")
+    assert_class_tokens(class_tokens_from_markup(yakap_ledger_table), "cf-table", "cf-table-wide")
+    assert_class_tokens(class_tokens_from_markup(yakap_export_button), "w-full", "sm:w-auto")
+    assert calendar_card is not None
+    assert "height: auto;" in calendar_card.group("body")
+    assert "overflow: visible;" in calendar_card.group("body")
+    assert "@media (pointer: coarse) {" in css
+    pointer_coarse_css = css_media_block("pointer: coarse")
+    assert "#calendar .fc-event" in pointer_coarse_css
+    assert "min-height: 2.5rem;" in pointer_coarse_css
 
 
 def test_calendar_mobile_viewport_contracts():
@@ -360,19 +511,20 @@ def test_calendar_responsive_css_collapses_header_filters_and_safe_month_scroll(
     assert "position: relative;" in legend_badge
     assert "font-variant-numeric: tabular-nums;" in time_label
     assert "border-radius: var(--cf-radius-sm);" in time_event
-    assert "height: calc(100dvh - 8.5rem);" in tablet_css
-    assert "min-height: calc(100dvh - 8.5rem);" in tablet_css
+    assert "height: auto;" in tablet_css
+    assert "min-height: 0;" in tablet_css
+    assert "overflow: visible;" in tablet_css
     assert ".cf-calendar-header" in tablet_css
     assert "grid-template-columns: 1fr;" in tablet_css
     assert "#calendar.cf-calendar-grid-scroll" in tablet_css
     assert ".cf-calendar-grid-scroll" in tablet_css
-    assert "overflow-x: auto;" in tablet_css
+    assert "overflow: auto;" in tablet_css
     assert "min-width: 44rem;" in tablet_css
     assert "#calendar .fc-dayGridMonth-view .fc-scroller" in tablet_css
-    assert "overflow-y: visible !important;" in tablet_css
     assert ".cf-calendar-title" in mobile_css
-    assert "height: calc(100dvh - 8.5rem);" in mobile_css
-    assert "min-height: calc(100dvh - 8.5rem);" in mobile_css
+    assert "height: auto;" in mobile_css
+    assert "min-height: 0;" in mobile_css
+    assert "overflow: visible;" in mobile_css
     assert "white-space: normal;" in mobile_css
     assert "overflow-wrap: anywhere;" in mobile_css
     assert "min-width: 42rem;" in mobile_css
@@ -489,6 +641,76 @@ def test_auth_public_and_widget_mobile_contracts():
     assert "@media (max-width: 640px)" in widget_views
 
 
+def test_settings_public_widget_mobile_hardening_contracts():
+    settings = source_text("templates/dashboard/settings.html")
+    business_hours = source_text("templates/dashboard/business_hours.html")
+    assistant_settings = source_text("templates/dashboard/assistant_settings.html")
+    messenger_settings = source_text("dashboard/templates/dashboard/messenger_settings.html")
+    widget_embed = source_text("templates/dashboard/widget_embed.html")
+    onboarding = source_text("templates/accounts/onboarding.html")
+    widget_success = source_text("templates/widget/booking_success.html")
+    widget = source_text("templates/widget/widget.html")
+    auth_panel_after = css_rule_block(".cf-auth-panel::after")
+    settings_break_cell = tag_block_containing(settings, "td", "settings-break-start-{{ weekday }}")
+    business_hours_break_cell = tag_block_containing(business_hours, "td", 'name="break_start_{{ weekday }}"')
+    provider_status = opening_tag_containing(assistant_settings, "span", "data-ai-provider-model-status")
+    model_option_class = re.search(r"button\.className = '(?P<class>[^']+)';", assistant_settings)
+    messenger_app_secret_toggle = opening_tag_containing(messenger_settings, "button", 'data-secret-field="app_secret"')
+    messenger_page_token_toggle = opening_tag_containing(messenger_settings, "button", 'data-secret-field="page_access_token"')
+    messenger_meta_callback_label = '<p class="cf-label">Meta Callback URL</p>'
+    messenger_django_webhook_label = '<p class="cf-label">Django Webhook URL</p>'
+    messenger_meta_callback_field = div_block_containing(messenger_settings, messenger_meta_callback_label)
+    messenger_django_webhook_field = div_block_containing(messenger_settings, messenger_django_webhook_label)
+    messenger_meta_callback_row = tag_block_after(messenger_meta_callback_field, "div", messenger_meta_callback_label)
+    messenger_django_webhook_row = tag_block_after(messenger_django_webhook_field, "div", messenger_django_webhook_label)
+    widget_script_pre = opening_tag_containing(widget_embed, "pre", 'id="script-code"')
+    widget_iframe_pre = opening_tag_containing(widget_embed, "pre", 'id="iframe-code"')
+    onboarding_title = tag_block_containing(onboarding, "h1", "Complete {{ clinic.name }} setup")
+    onboarding_hours_section = tag_block_containing(onboarding, "section", "Business Hours")
+    widget_scroll = opening_tag_containing(widget, "div", "cf-widget-scroll")
+    widget_chat_pane = opening_tag_containing(widget, "div", 'x-show="mode===\'chat\'"')
+    widget_chat_conversation_pane = opening_tag_containing(widget, "div", 'x-show="chatTab===\'conversation\'"')
+    widget_chat_faqs_pane = opening_tag_containing(widget, "div", 'x-show="chatTab===\'faqs\'"')
+    widget_faq_question = opening_tag_containing(widget, "span", 'x-text="faq.question"')
+    widget_faq_answer = opening_tag_containing(widget, "div", 'x-text="faq.answer"')
+
+    for break_cell in [settings_break_cell, business_hours_break_cell]:
+        break_cell_tokens = class_tokens_from_markup(break_cell)
+        assert_class_tokens(break_cell_tokens, "p-4")
+        assert "min-w-[14rem]" in break_cell
+        assert_not_class_token_group(break_cell_tokens, "p-4", "flex", "gap-2")
+    assert_class_tokens(
+        class_tokens_from_markup(provider_status),
+        "whitespace-normal",
+        "break-words",
+        "text-left",
+        "leading-snug",
+    )
+    assert model_option_class is not None
+    assert_class_tokens(class_tokens_from_value(model_option_class.group("class")), "break-words", "whitespace-normal")
+    for secret_toggle in [messenger_app_secret_toggle, messenger_page_token_toggle]:
+        secret_toggle_tokens = class_tokens_from_markup(secret_toggle)
+        assert_class_tokens(secret_toggle_tokens, "h-10", "w-10")
+        assert_not_class_token_group(secret_toggle_tokens, "h-8", "w-8")
+    for webhook_row in [messenger_meta_callback_row, messenger_django_webhook_row]:
+        copy_button = tag_block_containing(webhook_row, "button", "copy-label")
+        webhook_row_opening = opening_tag_containing(webhook_row, "div", "max-sm:flex-col")
+        assert_class_tokens(class_tokens_from_markup(webhook_row_opening), "max-sm:flex-col", "max-sm:items-stretch")
+        assert_class_tokens(class_tokens_from_markup(copy_button), "w-full", "sm:w-auto")
+    for pre in [widget_script_pre, widget_iframe_pre]:
+        pre_tokens = class_tokens_from_markup(pre)
+        assert_class_tokens(pre_tokens, "pr-4", "sm:pr-24")
+        assert "pr-24" not in pre_tokens
+    assert "cf-mobile-scroll-hint" in onboarding_hours_section
+    assert_class_tokens(class_tokens_from_markup(onboarding_title), "cf-mobile-break")
+    assert "min-h-dvh" in widget_success
+    for widget_pane in [widget_scroll, widget_chat_pane, widget_chat_conversation_pane, widget_chat_faqs_pane]:
+        assert_class_tokens(class_tokens_from_markup(widget_pane), "min-h-0")
+    assert_class_tokens(class_tokens_from_markup(widget_faq_question), "break-words")
+    assert_class_tokens(class_tokens_from_markup(widget_faq_answer), "cf-mobile-break")
+    assert "pointer-events: none;" in auth_panel_after
+
+
 def test_password_reset_templates_follow_auth_shell_contract():
     login = source_text("templates/accounts/login.html")
     signup = source_text("templates/accounts/signup.html")
@@ -517,6 +739,7 @@ def test_widget_mobile_embed_contracts_are_specific():
     widget_error = source_text("templates/widget/partials/booking_error.html")
     widget_embed = source_text("templates/dashboard/widget_embed.html")
     widget_views = source_text("widget/views.py")
+    chat_option_button = opening_tag_containing(widget, "button", 'x-text="opt.label"')
 
     assert "flex min-w-0 items-center gap-3" in widget
     assert "shrink-0 rounded-full" in widget
@@ -531,7 +754,7 @@ def test_widget_mobile_embed_contracts_are_specific():
     assert "accentForeground()" in widget
     assert "background-color:' + accentColor + '; color:' + accentForeground()" in widget
     assert "min-h-10 flex-1 rounded-lg" in widget
-    assert "min-h-10 rounded-xl border" in widget
+    assert_class_tokens(class_tokens_from_markup(chat_option_button), "min-h-10", "rounded-xl", "border", "break-words")
     assert "min-h-11 w-full rounded-xl" in widget
     assert "min-h-11 min-w-11" in widget
     assert "text-white text-sm font-black\" style=\"background-color: {{ clinic.safe_widget_accent_color }}" not in widget
@@ -1107,15 +1330,22 @@ def test_messenger_secret_reveal_buttons_do_not_overlap_input_border():
 
     assert len(reveal_buttons) == 2
     for button_class in reveal_buttons:
-        assert "cf-secret-toggle" in button_class
-        assert "inset-y-0" not in button_class
-        assert "top-1/2" in button_class
-        assert "-translate-y-1/2" in button_class
-        assert "h-8 w-8" in button_class
-        assert "justify-center" in button_class
-        assert "border-0" in button_class
-        assert "bg-transparent" in button_class
-        assert "p-0" in button_class
+        button_tokens = class_tokens_from_value(button_class)
+        assert_class_tokens(
+            button_tokens,
+            "cf-secret-toggle",
+            "top-1/2",
+            "-translate-y-1/2",
+            "right-1.5",
+            "h-10",
+            "w-10",
+            "justify-center",
+            "border-0",
+            "bg-transparent",
+            "p-0",
+        )
+        assert "inset-y-0" not in button_tokens
+        assert_not_class_token_group(button_tokens, "h-8", "w-8")
     assert ".cf-secret-toggle:focus-visible" in css
     assert "box-shadow: inset 0 0 0 2px var(--cf-focus);" in css
 
@@ -1160,9 +1390,9 @@ def test_dashboard_shell_uses_task_2_navigation_groups_and_labels():
     assert 'icon="panel-top-open" label="Booking Widget"' in template
     assert 'url_name="dashboard:billing"' in setup_group
     assert "icon=\"message-circle\" label=\"Assistant\"" in template
-    assert "<span>Overview</span>" in template
+    assert '<span class="block max-w-full truncate">Overview</span>' in template
     assert "label=\"Dashboard\"" not in template
-    assert "<span>Home</span>" not in template
+    assert '<span class="block max-w-full truncate">Home</span>' not in template
     assert ">Main<" not in template
     assert ">Config<" not in template
 
@@ -1429,7 +1659,7 @@ def test_responsive_table_css_uses_inner_scroll_and_mobile_width_variants():
     assert "cf-table-form" in css
     assert "cf-table-wide" in css
     assert ".cf-table { min-width: max(100%, 36rem); }" in mobile
-    assert ".cf-table-compact { min-width: 100%; }" in mobile
+    assert ".cf-table-compact { min-width: max(100%, 32rem); }" in mobile
     assert ".cf-table-form { min-width: max(100%, 42rem); }" in mobile
     assert ".cf-table-wide { min-width: max(100%, 48rem); }" in mobile
 
@@ -1791,9 +2021,29 @@ def test_patient_detail_modals_match_dashboard_focus_management():
 
 def test_patient_detail_visit_history_uses_table_surface_without_nested_card():
     template = partial_text("patient_detail_content.html")
+    visit_history = tag_block_containing(template, "section", 'id="visit-history-heading"')
+    visit_history_header = opening_tag_containing(visit_history, "div", "sm:justify-between")
+    table_wrap = opening_tag_containing(visit_history, "div", "cf-table-wrap")
 
-    assert '<div class="cf-card p-5 lg:p-6">\n    <div class="flex items-center justify-between">\n      <h2 id="visit-history-heading" tabindex="-1" class="cf-section-title">Visit History</h2>' not in template
-    assert '<section class="grid gap-4">\n    <div class="flex items-center justify-between">\n      <h2 id="visit-history-heading" tabindex="-1" class="cf-section-title">Visit History</h2>' in template
+    assert_class_tokens(class_tokens_from_markup(visit_history), "grid", "gap-4")
+    visit_history_header_tokens = class_tokens_from_markup(visit_history_header)
+    assert_class_tokens(
+        visit_history_header_tokens,
+        "flex",
+        "flex-col",
+        "items-start",
+        "gap-3",
+        "sm:flex-row",
+        "sm:items-center",
+        "sm:justify-between",
+    )
+    assert_not_class_token_group(visit_history_header_tokens, "flex", "items-center", "justify-between")
+    assert '<h2 id="visit-history-heading" tabindex="-1" class="cf-section-title">Visit History</h2>' in visit_history
+    assert_class_tokens(class_tokens_from_markup(table_wrap), "cf-table-wrap")
+    for div_opening in re.findall(r"<div\b[^>]*>", visit_history):
+        if 'class="' not in div_opening:
+            continue
+        assert_not_class_token_group(class_tokens_from_markup(div_opening), "cf-card", "p-5", "lg:p-6")
 
 
 def test_patient_detail_visit_history_summary_matches_faq_summary_pattern():
@@ -1958,7 +2208,8 @@ def test_assistant_ai_provider_card_uses_compact_design_system_layout():
     assert provider_form.count('widget=forms.Select(attrs={"class": _SELECT})') >= 2
     assert '"provider": forms.Select(attrs={"class": _SELECT})' in provider_form
     assert 'SavedProviderSecretInput(attrs={"class": f"{_INPUT} pr-12"' in provider_form
-    assert '"is_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX})' in provider_form
+    assert '"is_enabled"' not in provider_form
+    assert 'name="is_enabled"' not in provider_section
 
 
 def test_faq_summary_metrics_use_aqua_soft_pills():
@@ -2356,7 +2607,7 @@ def test_task_5_appointment_pagination_preserves_filters_for_htmx():
         "hx-get=\"?page={{ page_obj.paginator.num_pages }}",
     ]:
         assert page_snippet in appointment_list
-    assert "{% if search_query %}&q={{ search_query }}{% endif %}" in appointment_list
+    assert "{% if search_query %}&q={{ search_query|urlencode }}{% endif %}" in appointment_list
 
 
 def test_patient_pagination_preserves_search_for_htmx():

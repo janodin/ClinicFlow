@@ -3,9 +3,9 @@
 {% block content %}
 <div class="cf-page">
 <div class="cf-page-header">
-  <div>
-    <h1 class="cf-page-title ui-page-title">Today at {{ clinic.name }}</h1>
-    <p class="cf-page-description">{{ today|date:"F j, Y" }} · {{ clinic.timezone }} · <span class="inline-flex items-center gap-1"><i data-lucide="check-circle-2" class="h-3.5 w-3.5 text-[var(--cf-brand)]" aria-hidden="true"></i>Active clinic: {{ clinic.name }}</span></p>
+  <div class="min-w-0">
+    <h1 class="cf-page-title ui-page-title cf-mobile-break">Today at {{ clinic.name }}</h1>
+    <p class="cf-page-description cf-mobile-break">{{ today|date:"F j, Y" }} · {{ clinic.timezone }} · <span class="inline-flex min-w-0 flex-wrap items-center gap-1"><i data-lucide="check-circle-2" class="h-3.5 w-3.5 text-[var(--cf-brand)]" aria-hidden="true"></i>Active clinic: {{ clinic.name }}</span></p>
   </div>
   <div class="cf-page-actions">
     <a href="{% url 'dashboard:appointments' %}" class="cf-btn cf-btn-primary"><i data-lucide="calendar-plus" class="h-4 w-4"></i>New appointment</a>

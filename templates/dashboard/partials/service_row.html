@@ -12,13 +12,10 @@
     </div>
     <h2 class="cf-mobile-break mt-3 cf-section-title">{{ service.name }}</h2>
     <p class="mt-1.5 text-sm text-[var(--cf-muted)]">{{ service.effective_duration }} minutes</p>
-    {% if service.display_price %}
-      <p class="mt-1 text-sm text-[var(--cf-muted)]">₱ {{ service.price }}</p>
-    {% endif %}
     {% with yakap_rule=service.yakap_rule %}
       {% if yakap_rule %}
         <div class="mt-2">
-          <span class="cf-badge cf-badge-info">{{ yakap_rule.get_coverage_status_display }}</span>
+          <span class="cf-badge {% if yakap_rule.coverage_status == 'covered' or yakap_rule.coverage_status == 'possibly_covered' %}cf-badge-active{% elif yakap_rule.coverage_status == 'requires_verification' %}cf-badge-warning cf-status-pending{% elif yakap_rule.coverage_status == 'not_covered' or yakap_rule.coverage_status == 'cash_only' %}cf-status-cancelled{% else %}cf-badge-info{% endif %}">{{ yakap_rule.get_coverage_status_display }}{% if not yakap_rule.category_id %} - needs category{% endif %}</span>
         </div>
       {% endif %}
     {% endwith %}

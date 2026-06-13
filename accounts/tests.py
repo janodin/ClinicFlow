@@ -1,5 +1,4 @@
 import re
-from decimal import Decimal
 from datetime import time
 
 import pytest
@@ -23,7 +22,6 @@ def _onboarding_post_data():
         "booking_approval_mode": Clinic.APPROVAL_MANUAL,
         "service_name": "Dental Cleaning",
         "service_duration_minutes": "45",
-        "service_price": "800.00",
     }
     for weekday in range(7):
         data[f"open_time_{weekday}"] = "09:00"
@@ -292,7 +290,7 @@ def test_onboarding_saves_clinic_service_hours_and_clears_flag(client):
         requires_onboarding=True,
     )
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
     client.force_login(user)
 
     response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
@@ -310,7 +308,8 @@ def test_onboarding_saves_clinic_service_hours_and_clears_flag(client):
     service = clinic.services.get(name="Dental Cleaning")
     assert service.name == "Dental Cleaning"
     assert service.duration_minutes == 45
-    assert service.price == Decimal("800.00")
+    assert service.is_active is True
+    assert service.is_archived is False
     assert not clinic.services.filter(name="General Consultation").exists()
     business_hours = {
         business_hour.weekday: business_hour
@@ -344,7 +343,7 @@ def test_onboarding_business_hours_table_uses_scoped_headers(client):
         requires_onboarding=True,
     )
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
     client.force_login(user)
 
     response = client.get(reverse("accounts:onboarding"))
@@ -379,7 +378,7 @@ def test_completed_onboarding_post_redirects_without_overwriting_clinic_data(cli
         requires_onboarding=False,
     )
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    service = Service.objects.create(clinic=clinic, name="Existing Service", duration_minutes=30, price=Decimal("100.00"))
+    service = Service.objects.create(clinic=clinic, name="Existing Service", duration_minutes=30)
     client.force_login(user)
 
     response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
@@ -397,7 +396,6 @@ def test_completed_onboarding_post_redirects_without_overwriting_clinic_data(cli
     assert clinic.requires_onboarding is False
     assert service.name == "Existing Service"
     assert service.duration_minutes == 30
-    assert service.price == Decimal("100.00")
 
 
 @pytest.mark.django_db
@@ -416,8 +414,8 @@ def test_onboarding_duplicate_service_name_returns_form_error_without_clearing_f
         requires_onboarding=True,
     )
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
-    Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=60, price=Decimal("1200.00"))
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
+    Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=60)
     client.force_login(user)
 
     response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
@@ -444,12 +442,11 @@ def test_onboarding_archived_duplicate_service_name_returns_form_error_without_c
         requires_onboarding=True,
     )
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
     Service.objects.create(
         clinic=clinic,
         name="Dental Cleaning",
         duration_minutes=60,
-        price=Decimal("1200.00"),
         is_archived=True,
     )
     client.force_login(user)
@@ -485,8 +482,8 @@ def test_onboarding_allows_duplicate_service_name_in_another_clinic(client):
     other_group = ClinicGroup.objects.create(name="Other Clinic", owner=other_owner)
     other_clinic = Clinic.objects.create(group=other_group, name="Other Clinic", slug="other-clinic")
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
-    Service.objects.create(clinic=other_clinic, name="Dental Cleaning", duration_minutes=60, price=Decimal("1200.00"))
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
+    Service.objects.create(clinic=other_clinic, name="Dental Cleaning", duration_minutes=60)
     client.force_login(user)
 
     response = client.post(reverse("accounts:onboarding"), _onboarding_post_data())
@@ -497,7 +494,6 @@ def test_onboarding_allows_duplicate_service_name_in_another_clinic(client):
     assert clinic.requires_onboarding is False
     service = clinic.services.get(name="Dental Cleaning")
     assert service.duration_minutes == 45
-    assert service.price == Decimal("800.00")
 
 
 @pytest.mark.django_db
@@ -516,7 +512,7 @@ def test_onboarding_rejects_close_time_before_open_time_without_clearing_flag(cl
         requires_onboarding=True,
     )
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
     client.force_login(user)
     data = _onboarding_post_data()
     data["open_time_0"] = "17:00"
@@ -546,7 +542,7 @@ def test_onboarding_rejects_unpaired_break_time_without_clearing_flag(client):
         requires_onboarding=True,
     )
     ClinicMembership.objects.create(clinic=clinic, user=user, role=ClinicMembership.ROLE_OWNER)
-    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30, price=0)
+    Service.objects.create(clinic=clinic, name="General Consultation", duration_minutes=30)
     client.force_login(user)
     data = _onboarding_post_data()
     data.pop("break_end_0")

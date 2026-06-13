@@ -101,6 +101,10 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 
 .cf-secret-toggle {
+  width: 2.5rem;
+  min-width: 2.5rem;
+  height: 2.5rem;
+  min-height: 2.5rem;
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -442,6 +446,10 @@ code,
   gap: 1rem;
 }
 
+.cf-page-header > :first-child {
+  min-width: 0;
+}
+
 .cf-eyebrow {
   display: inline-flex;
   align-items: center;
@@ -463,6 +471,16 @@ code,
   font-family: "Inter", sans-serif;
   font-weight: 300;
   letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+
+.cf-page-title,
+.cf-page-description,
+.cf-section-title,
+.cf-section-description,
+.cf-modal-title,
+.cf-modal-description {
+  overflow-wrap: anywhere;
 }
 
 .cf-section-title {
@@ -481,6 +499,7 @@ code,
   color: var(--cf-muted);
   font-size: .875rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .cf-page-actions {
@@ -1121,12 +1140,17 @@ code,
 
 .cf-table-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: .75rem;
   border-bottom: 1px solid var(--cf-line-soft);
   background: var(--cf-surface);
   padding: .5rem .75rem;
+}
+
+.cf-table-header > :first-child {
+  min-width: 0;
 }
 
 .cf-table {
@@ -1194,6 +1218,18 @@ code,
   border-right: 1px solid rgba(34, 211, 238, .22);
   color: rgba(255, 255, 255, .88);
   box-shadow: inset -1px 0 0 rgba(165, 243, 252, .18), 10px 0 28px rgba(8, 51, 68, .12);
+}
+
+@media (max-width: 1023.98px) {
+  .cf-sidebar:not(.translate-x-0) {
+    transform: translateX(-100%);
+  }
+}
+
+@media (min-width: 1024px) {
+  .cf-sidebar {
+    transform: translateX(0);
+  }
 }
 
 .cf-sidebar-header {
@@ -1482,8 +1518,9 @@ code,
 
 @media (max-width: 768px) {
   .cf-calendar-card {
-    height: calc(100dvh - 8.5rem);
-    min-height: calc(100dvh - 8.5rem);
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   .cf-calendar-header {
@@ -1508,8 +1545,7 @@ code,
   .cf-calendar-filters .cf-select { min-width: 100%; }
 
   #calendar.cf-calendar-grid-scroll {
-    overflow-x: auto;
-    overflow-y: visible;
+    overflow: auto;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -1682,6 +1718,7 @@ code,
   color: var(--cf-muted);
   font-size: .875rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .cf-modal-body { padding: 1.25rem 1.5rem; }
@@ -1800,6 +1837,7 @@ a.cf-slot-button:hover,
   border: 1px solid rgba(255, 252, 246, .18);
   border-radius: 50%;
   background: rgba(255, 252, 246, .08);
+  pointer-events: none;
 }
 
 .cf-schedule-rail { position: relative; }
@@ -1914,6 +1952,30 @@ a.cf-slot-button:hover,
   }
 }
 
+@media (pointer: coarse) {
+  .cf-btn-xs,
+  .cf-row-actions .cf-btn-xs {
+    min-height: 2.5rem;
+    padding: .45rem .75rem;
+    font-size: .75rem;
+  }
+
+  .cf-row-actions .cf-btn-xs svg,
+  .cf-btn-xs svg {
+    width: .875rem;
+    height: .875rem;
+  }
+
+  #calendar .fc-event,
+  #calendar .fc-timegrid-event,
+  #calendar .fc-daygrid-more-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.5rem;
+  }
+}
+
 /* Migration compatibility: semantic aliases retained until active templates are normalized. */
 .cf-page-title,
 .ui-page-title {
@@ -1959,6 +2021,32 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
 @media (max-width: 640px) {
   .cf-page { gap: 1rem; }
   .cf-card { padding: 1rem; }
+
+  .cf-page-header {
+    align-items: flex-start;
+  }
+
+  .cf-page-actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .cf-tabs {
+    scroll-snap-type: x proximity;
+  }
+
+  .cf-tab {
+    scroll-snap-align: start;
+  }
+
+  .cf-topbar-search .cf-search-panel {
+    position: fixed;
+    left: 1rem;
+    right: 1rem;
+    width: auto;
+    max-height: min(420px, calc(100dvh - 5rem));
+  }
+
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea,
@@ -1994,7 +2082,7 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
   }
 
   .cf-table { min-width: max(100%, 36rem); }
-  .cf-table-compact { min-width: 100%; }
+  .cf-table-compact { min-width: max(100%, 32rem); }
   .cf-table-form { min-width: max(100%, 42rem); }
   .cf-table-wide { min-width: max(100%, 48rem); }
   .cf-table th,
@@ -2084,8 +2172,9 @@ button.bg-slate-100:hover { background: var(--cf-surface-warm) !important; }
   }
 
   .cf-calendar-card {
-    height: calc(100dvh - 8.5rem);
-    min-height: calc(100dvh - 8.5rem);
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   .cf-calendar-grid-scroll .fc {

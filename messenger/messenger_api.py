@@ -35,8 +35,10 @@ def fetch_page_profile(page_access_token):
     try:
         response = requests.get(
             f"{META_API_URL}/me",
-            params={"fields": "id,name", "access_token": page_access_token},
+            params={"fields": "id,name"},
+            headers={"Authorization": f"Bearer {page_access_token}"},
             timeout=10,
+            allow_redirects=False,
         )
         response.raise_for_status()
         data = response.json()
@@ -53,10 +55,15 @@ def fetch_page_profile(page_access_token):
 
 def _send_message(connection, psid, payload):
     url = f"{META_API_URL}/me/messages"
-    params = {"access_token": connection.page_access_token}
     body = {"messaging_type": "RESPONSE", "recipient": {"id": psid}, "message": payload}
     try:
-        resp = requests.post(url, params=params, json=body, timeout=10)
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {connection.page_access_token}"},
+            json=body,
+            timeout=10,
+            allow_redirects=False,
+        )
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException:

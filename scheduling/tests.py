@@ -66,6 +66,28 @@ def test_generate_slots_respects_break_time(clinic_setup):
 
 
 @pytest.mark.django_db
+def test_generate_slots_resumes_at_break_end_when_break_not_on_slot_grid(clinic_setup):
+    clinic, service = clinic_setup
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.update_or_create(
+        clinic=clinic,
+        weekday=target_date.weekday(),
+        defaults={
+            "is_open": True,
+            "open_time": time(9),
+            "close_time": time(12),
+            "break_start": time(10),
+            "break_end": time(10, 45),
+        },
+    )
+
+    labels = [slot["label"] for slot in generate_slots(clinic, service, target_date)]
+
+    assert "10:45 AM" in labels
+    assert "10:30 AM" not in labels
+
+
+@pytest.mark.django_db
 def test_generate_slots_respects_clinic_appointments(clinic_setup):
     clinic, service = clinic_setup
     target_date = timezone.localdate() + timedelta(days=1)

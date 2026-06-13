@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from appointments.models import Appointment
 from clinics.models import Clinic, ClinicGroup, ClinicMembership
+from patients.forms import PatientForm
 from patients.models import Patient
 from patients.utils import format_phone_display, normalize_phone
 from services.models import Service
@@ -110,6 +111,35 @@ def test_merge_scoped_to_clinic(clinic_setup, client):
     )
     assert response.status_code == 404
     assert Patient.objects.filter(pk=other_patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_merge_rejects_same_primary_and_duplicate_without_deleting_patient(clinic_setup, client):
+    clinic, _service, user = clinic_setup
+    client.force_login(user)
+    patient = Patient.objects.create(clinic=clinic, full_name="Same Patient", phone="09170001113")
+
+    response = client.post(
+        reverse("dashboard:patient_merge"),
+        {"primary_id": patient.id, "duplicate_id": patient.id},
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 400
+    assert Patient.objects.filter(pk=patient.pk).exists()
+
+
+@pytest.mark.django_db
+def test_patient_form_rejects_short_phone(clinic_setup):
+    clinic, _service, _user = clinic_setup
+
+    form = PatientForm(
+        clinic=clinic,
+        data={"full_name": "Short Phone", "phone": "123456", "email": ""},
+    )
+
+    assert not form.is_valid()
+    assert "phone" in form.errors
 
 
 @pytest.mark.django_db

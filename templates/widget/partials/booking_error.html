@@ -2,5 +2,5 @@
   <div class="rounded-[var(--cf-radius-lg)] border border-[var(--cf-danger)] bg-[var(--cf-danger-soft)] p-4 text-sm text-[var(--cf-danger)]">
     <p class="break-words">{{ error }}</p>
   </div>
-  <a href="{% url 'widget:home' clinic.slug %}" class="cf-btn cf-btn-secondary mt-4 w-full"><i data-lucide="arrow-left" class="h-4 w-4"></i>Back to Booking</a>
+  <a href="{% url 'widget:home' clinic.slug %}{% if widget_source == 'embed' %}?source=embed{% endif %}" class="cf-btn cf-btn-secondary mt-4 w-full"><i data-lucide="arrow-left" class="h-4 w-4"></i>Back to Booking</a>
 </div>

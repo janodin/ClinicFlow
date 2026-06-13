@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 
 from clinics.ai_provider_validation import validate_ai_provider_base_url
-from clinics.forms import AIProviderSettingsForm, SAVED_PROVIDER_SECRET_MASK
+from clinics.forms import AIProviderSettingsForm, ClinicSettingsForm, SAVED_PROVIDER_SECRET_MASK
 from clinics.models import Clinic, ClinicAIProviderSettings, ClinicGroup
 
 
@@ -18,6 +18,38 @@ def _create_clinic(slug="provider-clinic"):
     )
     group = ClinicGroup.objects.create(name=f"Group {slug}", owner=owner)
     return Clinic.objects.create(group=group, name=f"Clinic {slug}", slug=slug)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("duration", [0, 481])
+def test_clinic_settings_form_rejects_default_duration_outside_bounds(duration):
+    clinic = _create_clinic(f"default-duration-form-{duration}")
+
+    form = ClinicSettingsForm(
+        data={
+            "name": clinic.name,
+            "address": clinic.address,
+            "phone": clinic.phone,
+            "email": clinic.email,
+            "timezone": clinic.timezone,
+            "default_appointment_duration": duration,
+            "booking_approval_mode": clinic.booking_approval_mode,
+        },
+        instance=clinic,
+    )
+
+    assert not form.is_valid()
+    assert "default_appointment_duration" in form.errors
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("duration", [0, 481])
+def test_clinic_model_rejects_default_duration_outside_bounds(duration):
+    clinic = _create_clinic(f"default-duration-model-{duration}")
+    clinic.default_appointment_duration = duration
+
+    with pytest.raises(ValidationError):
+        clinic.save()
 
 
 @pytest.mark.django_db

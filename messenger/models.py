@@ -140,11 +140,15 @@ class MessengerInboundMessage(TimeStampedModel):
 
 class MessengerAITurn(TimeStampedModel):
     STATUS_ACTIVE = "active"
+    STATUS_CLAIMED = "claimed"
+    STATUS_SENDING = "sending"
     STATUS_SUPERSEDED = "superseded"
     STATUS_COMPLETED = "completed"
     STATUS_STALE = "stale"
     STATUS_CHOICES = [
         (STATUS_ACTIVE, "Active"),
+        (STATUS_CLAIMED, "Claimed"),
+        (STATUS_SENDING, "Sending"),
         (STATUS_SUPERSEDED, "Superseded"),
         (STATUS_COMPLETED, "Completed"),
         (STATUS_STALE, "Stale"),
@@ -161,3 +165,34 @@ class MessengerAITurn(TimeStampedModel):
 
     def __str__(self):
         return f"MessengerAITurn({self.conversation_id} #{self.input_sequence} {self.status})"
+
+
+class MessengerOutboundMessage(TimeStampedModel):
+    STATUS_PENDING = "pending"
+    STATUS_SENDING = "sending"
+    STATUS_SENT = "sent"
+    STATUS_FAILED = "failed"
+    STATUS_UNKNOWN = "unknown"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SENDING, "Sending"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_UNKNOWN, "Delivery Unknown"),
+    ]
+
+    turn = models.ForeignKey(MessengerAITurn, on_delete=models.CASCADE, related_name="outbound_messages")
+    body_index = models.PositiveIntegerField()
+    body_hash = models.CharField(max_length=64)
+    body = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    error = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["body_index"]
+        constraints = [
+            models.UniqueConstraint(fields=["turn", "body_index"], name="unique_messenger_outbound_turn_body"),
+        ]
+
+    def __str__(self):
+        return f"MessengerOutboundMessage({self.turn_id} #{self.body_index} {self.status})"

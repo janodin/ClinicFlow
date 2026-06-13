@@ -4,12 +4,14 @@ from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.db import transaction
 from django.utils import timezone
 
 from appointments.models import Appointment
 from clinics.models import ClinicFAQ
 from scheduling.utils import generate_slots
 from widget.views import _process_guest_booking, _find_next_available_date
+from yakap.services import cancel_unposted_yakap_snapshot, validate_yakap_appointment_cancellation
 from .faq_matcher import match_faq
 from .models import MessengerSession
 
@@ -30,6 +32,12 @@ def _quick_reply(text, options):
 
 def _text(text):
     return {"type": "text", "text": text}
+
+
+def _validation_error_message(exc):
+    if hasattr(exc, "messages") and exc.messages:
+        return exc.messages[0]
+    return str(exc)
 
 
 def _next_step_options():
@@ -116,24 +124,31 @@ def handle_message(session, text, postback):
 
     # Global cancel command (outside collect_info)
     if state != MessengerSession.STATE_COLLECT_INFO and lower in ("cancel", "cancel appointment"):
-        appt = (
-            Appointment.objects.filter(
-                clinic=clinic,
-                source=Appointment.SOURCE_MESSENGER,
-                status__in=[Appointment.STATUS_PENDING, Appointment.STATUS_CONFIRMED],
-                starts_at__gte=timezone.now(),
-                starts_at__lte=timezone.now() + timedelta(days=7),
-                messenger_psid=session.psid,
-            )
-            .order_by("starts_at")
-            .first()
-        )
-        if appt:
-            appt.status = Appointment.STATUS_CANCELLED
-            appt.save(update_fields=["status"])
-            actions.append(_text(f"Your appointment ({appt.reference_code}) has been cancelled."))
-        else:
-            actions.append(_text("I couldn't find a pending or confirmed appointment to cancel."))
+        try:
+            with transaction.atomic():
+                appt = (
+                    Appointment.objects.select_for_update()
+                    .filter(
+                        clinic=clinic,
+                        source=Appointment.SOURCE_MESSENGER,
+                        status__in=[Appointment.STATUS_PENDING, Appointment.STATUS_CONFIRMED],
+                        starts_at__gte=timezone.now(),
+                        starts_at__lte=timezone.now() + timedelta(days=7),
+                        messenger_psid=session.psid,
+                    )
+                    .order_by("starts_at")
+                    .first()
+                )
+                if appt:
+                    validate_yakap_appointment_cancellation(appt)
+                    appt.status = Appointment.STATUS_CANCELLED
+                    appt.save(update_fields=["status"])
+                    cancel_unposted_yakap_snapshot(appt)
+                    actions.append(_text(f"Your appointment ({appt.reference_code}) has been cancelled."))
+                else:
+                    actions.append(_text("I couldn't find a pending or confirmed appointment to cancel."))
+        except ValidationError as exc:
+            actions.append(_text(_validation_error_message(exc)))
         session.reset()
         actions.append(_next_step_quick_reply())
         return actions

@@ -40,6 +40,7 @@ from scheduling.models import ClinicBusinessHour, UnavailableDate
 from scheduling.utils import _date_is_unavailable, _inside_break, generate_slots, get_working_window, validate_slot
 from patients.forms import PatientForm
 from patients.models import Patient
+from patients.utils import normalize_phone
 from services.forms import ServiceForm
 from accounts.forms import AppPasswordChangeForm
 from yakap.forms import (
@@ -61,13 +62,17 @@ from yakap.models import (
     YakapLedgerEntry,
 )
 from yakap.services import (
+    YAKAP_LEDGER_SERVICE_RULE_ALLOWED_STATUSES,
     active_period_for_profile_category,
     balance_state_for,
+    cancel_unposted_yakap_snapshot,
     create_yakap_audit_event,
     ensure_default_yakap_setup,
     estimated_remaining_for,
     ledger_entry_over_limit,
+    patient_has_yakap_history,
     validate_yakap_ledger_posting,
+    validate_yakap_appointment_cancellation,
     yakap_verification_freshness,
     yakap_profile_for_patient,
 )
@@ -143,6 +148,24 @@ def _redirect_with_appointment_error(request, message):
     return redirect("dashboard:appointments")
 
 
+def _validation_error_message(exc):
+    if hasattr(exc, "messages") and exc.messages:
+        return exc.messages[0]
+    return str(exc)
+
+
+def _appointment_has_yakap_records(appointment):
+    return hasattr(appointment, "yakap_snapshot") or appointment.yakap_ledger_entries.exists()
+
+
+def _matched_patient_id_for_booking(clinic, phone):
+    normalized = normalize_phone(phone)
+    if not normalized:
+        return None
+    patient = clinic.patients.filter(normalized_phone=normalized).order_by("created_at").first()
+    return patient.id if patient else None
+
+
 def _require_settings_permission(user):
     membership = get_active_membership(user)
     if not user_can_manage_settings(membership):
@@ -151,9 +174,76 @@ def _require_settings_permission(user):
 
 def _safe_csv_cell(value):
     value = "" if value is None else str(value)
-    if value.startswith(("=", "+", "-", "@", "\t", "\r")):
+    if value.startswith(("=", "+", "-", "@", "\t", "\r", "\n")):
         return f"'{value}"
     return value
+
+
+def _parse_service_filter(value):
+    if not value:
+        return None
+    try:
+        service_id = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError("Invalid service filter.")
+    if service_id < 1 or service_id > 9223372036854775807:
+        raise ValidationError("Invalid service filter.")
+    return service_id
+
+
+def _clinic_day_bounds(clinic, date_value):
+    clinic_tz = ZoneInfo(clinic.timezone)
+    start = timezone.make_aware(datetime.combine(date_value, time.min), clinic_tz)
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def _apply_clinic_date_filters(qs, clinic, date_from, date_to):
+    if date_from:
+        parsed = parse_date(date_from)
+        if not parsed:
+            raise ValidationError("Invalid date filter.")
+        start, _ = _clinic_day_bounds(clinic, parsed)
+        qs = qs.filter(starts_at__gte=start)
+    if date_to:
+        parsed = parse_date(date_to)
+        if not parsed:
+            raise ValidationError("Invalid date filter.")
+        _, end = _clinic_day_bounds(clinic, parsed)
+        qs = qs.filter(starts_at__lt=end)
+    return qs
+
+
+def _appointment_htmx_response(request, clinic, appointment, message):
+    modal_source = request.POST.get("modal_source", "")
+    if modal_source == "calendar":
+        response = HttpResponse("")
+        response["HX-Trigger"] = _calendar_modal_trigger(message, close=True)
+        return response
+    if modal_source == "patient":
+        patient = get_object_or_404(
+            clinic.patients.prefetch_related("appointments__service"),
+            pk=appointment.patient_id,
+        )
+        response = render(
+            request,
+            "dashboard/partials/patient_detail_content.html",
+            _patient_detail_context(clinic, patient, membership=get_active_membership(request.user)),
+        )
+        response["HX-Retarget"] = "#patient-detail-content"
+        response["HX-Reswap"] = "innerHTML"
+    elif modal_source == "yakap":
+        response = HttpResponse("")
+        response["HX-Refresh"] = "true"
+    else:
+        response = render(request, "dashboard/partials/appointment_list.html", _appointments_context(request, clinic))
+        response["HX-Retarget"] = "#appointments-table"
+        response["HX-Reswap"] = "innerHTML"
+    response["HX-Trigger"] = json.dumps({
+        "appointmentSaved": True,
+        "toast-message": {"message": message, "type": "success"},
+    })
+    return response
 
 
 def _service_yakap_rule_instance(service):
@@ -213,6 +303,11 @@ def _request_filter_params(request):
         if current_url:
             current_params = QueryDict(urlparse(current_url).query)
             for key in current_params:
+                if key == "service":
+                    try:
+                        _parse_service_filter(current_params.get(key))
+                    except ValidationError:
+                        continue
                 if key not in params:
                     params.setlist(key, current_params.getlist(key))
         return params
@@ -235,13 +330,10 @@ def _appointments_context(request, clinic):
         qs = qs.filter(status=status)
     date_from = params.get("date_from")
     date_to = params.get("date_to")
-    if date_from:
-        qs = qs.filter(starts_at__date__gte=date_from)
-    if date_to:
-        qs = qs.filter(starts_at__date__lte=date_to)
+    qs = _apply_clinic_date_filters(qs, clinic, date_from, date_to)
     service_filter = params.get("service")
     if service_filter:
-        qs = qs.filter(service_id=service_filter)
+        qs = qs.filter(service_id=_parse_service_filter(service_filter))
     source_filter = params.get("source")
     if source_filter:
         qs = qs.filter(source=source_filter)
@@ -272,6 +364,25 @@ def _appointments_context(request, clinic):
     }
 
 
+def _yakap_ledger_blockers(clinic, appointment, snapshot, profile, freshness):
+    blockers = []
+    if appointment.status not in {Appointment.STATUS_CONFIRMED, Appointment.STATUS_COMPLETED}:
+        blockers.append("Confirm or complete the appointment before posting YAKAP usage.")
+    if not snapshot or snapshot.coverage_status not in {
+        AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT,
+        AppointmentYakapSnapshot.STATUS_POSTED,
+    }:
+        blockers.append("Mark the visit as verified for this visit before posting usage.")
+    if profile is None or profile.status != PatientYakapProfile.STATUS_ACTIVE:
+        blockers.append("Set the patient YAKAP profile to active after clinic verification.")
+    rule = getattr(appointment.service, "yakap_rule", None)
+    if not rule or not rule.category_id or not rule.category.is_active:
+        blockers.append("Configure an active YAKAP category for this service.")
+    elif rule.coverage_status not in YAKAP_LEDGER_SERVICE_RULE_ALLOWED_STATUSES:
+        blockers.append("Configure this service as YAKAP-covered before posting usage.")
+    return blockers
+
+
 def _appointment_detail_context(
     clinic,
     appointment,
@@ -282,7 +393,8 @@ def _appointment_detail_context(
     note_form=None,
     yakap_status_form=None,
     yakap_ledger_form=None,
-    can_manage_daily_ops=True,
+    can_manage_daily_ops=False,
+    membership=None,
 ):
     try:
         yakap_snapshot = appointment.yakap_snapshot
@@ -297,12 +409,15 @@ def _appointment_detail_context(
     except ClinicYakapSettings.DoesNotExist:
         yakap_settings = None
     yakap_freshness = yakap_verification_freshness(yakap_profile, settings=yakap_settings)
+    yakap_ledger_blockers = _yakap_ledger_blockers(clinic, appointment, yakap_snapshot, yakap_profile, yakap_freshness)
+    can_manage_yakap_settings = user_can_manage_settings(membership) if membership else False
     if yakap_status_form is None:
         yakap_status_form = (
             AppointmentYakapStatusForm(instance=yakap_snapshot)
             if yakap_snapshot
             else AppointmentYakapStatusForm()
         )
+    yakap_rule = getattr(appointment.service, "yakap_rule", None)
 
     return {
         "clinic": clinic,
@@ -314,15 +429,20 @@ def _appointment_detail_context(
         "yakap_snapshot": yakap_snapshot,
         "yakap_status_form": yakap_status_form,
         "yakap_verification_freshness": yakap_freshness,
+        "yakap_ledger_blockers": yakap_ledger_blockers,
+        "yakap_can_post_ledger": not yakap_ledger_blockers,
+        "can_manage_yakap_settings": can_manage_yakap_settings,
         "yakap_ledger_form": yakap_ledger_form if yakap_ledger_form is not None else YakapLedgerEntryForm(
             clinic,
             patient=appointment.patient,
+            category=getattr(yakap_rule, "category", None),
+            allow_privileged_entries=can_manage_yakap_settings,
         ),
         "can_manage_daily_ops": can_manage_daily_ops,
     }
 
 
-def _patient_detail_context(clinic, patient):
+def _patient_detail_context(clinic, patient, *, membership=None):
     appointments = clinic.appointments.filter(patient=patient)
     try:
         yakap_profile = patient.yakap_profile
@@ -354,6 +474,7 @@ def _patient_detail_context(clinic, patient):
         "yakap_profile_form": PatientYakapProfileForm(instance=yakap_profile_form_instance),
         "yakap_balances": yakap_balances,
         "yakap_ledger_entries": yakap_ledger_entries,
+        "can_manage_daily_ops": user_can_manage_daily_ops(membership) if membership else False,
     }
 
 
@@ -461,9 +582,11 @@ def calendar_events(request):
         Appointment.STATUS_NO_SHOW: {"backgroundColor": "#edf2f7", "borderColor": "#4a5870", "textColor": "#4a5870"},
     }
 
+    clinic_tz = ZoneInfo(clinic.timezone)
     for appointment in qs:
         colors = color_map.get(appointment.status, {})
-        local_start = appointment.starts_at.astimezone(ZoneInfo(clinic.timezone))
+        local_start = timezone.localtime(appointment.starts_at, clinic_tz)
+        local_end = timezone.localtime(appointment.ends_at, clinic_tz)
         starts_at_label = local_start.strftime("%I:%M %p").lstrip("0").lower()
         is_reschedulable = appointment.status not in {
             Appointment.STATUS_COMPLETED,
@@ -473,8 +596,8 @@ def calendar_events(request):
             {
                 "id": appointment.id,
                 "title": f"{starts_at_label} {appointment.patient.full_name}",
-                "start": appointment.starts_at.isoformat(),
-                "end": appointment.ends_at.isoformat(),
+                "start": local_start.isoformat(),
+                "end": local_end.isoformat(),
                 "className": f"status-{appointment.status}",
                 "editable": is_reschedulable,
                 "extendedProps": {"status": appointment.status},
@@ -570,7 +693,10 @@ def calendar_reschedule(request):
 @login_required
 def appointments(request):
     clinic = _clinic_or_redirect(request)
-    context = _appointments_context(request, clinic)
+    try:
+        context = _appointments_context(request, clinic)
+    except ValidationError as error:
+        return HttpResponse(error.messages[0], status=400)
     if request.headers.get("HX-Request"):
         return render(request, "dashboard/partials/appointment_list.html", context)
     return render(request, "dashboard/appointments.html", context)
@@ -623,6 +749,7 @@ def appointment_detail(request, pk):
             init_mode=init_mode,
             source=request.GET.get("source", ""),
             can_manage_daily_ops=can_manage_daily_ops,
+            membership=membership,
         ),
     )
 
@@ -635,36 +762,71 @@ def appointment_edit(request, pk):
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
     if request.method == "POST":
-        with transaction.atomic():
-            clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
-            form = StaffAppointmentForm(clinic, request.POST, instance=appointment)
-            if form.is_valid():
-                patient, _ = Patient.find_or_create_for_booking(
-                    clinic=clinic,
-                    full_name=form.cleaned_data["patient_name"],
-                    phone=form.cleaned_data["patient_phone"],
-                    email=form.cleaned_data["patient_email"],
+        saved = False
+        form = None
+        try:
+            with transaction.atomic():
+                clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
+                appointment = get_object_or_404(
+                    clinic.appointments.select_for_update().select_related("patient", "service"),
+                    pk=pk,
                 )
-                appointment = form.save(commit=False)
-                appointment.patient = patient
-                appointment.save()
-            else:
-                if request.headers.get("HX-Request"):
-                    return render(request, "dashboard/partials/appointment_form.html", {
-                        "form": form,
-                        "appointment": appointment,
-                        "patient_form": PatientForm(clinic=clinic),
-                        "source": request.POST.get("modal_source", ""),
-                    })
-                messages.error(request, form.errors.as_text())
-                return redirect("dashboard:appointments")
-        if form.is_valid():
+                existing_patient_id = appointment.patient_id
+                existing_service_id = appointment.service_id
+                existing_status = appointment.status
+                form = StaffAppointmentForm(clinic, request.POST, instance=appointment)
+                if form.is_valid():
+                    edited_appointment = form.save(commit=False)
+                    yakap_records_exist = _appointment_has_yakap_records(appointment)
+                    service_changed = edited_appointment.service_id != existing_service_id
+                    matched_patient_id = _matched_patient_id_for_booking(clinic, form.cleaned_data["patient_phone"])
+                    patient_changed = matched_patient_id != existing_patient_id
+                    if yakap_records_exist and (patient_changed or service_changed):
+                        form.add_error(None, "Cancel the YAKAP request or create a new appointment before changing patient or service.")
+                    else:
+                        cancelling = edited_appointment.status == Appointment.STATUS_CANCELLED and existing_status != Appointment.STATUS_CANCELLED
+                        if cancelling:
+                            validate_yakap_appointment_cancellation(appointment)
+                        patient, _ = Patient.find_or_create_for_booking(
+                            clinic=clinic,
+                            full_name=form.cleaned_data["patient_name"],
+                            phone=form.cleaned_data["patient_phone"],
+                            email=form.cleaned_data["patient_email"],
+                        )
+                        edited_appointment.patient = patient
+                        edited_appointment.save()
+                        if cancelling:
+                            cancel_unposted_yakap_snapshot(edited_appointment, actor=request.user)
+                        appointment = edited_appointment
+                        saved = True
+        except ValidationError as exc:
+            if form is None:
+                form = StaffAppointmentForm(clinic, request.POST, instance=appointment)
+            form.add_error(None, _validation_error_message(exc))
+            appointment.refresh_from_db()
+        if not saved:
+            if request.headers.get("HX-Request"):
+                return render(request, "dashboard/partials/appointment_form.html", {
+                    "form": form,
+                    "appointment": appointment,
+                    "patient_form": PatientForm(clinic=clinic),
+                    "source": request.POST.get("modal_source", ""),
+                })
+            messages.error(request, form.errors.as_text())
+            return redirect("dashboard:appointments")
+        if saved:
             if request.headers.get("HX-Request"):
                 if request.POST.get("modal_source") == "calendar":
                     response = render(
                         request,
                         "dashboard/partials/appointment_detail.html",
-                        _appointment_detail_context(clinic, appointment, source="calendar"),
+                        _appointment_detail_context(
+                            clinic,
+                            appointment,
+                            source="calendar",
+                            can_manage_daily_ops=True,
+                            membership=membership,
+                        ),
                     )
                     response["HX-Trigger"] = _calendar_modal_trigger("Appointment updated.")
                     return response
@@ -694,29 +856,27 @@ def appointment_edit(request, pk):
 @require_POST
 def appointment_cancel(request, pk):
     clinic = _clinic_or_redirect(request)
-    appointment = get_object_or_404(clinic.appointments, pk=pk)
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
-    if not appointment.can_transition_to(Appointment.STATUS_CANCELLED):
-        return _redirect_with_appointment_error(request, "Cannot cancel this appointment from its current status.")
-    reason = request.POST.get("cancellation_reason", "")
-    appointment.status = Appointment.STATUS_CANCELLED
-    appointment.cancellation_reason = reason
-    appointment.save()
+    try:
+        with transaction.atomic():
+            appointment = get_object_or_404(
+                clinic.appointments.select_for_update().select_related("patient", "service"),
+                pk=pk,
+            )
+            if not appointment.can_transition_to(Appointment.STATUS_CANCELLED):
+                return _redirect_with_appointment_error(request, "Cannot cancel this appointment from its current status.")
+            validate_yakap_appointment_cancellation(appointment)
+            reason = request.POST.get("cancellation_reason", "")
+            appointment.status = Appointment.STATUS_CANCELLED
+            appointment.cancellation_reason = reason
+            appointment.save()
+            cancel_unposted_yakap_snapshot(appointment, actor=request.user)
+    except ValidationError as exc:
+        return _redirect_with_appointment_error(request, _validation_error_message(exc))
     if request.headers.get("HX-Request"):
-        if request.POST.get("modal_source") == "calendar":
-            response = HttpResponse("")
-            response["HX-Trigger"] = _calendar_modal_trigger("Appointment cancelled.", close=True)
-            return response
-        response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
-        response["HX-Retarget"] = f"#appointment-row-{appointment.pk}"
-        response["HX-Reswap"] = "outerHTML"
-        response["HX-Trigger"] = json.dumps({
-            "appointmentSaved": True,
-            "toast-message": {"message": "Appointment cancelled.", "type": "success"}
-        })
-        return response
+        return _appointment_htmx_response(request, clinic, appointment, "Appointment cancelled.")
     messages.success(request, "Appointment cancelled.")
     return redirect("dashboard:appointments")
 
@@ -725,12 +885,15 @@ def appointment_cancel(request, pk):
 @require_POST
 def delete_appointment(request, pk):
     clinic = _clinic_or_redirect(request)
-    appointment = get_object_or_404(clinic.appointments.select_related("patient"), pk=pk)
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
-    patient_id = appointment.patient_id
-    appointment.delete()
+    with transaction.atomic():
+        appointment = get_object_or_404(clinic.appointments.select_for_update().select_related("patient"), pk=pk)
+        patient_id = appointment.patient_id
+        if appointment.yakap_ledger_entries.exists() or hasattr(appointment, "yakap_snapshot"):
+            return _redirect_with_appointment_error(request, "Cancel the appointment or reconcile YAKAP records before deleting it.")
+        appointment.delete()
     if request.headers.get("HX-Request"):
         modal_source = request.POST.get("modal_source", "")
         if modal_source == "calendar":
@@ -745,7 +908,7 @@ def delete_appointment(request, pk):
             response = render(
                 request,
                 "dashboard/partials/patient_detail_content.html",
-                _patient_detail_context(clinic, patient),
+                _patient_detail_context(clinic, patient, membership=get_active_membership(request.user)),
             )
             response["HX-Trigger"] = json.dumps({
                 "appointmentDeleted": True,
@@ -806,18 +969,7 @@ def appointment_reschedule(request, pk):
         appointment.ends_at = new_ends_at
         appointment.save()
     if request.headers.get("HX-Request"):
-        if request.POST.get("modal_source") == "calendar":
-            response = HttpResponse("")
-            response["HX-Trigger"] = _calendar_modal_trigger("Appointment rescheduled.", close=True)
-            return response
-        response = render(request, "dashboard/partials/appointment_row.html", {"appointment": appointment})
-        response["HX-Retarget"] = f"#appointment-row-{appointment.pk}"
-        response["HX-Reswap"] = "outerHTML"
-        response["HX-Trigger"] = json.dumps({
-            "appointmentSaved": True,
-            "toast-message": {"message": "Appointment rescheduled.", "type": "success"}
-        })
-        return response
+        return _appointment_htmx_response(request, clinic, appointment, "Appointment rescheduled.")
     messages.success(request, "Appointment rescheduled.")
     return redirect("dashboard:appointments")
 
@@ -825,19 +977,25 @@ def appointment_reschedule(request, pk):
 @login_required
 def export_csv(request):
     clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
     qs = clinic.appointments.select_related("patient", "service").all()
     status = request.GET.get("status")
     if status:
         qs = qs.filter(status=status)
     date_from = request.GET.get("date_from")
     date_to = request.GET.get("date_to")
-    if date_from:
-        qs = qs.filter(starts_at__date__gte=date_from)
-    if date_to:
-        qs = qs.filter(starts_at__date__lte=date_to)
+    try:
+        qs = _apply_clinic_date_filters(qs, clinic, date_from, date_to)
+    except ValidationError as error:
+        return HttpResponse(error.messages[0], status=400)
     service_filter = request.GET.get("service")
     if service_filter:
-        qs = qs.filter(service_id=service_filter)
+        try:
+            qs = qs.filter(service_id=_parse_service_filter(service_filter))
+        except ValidationError as error:
+            return HttpResponse(error.messages[0], status=400)
     source_filter = request.GET.get("source")
     if source_filter:
         qs = qs.filter(source=source_filter)
@@ -849,18 +1007,21 @@ def export_csv(request):
     response["Content-Disposition"] = 'attachment; filename="appointments.csv"'
     writer = csv.writer(response)
     writer.writerow(["ID", "Patient Name", "Phone", "Service", "Date", "Time", "Status", "Source", "Payment State", "Created At"])
+    clinic_tz = ZoneInfo(clinic.timezone)
     for appt in qs:
+        local_start = timezone.localtime(appt.starts_at, clinic_tz)
+        local_created = timezone.localtime(appt.created_at, clinic_tz)
         writer.writerow([
             appt.id,
-            appt.patient.full_name,
-            appt.patient.phone,
-            appt.service.name,
-            appt.starts_at.strftime("%Y-%m-%d"),
-            appt.starts_at.strftime("%H:%M"),
-            appt.get_status_display(),
-            appt.get_source_display(),
-            appt.get_payment_state_display(),
-            appt.created_at.strftime("%Y-%m-%d %H:%M"),
+            _safe_csv_cell(appt.patient.full_name),
+            _safe_csv_cell(appt.patient.phone),
+            _safe_csv_cell(appt.service.name),
+            local_start.strftime("%Y-%m-%d"),
+            local_start.strftime("%H:%M"),
+            _safe_csv_cell(appt.get_status_display()),
+            _safe_csv_cell(appt.get_source_display()),
+            _safe_csv_cell(appt.get_payment_state_display()),
+            local_created.strftime("%Y-%m-%d %H:%M"),
         ])
     return response
 
@@ -872,13 +1033,33 @@ def update_appointment(request, pk):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
+    form = None
+    updated = False
     appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
-    form = AppointmentStatusForm(request.POST, instance=appointment)
-    updated = form.is_valid()
-    if updated:
-        form.save()
-        messages.success(request, "Appointment updated.")
-    else:
+    try:
+        with transaction.atomic():
+            appointment = get_object_or_404(
+                clinic.appointments.select_for_update().select_related("patient", "service"),
+                pk=pk,
+            )
+            existing_status = appointment.status
+            form = AppointmentStatusForm(request.POST, instance=appointment)
+            updated = form.is_valid()
+            if updated:
+                cancelling = form.cleaned_data["status"] == Appointment.STATUS_CANCELLED and existing_status != Appointment.STATUS_CANCELLED
+                if cancelling:
+                    validate_yakap_appointment_cancellation(appointment)
+                appointment = form.save()
+                if cancelling:
+                    cancel_unposted_yakap_snapshot(appointment, actor=request.user)
+                messages.success(request, "Appointment updated.")
+    except ValidationError as exc:
+        if form is None:
+            form = AppointmentStatusForm(request.POST, instance=appointment)
+        form.add_error("status", _validation_error_message(exc))
+        updated = False
+        appointment.refresh_from_db()
+    if not updated:
         appointment.refresh_from_db()
     if request.headers.get("HX-Request"):
         response = render(
@@ -889,6 +1070,8 @@ def update_appointment(request, pk):
                 appointment,
                 status_form=AppointmentStatusForm(instance=appointment) if updated else form,
                 source=request.POST.get("modal_source", ""),
+                can_manage_daily_ops=True,
+                membership=membership,
             ),
         )
         if not updated:
@@ -928,6 +1111,8 @@ def add_appointment_note(request, pk):
                 appointment,
                 note_form=AppointmentNoteForm() if added else form,
                 source=request.POST.get("modal_source", ""),
+                can_manage_daily_ops=True,
+                membership=membership,
             ),
         )
         if not added:
@@ -967,8 +1152,12 @@ def update_appointment_yakap_status(request, pk):
         snapshot.clinic = clinic
         snapshot.appointment = appointment
         snapshot.requested = snapshot.coverage_status != AppointmentYakapSnapshot.STATUS_NOT_REQUESTED
-        snapshot.verified_at = timezone.now()
-        snapshot.verified_by = request.user
+        if snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT:
+            snapshot.verified_at = timezone.now()
+            snapshot.verified_by = request.user
+        else:
+            snapshot.verified_at = None
+            snapshot.verified_by = None
         snapshot.save()
         create_yakap_audit_event(
             clinic=clinic,
@@ -990,6 +1179,8 @@ def update_appointment_yakap_status(request, pk):
                 appointment,
                 source=request.POST.get("modal_source", ""),
                 yakap_status_form=AppointmentYakapStatusForm(instance=snapshot) if saved else form,
+                can_manage_daily_ops=True,
+                membership=membership,
             ),
         )
         if not saved:
@@ -1012,19 +1203,26 @@ def appointment_yakap_ledger(request, pk):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
+    can_manage_yakap_settings = user_can_manage_settings(membership)
 
     appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
     privileged_entry_types = {YakapLedgerEntry.TYPE_ADJUSTMENT, YakapLedgerEntry.TYPE_REVERSAL}
-    if request.POST.get("entry_type") in privileged_entry_types and not user_can_manage_settings(membership):
+    if request.POST.get("entry_type") in privileged_entry_types and not can_manage_yakap_settings:
         raise PermissionDenied
-    if request.POST.get("reversal_of") and not user_can_manage_settings(membership):
+    if request.POST.get("reversal_of") and not can_manage_yakap_settings:
         raise PermissionDenied
     submitted_category = None
     try:
         submitted_category = clinic.yakap_categories.filter(is_active=True, pk=request.POST.get("category")).first()
     except (TypeError, ValueError):
         submitted_category = None
-    form = YakapLedgerEntryForm(clinic, request.POST, patient=appointment.patient, category=submitted_category)
+    form = YakapLedgerEntryForm(
+        clinic,
+        request.POST,
+        patient=appointment.patient,
+        category=submitted_category,
+        allow_privileged_entries=can_manage_yakap_settings,
+    )
     saved = form.is_valid()
     if saved:
         entry = form.save(commit=False)
@@ -1038,12 +1236,18 @@ def appointment_yakap_ledger(request, pk):
             entry.verified_by = request.user
         try:
             with transaction.atomic():
+                appointment = get_object_or_404(
+                    clinic.appointments.select_for_update().select_related("patient", "service"),
+                    pk=appointment.pk,
+                )
                 locked_patient = clinic.patients.select_for_update().get(pk=appointment.patient_id)
                 try:
                     profile = locked_patient.yakap_profile
                 except Patient.yakap_profile.RelatedObjectDoesNotExist:
                     profile = None
                 entry.patient = locked_patient
+                entry.appointment = appointment
+                entry.service = appointment.service
                 entry.profile = profile
                 try:
                     settings_obj = clinic.yakap_settings
@@ -1130,7 +1334,18 @@ def appointment_yakap_ledger(request, pk):
                 clinic,
                 appointment,
                 source=request.POST.get("modal_source", ""),
-                yakap_ledger_form=YakapLedgerEntryForm(clinic, patient=appointment.patient) if saved else form,
+                yakap_ledger_form=(
+                    YakapLedgerEntryForm(
+                        clinic,
+                        patient=appointment.patient,
+                        category=getattr(getattr(appointment.service, "yakap_rule", None), "category", None),
+                        allow_privileged_entries=can_manage_yakap_settings,
+                    )
+                    if saved
+                    else form
+                ),
+                can_manage_daily_ops=True,
+                membership=membership,
             ),
         )
         if not saved:
@@ -1159,6 +1374,9 @@ def patients(request):
 @require_POST
 def create_patient(request):
     clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
     form = PatientForm(clinic=clinic, data=request.POST)
     if form.is_valid():
         patient = form.save(commit=False)
@@ -1171,13 +1389,14 @@ def create_patient(request):
 @login_required
 def patient_detail(request, pk):
     clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
     patient = get_object_or_404(
         clinic.patients.prefetch_related(
             "appointments__service",
         ),
         pk=pk,
     )
-    context = _patient_detail_context(clinic, patient)
+    context = _patient_detail_context(clinic, patient, membership=membership)
     return render(request, "dashboard/partials/patient_detail.html", context)
 
 
@@ -1218,6 +1437,9 @@ def update_patient_yakap_profile(request, pk):
 @login_required
 def patient_edit(request, pk):
     clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
     patient = get_object_or_404(clinic.patients, pk=pk)
     if request.method == "POST":
         form = PatientForm(clinic=clinic, data=request.POST, instance=patient)
@@ -1230,7 +1452,7 @@ def patient_edit(request, pk):
                 response = render(
                     request,
                     "dashboard/partials/patient_detail_content.html",
-                    _patient_detail_context(clinic, patient),
+                    _patient_detail_context(clinic, patient, membership=membership),
                 )
                 response["HX-Retarget"] = "#patient-detail-content"
                 response["HX-Reswap"] = "innerHTML"
@@ -1314,12 +1536,19 @@ def find_duplicates(request):
 @login_required
 def patient_merge(request):
     clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_daily_ops(membership):
+        raise PermissionDenied
     primary_id = request.POST.get("primary_id") or request.GET.get("primary_id")
     duplicate_id = request.POST.get("duplicate_id") or request.GET.get("duplicate_id")
     primary = get_object_or_404(clinic.patients, pk=primary_id) if primary_id else None
     duplicate = get_object_or_404(clinic.patients, pk=duplicate_id) if duplicate_id else None
 
     if request.method == "POST" and primary and duplicate:
+        if primary.pk == duplicate.pk:
+            return HttpResponse("Select two different patients to merge.", status=400)
+        if patient_has_yakap_history(primary) or patient_has_yakap_history(duplicate):
+            return HttpResponse('<p class="cf-error">Cannot merge patients with YAKAP history. Resolve YAKAP records manually before merging.</p>')
         appointment_count = duplicate.appointments.count()
         for appointment in duplicate.appointments.all():
             appointment.patient = primary
@@ -1668,20 +1897,24 @@ def settings(request):
     slot_results = None
     slot_service = None
     slot_date = None
+    active_tab = request.GET.get("tab") if request.GET.get("tab") in {"general", "hours", "unavailable", "preview"} else "general"
+    slot_preview_services = clinic.services.filter(is_active=True, is_archived=False)
 
     # Discriminate slot-preview POST from general settings POST
     if request.method == "POST" and request.POST.get("date") and request.POST.get("service"):
+        active_tab = "preview"
         service_id = request.POST.get("service")
         date_str = request.POST.get("date")
         if service_id and date_str:
-            from datetime import date as date_class
-            slot_service = get_object_or_404(clinic.services.filter(is_active=True, is_archived=False), pk=service_id)
+            service_pk = None
             try:
-                slot_date = date_class.fromisoformat(date_str)
-                if slot_service:
-                    slot_results = generate_slots(clinic, slot_service, slot_date)
-            except ValueError:
+                service_pk = _parse_service_filter(service_id)
+            except ValidationError:
                 pass
+            slot_service = slot_preview_services.filter(pk=service_pk).first() if service_pk else None
+            slot_date = parse_date(date_str)
+            if slot_service and slot_date:
+                slot_results = generate_slots(clinic, slot_service, slot_date)
         form = ClinicSettingsForm(instance=clinic)
     elif request.method == "POST":
         form = ClinicSettingsForm(request.POST, request.FILES, instance=clinic)
@@ -1705,6 +1938,8 @@ def settings(request):
         "slot_results": slot_results,
         "slot_service": slot_service,
         "slot_date": slot_date,
+        "active_tab": active_tab,
+        "slot_preview_services": slot_preview_services,
     })
 
 
@@ -1847,13 +2082,18 @@ def yakap(request):
             AppointmentYakapSnapshot.STATUS_UNVERIFIED,
             AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION,
         ],
-    ).order_by("starts_at")
+    ).exclude(status__in=[Appointment.STATUS_CANCELLED, Appointment.STATUS_NO_SHOW]).order_by("starts_at")
     unverified_appointments_count = unverified_appointments_qs.count()
     unverified_appointments = unverified_appointments_qs[:10]
     upcoming_yakap_appointments_qs = clinic.appointments.select_related("patient", "service", "yakap_snapshot").filter(
         starts_at__gte=timezone.now(),
         yakap_snapshot__requested=True,
-    ).exclude(status=Appointment.STATUS_CANCELLED).order_by("starts_at")
+        yakap_snapshot__coverage_status__in=[
+            AppointmentYakapSnapshot.STATUS_REQUESTED,
+            AppointmentYakapSnapshot.STATUS_UNVERIFIED,
+            AppointmentYakapSnapshot.STATUS_NEEDS_VERIFICATION,
+        ],
+    ).exclude(status__in=[Appointment.STATUS_CANCELLED, Appointment.STATUS_NO_SHOW]).order_by("starts_at")
     upcoming_yakap_appointments_count = upcoming_yakap_appointments_qs.count()
     upcoming_yakap_appointments = upcoming_yakap_appointments_qs[:10]
     recent_ledger_entries = clinic.yakap_ledger_entries.select_related(
@@ -1865,7 +2105,10 @@ def yakap(request):
     services_missing_rules_qs = clinic.services.filter(
         is_active=True,
         is_archived=False,
-        yakap_rule__isnull=True,
+    ).filter(
+        Q(yakap_rule__isnull=True)
+        | Q(yakap_rule__category__isnull=True)
+        | Q(yakap_rule__category__is_active=False)
     ).order_by("name")
     services_missing_rules_count = services_missing_rules_qs.count()
     services_missing_rules = services_missing_rules_qs[:10]
@@ -2250,9 +2493,14 @@ def slot_preview(request):
         service_id = request.POST.get("service")
         date_str = request.POST.get("date")
         if service_id and date_str:
-            selected_service = get_object_or_404(services, pk=service_id)
+            service_pk = None
+            try:
+                service_pk = _parse_service_filter(service_id)
+            except ValidationError:
+                pass
+            selected_service = services.filter(pk=service_pk).first() if service_pk else None
             selected_date = parse_date(date_str)
-            if selected_date:
+            if selected_service and selected_date:
                 slots = generate_slots(clinic, selected_service, selected_date)
     return render(request, "dashboard/slot_preview.html", {
         "clinic": clinic,

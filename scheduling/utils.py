@@ -53,6 +53,8 @@ def slot_is_available_for_appointment(clinic, starts_at, ends_at, exclude_appoin
 
 def validate_slot(clinic, starts_at, ends_at, exclude_appointment=None):
     from django.core.exceptions import ValidationError
+    if starts_at <= timezone.now():
+        raise ValidationError("Selected time must be in the future.")
     tz = ZoneInfo(clinic.timezone)
     local_start = starts_at.astimezone(tz)
     local_end = ends_at.astimezone(tz)
@@ -90,7 +92,10 @@ def generate_slots(clinic, service, date_value):
     slots = []
     while cursor + timedelta(minutes=duration) <= close_dt:
         end = cursor + timedelta(minutes=duration)
-        if cursor > now and not _inside_break(cursor.time(), end.time(), break_start, break_end):
+        if _inside_break(cursor.time(), end.time(), break_start, break_end):
+            cursor = max(_localize(clinic, date_value, break_end), end) if break_end else end
+            continue
+        if cursor > now:
             utc_start = cursor.astimezone(ZoneInfo("UTC"))
             utc_end = end.astimezone(ZoneInfo("UTC"))
             if slot_is_available(clinic, utc_start, utc_end):

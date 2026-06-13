@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import re
 import pytest
@@ -123,6 +125,72 @@ def test_viewer_appointment_detail_hides_daily_ops_forms(calendar_setup, client)
 
 
 @pytest.mark.django_db
+def test_viewer_cannot_create_patient(clinic_setup, client):
+    clinic, _service, _user = clinic_setup
+    User = get_user_model()
+    viewer = User.objects.create_user(username="patient-create-viewer@example.com", email="patient-create-viewer@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=viewer, role="viewer")
+    client.force_login(viewer)
+
+    response = client.post(
+        reverse("dashboard:create_patient"),
+        {"full_name": "Viewer Created", "phone": "09170009999", "email": "viewer@example.com"},
+    )
+
+    assert response.status_code == 403
+    assert not Patient.objects.filter(clinic=clinic, full_name="Viewer Created").exists()
+
+
+@pytest.mark.django_db
+def test_viewer_cannot_edit_patient(clinic_setup, client):
+    clinic, _service, _user = clinic_setup
+    patient = Patient.objects.create(clinic=clinic, full_name="Original Patient", phone="09170008888")
+    User = get_user_model()
+    viewer = User.objects.create_user(username="patient-edit-viewer@example.com", email="patient-edit-viewer@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=viewer, role="viewer")
+    client.force_login(viewer)
+
+    response = client.post(
+        reverse("dashboard:patient_edit", args=[patient.id]),
+        {"full_name": "Edited By Viewer", "phone": "09170007777", "email": "viewer@example.com"},
+    )
+
+    assert response.status_code == 403
+    patient.refresh_from_db()
+    assert patient.full_name == "Original Patient"
+    assert patient.phone == "09170008888"
+
+
+@pytest.mark.django_db
+def test_viewer_cannot_merge_patients(clinic_setup, client):
+    clinic, service, _user = clinic_setup
+    primary = Patient.objects.create(clinic=clinic, full_name="Primary Patient", phone="09170006666")
+    duplicate = Patient.objects.create(clinic=clinic, full_name="Duplicate Patient", phone="09170005555")
+    starts_at = timezone.now() + timedelta(days=1)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=duplicate,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+    )
+    User = get_user_model()
+    viewer = User.objects.create_user(username="patient-merge-viewer@example.com", email="patient-merge-viewer@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=viewer, role="viewer")
+    client.force_login(viewer)
+
+    response = client.post(
+        reverse("dashboard:patient_merge"),
+        {"primary_id": primary.id, "duplicate_id": duplicate.id},
+    )
+
+    assert response.status_code == 403
+    assert Patient.objects.filter(pk=duplicate.pk).exists()
+    appointment.refresh_from_db()
+    assert appointment.patient == duplicate
+
+
+@pytest.mark.django_db
 def test_search_patients(clinic_setup, client):
     clinic, service, user = clinic_setup
     client.force_login(user)
@@ -142,6 +210,23 @@ def test_search_appointments(clinic_setup, client):
     response = client.get(reverse("dashboard:search") + "?q=jane")
     assert response.status_code == 200
     assert b"Jane Doe" in response.content
+
+
+@pytest.mark.django_db
+def test_search_services_uses_effective_duration_without_price(clinic_setup, client):
+    clinic, _service, user = clinic_setup
+    clinic.default_appointment_duration = 45
+    clinic.save(update_fields=["default_appointment_duration", "updated_at"])
+    Service.objects.create(clinic=clinic, name="Default Duration Service", duration_minutes=None)
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:search") + "?q=default")
+
+    assert response.status_code == 200
+    assert b"Default Duration Service" in response.content
+    assert b"45 min" in response.content
+    assert b"None min" not in response.content
+    assert b"\xe2\x82\xb1" not in response.content
 
 
 @pytest.mark.django_db
@@ -176,6 +261,56 @@ def test_settings_business_hours_missing_rows_render_closed(clinic_setup, client
     sunday_checkbox = re.search(r'<input[^>]+name="is_open_6"[^>]*>', html).group(0)
     assert "checked" not in saturday_checkbox
     assert "checked" not in sunday_checkbox
+
+
+@pytest.mark.django_db
+def test_settings_slot_preview_post_keeps_preview_tab_visible(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:settings"),
+        {"service": service.id, "date": (timezone.localdate() + timedelta(days=1)).isoformat()},
+    )
+
+    assert response.status_code == 200
+    assert 'x-data="{tab: \'preview\'}"' in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_settings_slot_preview_lists_only_active_unarchived_services(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    Service.objects.create(clinic=clinic, name="Inactive Service", duration_minutes=30, is_active=False)
+    Service.objects.create(clinic=clinic, name="Archived Service", duration_minutes=30, is_archived=True)
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:settings") + "?tab=preview")
+    content = response.content.decode()
+    select = content[content.index('id="settings-slot-service"'):content.index("</select>", content.index('id="settings-slot-service"'))]
+
+    assert service.name in select
+    assert "Inactive Service" not in select
+    assert "Archived Service" not in select
+
+
+@pytest.mark.django_db
+def test_settings_slot_preview_handles_invalid_service_and_date(clinic_setup, client):
+    _clinic, _service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(reverse("dashboard:settings"), {"service": "not-a-number", "date": "not-a-date"})
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_slot_preview_handles_invalid_service_and_date(clinic_setup, client):
+    _clinic, _service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(reverse("dashboard:slot_preview"), {"service": "not-a-number", "date": "not-a-date"})
+
+    assert response.status_code == 200
 
 
 @pytest.mark.django_db
@@ -413,6 +548,48 @@ def test_calendar_page_uses_event_title_time_only(calendar_setup, client):
 
 
 @pytest.mark.django_db
+def test_calendar_page_uses_clinic_timezone_and_posts_start_str(calendar_setup, client):
+    clinic, _service, user, _patient, _appointment, _target_date = calendar_setup
+    clinic.timezone = "America/Los_Angeles"
+    clinic.save(update_fields=["timezone"])
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert "timeZone: 'America/Los_Angeles'" in content
+    assert "formData.append('starts_at', info.event.startStr)" in content
+    assert ".toISOString()" not in content
+
+
+@pytest.mark.django_db
+def test_calendar_events_emit_clinic_local_iso_datetimes(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    clinic.timezone = "America/Los_Angeles"
+    clinic.save(update_fields=["timezone"])
+    clinic_tz = ZoneInfo(clinic.timezone)
+    patient = Patient.objects.create(clinic=clinic, full_name="Late Patient", phone="09170001112")
+    local_start = timezone.datetime(2026, 1, 10, 23, 30, tzinfo=clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=local_start,
+        ends_at=local_start + timedelta(minutes=30),
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:calendar_events"))
+
+    assert response.status_code == 200
+    event = response.json()[0]
+    assert event["id"] == appointment.id
+    assert event["start"].startswith("2026-01-10T23:30:00")
+    assert event["start"].endswith("-08:00")
+
+
+@pytest.mark.django_db
 def test_appointments_page_uses_html_safe_alpine_focus_selector(clinic_setup, client):
     clinic, service, user = clinic_setup
     client.force_login(user)
@@ -542,6 +719,155 @@ def test_appointments_page_paginates_ten_appointments(clinic_setup, client):
 
 
 @pytest.mark.django_db
+def test_appointments_pagination_encodes_search_query(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    starts_at = timezone.now() + timedelta(days=1)
+    for index in range(11):
+        patient = Patient.objects.create(
+            clinic=clinic,
+            full_name=f"Alice &status=cancelled Patient {index:02d}",
+            phone=f"0917010{index:04d}",
+        )
+        appointment_start = starts_at + timedelta(hours=index)
+        Appointment.objects.create(
+            clinic=clinic,
+            patient=patient,
+            service=service,
+            starts_at=appointment_start,
+            ends_at=appointment_start + timedelta(minutes=30),
+        )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:appointments"), {"q": "Alice &status=cancelled"})
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert "q=Alice%20%26status%3Dcancelled" in content
+    assert "q=Alice &amp;status=cancelled" not in content
+
+
+@pytest.mark.django_db
+def test_appointments_page_rejects_invalid_service_filter(clinic_setup, client):
+    clinic, _service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:appointments"), {"service": "not-a-number"})
+
+    assert response.status_code == 400
+    assert b"Invalid service filter." in response.content
+
+
+@pytest.mark.django_db
+def test_appointments_export_rejects_invalid_service_filter(clinic_setup, client):
+    clinic, _service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:export_csv"), {"service": "not-a-number"})
+
+    assert response.status_code == 400
+    assert b"Invalid service filter." in response.content
+
+
+@pytest.mark.django_db
+def test_appointments_export_escapes_csv_formula_cells(clinic_setup, client):
+    clinic, _service, user = clinic_setup
+    patient = Patient.objects.create(clinic=clinic, full_name='=HYPERLINK("https://evil.test","x")', phone="@SUM(1,1)123")
+    service = Service.objects.create(clinic=clinic, name="+Danger Service", duration_minutes=30)
+    starts_at = timezone.now() + timedelta(days=1)
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=starts_at,
+        ends_at=starts_at + timedelta(minutes=30),
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:export_csv"))
+    rows = list(csv.reader(io.StringIO(response.content.decode())))
+
+    assert response.status_code == 200
+    assert rows[1][1].startswith("'=")
+    assert rows[1][2].startswith("'@")
+    assert rows[1][3].startswith("'+")
+
+
+@pytest.mark.django_db
+def test_appointments_date_filter_uses_clinic_timezone(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    clinic.timezone = "America/Los_Angeles"
+    clinic.save(update_fields=["timezone"])
+    clinic_tz = ZoneInfo(clinic.timezone)
+    patient = Patient.objects.create(clinic=clinic, full_name="Boundary Patient", phone="09170002222")
+    included = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.datetime(2026, 1, 10, 23, 30, tzinfo=clinic_tz),
+        ends_at=timezone.datetime(2026, 1, 11, 0, 0, tzinfo=clinic_tz),
+    )
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.datetime(2026, 1, 11, 0, 30, tzinfo=clinic_tz),
+        ends_at=timezone.datetime(2026, 1, 11, 1, 0, tzinfo=clinic_tz),
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:appointments"), {"date_from": "2026-01-10", "date_to": "2026-01-10"})
+
+    assert response.status_code == 200
+    assert list(response.context["appointments"]) == [included]
+
+
+@pytest.mark.django_db
+def test_export_date_filter_and_csv_times_use_clinic_timezone(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    clinic.timezone = "America/Los_Angeles"
+    clinic.save(update_fields=["timezone"])
+    clinic_tz = ZoneInfo(clinic.timezone)
+    patient = Patient.objects.create(clinic=clinic, full_name="CSV Patient", phone="09170003333")
+    included = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.datetime(2026, 1, 10, 23, 30, tzinfo=clinic_tz),
+        ends_at=timezone.datetime(2026, 1, 11, 0, 0, tzinfo=clinic_tz),
+    )
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=timezone.datetime(2026, 1, 11, 0, 30, tzinfo=clinic_tz),
+        ends_at=timezone.datetime(2026, 1, 11, 1, 0, tzinfo=clinic_tz),
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:export_csv"), {"date_from": "2026-01-10", "date_to": "2026-01-10"})
+    rows = list(csv.reader(io.StringIO(response.content.decode())))
+
+    assert response.status_code == 200
+    assert len(rows) == 2
+    assert rows[1][0] == str(included.id)
+    assert rows[1][4] == "2026-01-10"
+    assert rows[1][5] == "23:30"
+
+
+@pytest.mark.django_db
+def test_viewer_cannot_export_appointments_csv(clinic_setup, client):
+    clinic, _service, _user = clinic_setup
+    User = get_user_model()
+    viewer = User.objects.create_user(username="appointment-export-viewer@example.com", email="appointment-export-viewer@example.com")
+    ClinicMembership.objects.create(clinic=clinic, user=viewer, role="viewer")
+    client.force_login(viewer)
+
+    response = client.get(reverse("dashboard:export_csv"))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
 def test_calendar_page_uses_html_safe_alpine_focus_selector(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     client.force_login(user)
@@ -643,6 +969,56 @@ def test_calendar_cancel_triggers_refetch_without_table_row_target(calendar_setu
 
 
 @pytest.mark.django_db
+def test_htmx_cancel_refreshes_filtered_appointments_list(calendar_setup, client):
+    clinic, _service, user, patient, appointment, _target_date = calendar_setup
+    client.force_login(user)
+    current_url = reverse("dashboard:appointments") + f"?status={Appointment.STATUS_CONFIRMED}"
+
+    response = client.post(
+        reverse("dashboard:appointment_cancel", args=[appointment.id]),
+        HTTP_HX_REQUEST="true",
+        HTTP_HX_CURRENT_URL=current_url,
+    )
+
+    appointment.refresh_from_db()
+    assert appointment.status == Appointment.STATUS_CANCELLED
+    assert response.headers["HX-Retarget"] == "#appointments-table"
+    assert b"No appointments found" in response.content
+    assert patient.full_name.encode() not in response.content
+
+
+@pytest.mark.django_db
+def test_patient_history_cancel_refreshes_patient_detail(calendar_setup, client):
+    _clinic, _service, user, _patient, appointment, _target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_cancel", args=[appointment.id]),
+        {"modal_source": "patient"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.headers["HX-Retarget"] == "#patient-detail-content"
+    assert b"Contact Details" in response.content
+    assert b"Cancelled" in response.content
+
+
+@pytest.mark.django_db
+def test_yakap_cancel_does_not_target_missing_appointment_row(calendar_setup, client):
+    _clinic, _service, user, _patient, appointment, _target_date = calendar_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_cancel", args=[appointment.id]),
+        {"modal_source": "yakap"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.headers.get("HX-Refresh") == "true"
+    assert "HX-Retarget" not in response.headers
+
+
+@pytest.mark.django_db
 def test_calendar_edit_triggers_refetch_without_table_row_target(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     client.force_login(user)
@@ -673,6 +1049,36 @@ def test_calendar_edit_triggers_refetch_without_table_row_target(calendar_setup,
 
 
 @pytest.mark.django_db
+def test_appointment_edit_rejects_invalid_status_transition(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    appointment.status = Appointment.STATUS_COMPLETED
+    appointment.save(update_fields=["status"])
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_edit", args=[appointment.id]),
+        {
+            "patient_name": patient.full_name,
+            "patient_phone": patient.phone,
+            "patient_email": patient.email,
+            "service": service.id,
+            "date": target_date.isoformat(),
+            "time": "10:00",
+            "status": Appointment.STATUS_PENDING,
+            "payment_state": Appointment.PAYMENT_UNPAID,
+            "source": Appointment.SOURCE_STAFF,
+            "reason": "",
+        },
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"Cannot change status" in response.content
+    appointment.refresh_from_db()
+    assert appointment.status == Appointment.STATUS_COMPLETED
+
+
+@pytest.mark.django_db
 def test_calendar_reschedule_valid(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     client.force_login(user)
@@ -682,6 +1088,59 @@ def test_calendar_reschedule_valid(calendar_setup, client):
     assert response.json()["success"] is True
     appointment.refresh_from_db()
     assert appointment.starts_at == new_start
+
+
+@pytest.mark.django_db
+def test_htmx_reschedule_refreshes_filtered_appointments_list(calendar_setup, client):
+    clinic, _service, user, patient, appointment, target_date = calendar_setup
+    new_date = target_date + timedelta(days=1)
+    ClinicBusinessHour.objects.create(
+        clinic=clinic,
+        weekday=new_date.weekday(),
+        is_open=True,
+        open_time=time(9),
+        close_time=time(17),
+    )
+    client.force_login(user)
+    current_url = reverse("dashboard:appointments") + f"?date_from={target_date.isoformat()}&date_to={target_date.isoformat()}"
+
+    response = client.post(
+        reverse("dashboard:appointment_reschedule", args=[appointment.id]),
+        {"new_date": new_date.isoformat(), "new_time": "10:00"},
+        HTTP_HX_REQUEST="true",
+        HTTP_HX_CURRENT_URL=current_url,
+    )
+
+    appointment.refresh_from_db()
+    assert appointment.starts_at.date() == new_date
+    assert response.headers["HX-Retarget"] == "#appointments-table"
+    assert b"No appointments found" in response.content
+    assert patient.full_name.encode() not in response.content
+
+
+@pytest.mark.django_db
+def test_manual_appointment_reschedule_rejects_past_start(calendar_setup, client):
+    clinic, _service, user, _patient, appointment, _target_date = calendar_setup
+    original_start = appointment.starts_at
+    clinic_tz = ZoneInfo(clinic.timezone)
+    past_date = timezone.now().astimezone(clinic_tz).date() - timedelta(days=1)
+    ClinicBusinessHour.objects.update_or_create(
+        clinic=clinic,
+        weekday=past_date.weekday(),
+        defaults={"is_open": True, "open_time": time(9), "close_time": time(17)},
+    )
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:appointment_reschedule", args=[appointment.id]),
+        {"new_date": past_date.isoformat(), "new_time": "10:00"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"future" in response.content.lower()
+    appointment.refresh_from_db()
+    assert appointment.starts_at == original_start
 
 
 @pytest.mark.django_db
@@ -789,6 +1248,24 @@ def test_htmx_delete_appointment_refreshes_appointments_table(calendar_setup, cl
     assert b"Appointments" in response.content
     assert "appointmentDeleted" in response.headers["HX-Trigger"]
     assert "Appointment deleted." in response.headers["HX-Trigger"]
+
+
+@pytest.mark.django_db
+def test_htmx_delete_appointment_ignores_malformed_current_filter_url(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+    client.raise_request_exception = False
+
+    response = client.post(
+        reverse("dashboard:delete_appointment", args=[appointment.id]),
+        HTTP_HX_REQUEST="true",
+        HTTP_HX_CURRENT_URL="https://testserver/appointments/?service=not-a-number",
+    )
+
+    assert response.status_code == 200
+    assert not Appointment.objects.filter(pk=appointment.pk).exists()
+    assert b"Appointments" in response.content
+    assert "appointmentDeleted" in response.headers["HX-Trigger"]
 
 
 @pytest.mark.django_db
@@ -1224,8 +1701,10 @@ def test_owner_save_messenger_connection_fetches_and_displays_page_name(mock_get
     assert connection.page_name == "Demo Clinic Facebook"
     mock_get.assert_called_once_with(
         "https://graph.facebook.com/v18.0/me",
-        params={"fields": "id,name", "access_token": "PAGE-TOKEN-DASH"},
+        params={"fields": "id,name"},
+        headers={"Authorization": "Bearer PAGE-TOKEN-DASH"},
         timeout=10,
+        allow_redirects=False,
     )
 
     page = client.get(reverse("dashboard:messenger_settings"))

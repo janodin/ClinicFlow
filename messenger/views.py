@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import uuid
@@ -20,9 +21,7 @@ from .ai_tools import (
     build_ai_context,
     build_widget_ai_context,
     book_confirmed_appointment,
-    book_widget_confirmed_appointment,
     cancel_verified_appointment,
-    cancel_widget_verified_appointment,
     check_availability,
     check_widget_availability,
     find_verified_appointment,
@@ -31,7 +30,6 @@ from .ai_tools import (
     match_services,
     match_widget_services,
     reschedule_verified_appointment,
-    reschedule_widget_verified_appointment,
 )
 from .bot_engine import handle_message
 from .messenger_api import verify_signature
@@ -40,6 +38,7 @@ from .models import (
     MessengerConnection,
     MessengerConversation,
     MessengerInboundMessage,
+    MessengerOutboundMessage,
     MessengerProcessedMessage,
     MessengerSession,
 )
@@ -142,6 +141,60 @@ def _payload_contains_message_identity(data, page_id, psid, message_id):
     return False
 
 
+def _payload_contains_sender(data, page_id, psid):
+    if not isinstance(data, dict) or not page_id or not psid:
+        return False
+    entries = data.get("entry", [])
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        if not isinstance(entry, dict) or str(entry.get("id") or "") != page_id:
+            continue
+        messaging_items = entry.get("messaging", [])
+        if not isinstance(messaging_items, list):
+            continue
+        for messaging in messaging_items:
+            if not isinstance(messaging, dict):
+                continue
+            sender = messaging.get("sender", {})
+            if isinstance(sender, dict) and str(sender.get("id") or "") == psid:
+                return True
+    return False
+
+
+def _payload_message_for_identity(data, page_id, psid, message_id):
+    if not isinstance(data, dict) or not page_id or not psid:
+        return None
+    entries = data.get("entry", [])
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict) or str(entry.get("id") or "") != page_id:
+            continue
+        messaging_items = entry.get("messaging", [])
+        if not isinstance(messaging_items, list):
+            continue
+        for messaging in messaging_items:
+            if not isinstance(messaging, dict):
+                continue
+            sender = messaging.get("sender", {})
+            if not isinstance(sender, dict) or str(sender.get("id") or "") != psid:
+                continue
+            if message_id and _meta_message_id(messaging) != message_id:
+                continue
+            message = messaging.get("message", {})
+            if not isinstance(message, dict):
+                message = {}
+            postback = messaging.get("postback", {})
+            if not isinstance(postback, dict):
+                postback = {}
+            text = str(message.get("text") or "").strip()
+            payload = str(postback.get("payload") or "").strip()
+            if text or payload:
+                return {"message": text, "postback": payload}
+    return None
+
+
 def _active_connection_for_page(page_id):
     if not page_id:
         return None
@@ -207,6 +260,26 @@ def _meta_message_id(messaging):
     return str(message.get("mid") or postback.get("mid") or "").strip()
 
 
+def _stable_messenger_fallback_message_id(page_id, psid, message, postback):
+    payload = json.dumps(
+        {
+            "page_id": page_id,
+            "psid": psid,
+            "message": message,
+            "postback": postback,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return "fallback:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _stable_json_hash(value):
+    payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _mark_messenger_message_processed(connection, psid, message_id):
     if not message_id:
         return False
@@ -233,6 +306,40 @@ def _locked_messenger_conversation(connection, psid):
         defaults={"history": []},
     )
     return MessengerConversation.objects.select_for_update().get(pk=conversation.pk)
+
+
+def _messenger_ai_conversation_timeout():
+    try:
+        minutes = int(getattr(settings, "MESSENGER_SESSION_TIMEOUT_MINUTES", 30))
+    except (TypeError, ValueError):
+        minutes = 30
+    return timedelta(minutes=minutes)
+
+
+def _messenger_ai_last_user_activity_at(conversation):
+    return (
+        conversation.inbound_messages.order_by("-created_at")
+        .values_list("created_at", flat=True)
+        .first()
+        or conversation.updated_at
+    )
+
+
+def _expire_stale_messenger_ai_conversation(conversation):
+    timeout = _messenger_ai_conversation_timeout()
+    if _messenger_ai_last_user_activity_at(conversation) >= timezone.now() - timeout:
+        return
+    conversation.history = []
+    conversation.completed_sequence = conversation.last_sequence
+    conversation.active_turn_token = ""
+    conversation.active_input_sequence = 0
+    conversation.save(update_fields=[
+        "history",
+        "completed_sequence",
+        "active_turn_token",
+        "active_input_sequence",
+        "updated_at",
+    ])
 
 
 def _serialize_turn_message(message):
@@ -305,6 +412,32 @@ def _validate_locked_messenger_turn(connection, psid, turn_token, input_sequence
     )
 
 
+def _messenger_turn_is_current(data):
+    page_id = str(data.get("page_id", "")).strip()
+    psid = str(data.get("psid", "")).strip()
+    turn_token = str(data.get("turn_token", "")).strip()
+    input_sequence = _clean_turn_sequence(data.get("input_sequence"))
+    if not page_id or not psid or not turn_token or not input_sequence:
+        return False
+    connection = _active_connection_for_page(page_id)
+    if not connection:
+        return False
+    with transaction.atomic():
+        return _validate_locked_messenger_turn(connection, psid, turn_token, input_sequence)
+
+
+def _messenger_turn_context(data):
+    if not _messenger_turn_is_current(data):
+        return {"found": False}
+    return build_ai_context(data.get("page_id", ""))
+
+
+def _messenger_gateway_reply(data):
+    if str(data.get("channel", "")).strip().lower() == "messenger" and not _messenger_turn_is_current(data):
+        return {"reply": DEFAULT_AI_FALLBACK_MESSAGE, "fallback": True, "error": MESSENGER_AI_MUTATION_TURN_ERROR}
+    return build_gateway_reply(data)
+
+
 def _ai_tool_response(request, handler):
     if not _verify_ai_tool_secret(request):
         return JsonResponse({"error": "Unauthorized"}, status=401)
@@ -317,16 +450,85 @@ def _ai_tool_response(request, handler):
         return JsonResponse({"error": "Invalid request data"}, status=400)
 
 
+MESSENGER_AI_MUTATION_TURN_ERROR = "Messenger appointment mutation requires current turn metadata."
+WIDGET_AI_MUTATION_GATEWAY_ERROR = "Widget AI appointment mutations must use the AI gateway."
+
+
+def _has_messenger_mutation_turn_binding(data):
+    return bool(
+        str(data.get("page_id", "")).strip()
+        and str(data.get("psid", "")).strip()
+        and str(data.get("turn_token", "")).strip()
+        and _clean_turn_sequence(data.get("input_sequence"))
+    )
+
+
+def _missing_messenger_turn_response(result_key):
+    return {result_key: False, "error": MESSENGER_AI_MUTATION_TURN_ERROR}
+
+
+def _legacy_widget_mutation_response(result_key):
+    return {result_key: False, "error": WIDGET_AI_MUTATION_GATEWAY_ERROR}
+
+
+def _ai_book_handler(data):
+    if not _has_messenger_mutation_turn_binding(data):
+        return _missing_messenger_turn_response("created")
+    return book_confirmed_appointment(
+        data.get("page_id", ""),
+        data.get("service_id"),
+        data.get("starts_at"),
+        data.get("full_name", ""),
+        data.get("phone", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
+        data.get("email", ""),
+        data.get("reason", ""),
+        data.get("psid", ""),
+        data.get("turn_token", ""),
+        data.get("input_sequence"),
+    )
+
+
+def _ai_cancel_handler(data):
+    if not _has_messenger_mutation_turn_binding(data):
+        return _missing_messenger_turn_response("cancelled")
+    return cancel_verified_appointment(
+        data.get("page_id", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
+        data.get("reason", ""),
+        data.get("psid", ""),
+        data.get("turn_token", ""),
+        data.get("input_sequence"),
+    )
+
+
+def _ai_reschedule_handler(data):
+    if not _has_messenger_mutation_turn_binding(data):
+        return _missing_messenger_turn_response("rescheduled")
+    return reschedule_verified_appointment(
+        data.get("page_id", ""),
+        data.get("reference_code", ""),
+        data.get("phone", ""),
+        data.get("starts_at", ""),
+        _normalize_confirmed(data.get("confirmed", False)),
+        data.get("psid", ""),
+        data.get("turn_token", ""),
+        data.get("input_sequence"),
+    )
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def ai_context(request):
-    return _ai_tool_response(request, lambda data: build_ai_context(data.get("page_id", "")))
+    return _ai_tool_response(request, _messenger_turn_context)
 
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def ai_gateway_reply(request):
-    return _ai_tool_response(request, build_gateway_reply)
+    return _ai_tool_response(request, _messenger_gateway_reply)
 
 
 @csrf_exempt
@@ -349,19 +551,7 @@ def ai_availability(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def ai_book(request):
-    return _ai_tool_response(request, lambda data: book_confirmed_appointment(
-        data.get("page_id", ""),
-        data.get("service_id"),
-        data.get("starts_at"),
-        data.get("full_name", ""),
-        data.get("phone", ""),
-        _normalize_confirmed(data.get("confirmed", False)),
-        data.get("email", ""),
-        data.get("reason", ""),
-        data.get("psid", ""),
-        data.get("turn_token", ""),
-        data.get("input_sequence"),
-    ))
+    return _ai_tool_response(request, _ai_book_handler)
 
 
 @csrf_exempt
@@ -377,31 +567,13 @@ def ai_appointment_lookup(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def ai_appointment_cancel(request):
-    return _ai_tool_response(request, lambda data: cancel_verified_appointment(
-        data.get("page_id", ""),
-        data.get("reference_code", ""),
-        data.get("phone", ""),
-        _normalize_confirmed(data.get("confirmed", False)),
-        data.get("reason", ""),
-        data.get("psid", ""),
-        data.get("turn_token", ""),
-        data.get("input_sequence"),
-    ))
+    return _ai_tool_response(request, _ai_cancel_handler)
 
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def ai_appointment_reschedule(request):
-    return _ai_tool_response(request, lambda data: reschedule_verified_appointment(
-        data.get("page_id", ""),
-        data.get("reference_code", ""),
-        data.get("phone", ""),
-        data.get("starts_at", ""),
-        _normalize_confirmed(data.get("confirmed", False)),
-        data.get("psid", ""),
-        data.get("turn_token", ""),
-        data.get("input_sequence"),
-    ))
+    return _ai_tool_response(request, _ai_reschedule_handler)
 
 
 @csrf_exempt
@@ -443,10 +615,17 @@ def meta_signature_verify(request):
     if isinstance(message_id, str) and message_id.strip():
         clean_psid = psid.strip() if isinstance(psid, str) else ""
         clean_message_id = message_id.strip()
+        duplicate = False
         if verified and not _payload_contains_message_identity(raw_data, page_id, clean_psid, clean_message_id):
             verified = False
             response["verified"] = False
-        response["duplicate"] = False
+        if verified and clean_psid:
+            duplicate = MessengerInboundMessage.objects.filter(
+                conversation__connection=connection,
+                conversation__psid=clean_psid,
+                message_id=clean_message_id,
+            ).exists()
+        response["duplicate"] = duplicate
     return JsonResponse(response, status=200)
 
 
@@ -466,7 +645,9 @@ def ai_turn_register(request):
     message_id = data.get("message_id", "")
     message = data.get("message", "")
     postback = data.get("postback", "")
-    if not all(isinstance(value, str) for value in [page_id, psid, message_id, message, postback]):
+    raw_body = data.get("raw_body", "")
+    signature = data.get("signature", "")
+    if not all(isinstance(value, str) for value in [page_id, psid, message_id, message, postback, raw_body, signature]):
         return JsonResponse({"error": "Invalid request data"}, status=400)
     clean_page_id = page_id.strip()
     clean_psid = psid.strip()
@@ -489,12 +670,47 @@ def ai_turn_register(request):
             "process_now": False,
             "superseded_previous": False,
         }, status=200)
+    app_secret = _meta_app_secret_for_connection(connection)
+    raw_data = None
+    signature_valid = bool(
+        raw_body.strip()
+        and signature.strip()
+        and app_secret
+        and verify_signature(raw_body.encode("utf-8"), signature, app_secret)
+    )
+    if signature_valid:
+        try:
+            raw_data = json.loads(raw_body)
+        except (json.JSONDecodeError, TypeError):
+            raw_data = None
+    signed_message = _payload_message_for_identity(raw_data, clean_page_id, clean_psid, clean_message_id)
+    identity_valid = signed_message is not None
+    if not (
+        signature_valid
+        and _payload_matches_page(raw_data, clean_page_id)
+        and identity_valid
+    ):
+        return JsonResponse({
+            "registered": False,
+            "duplicate": False,
+            "process_now": False,
+            "superseded_previous": False,
+        }, status=200)
+    clean_message = signed_message["message"]
+    clean_postback = signed_message["postback"]
 
     with transaction.atomic():
         conversation = _locked_messenger_conversation(connection, clean_psid)
-        if clean_message_id and MessengerInboundMessage.objects.filter(
+        _expire_stale_messenger_ai_conversation(conversation)
+        inbound_message_id = clean_message_id or _stable_messenger_fallback_message_id(
+            clean_page_id,
+            clean_psid,
+            clean_message,
+            clean_postback,
+        )
+        if MessengerInboundMessage.objects.filter(
             conversation=conversation,
-            message_id=clean_message_id,
+            message_id=inbound_message_id,
         ).exists():
             return JsonResponse({
                 "registered": False,
@@ -506,18 +722,24 @@ def ai_turn_register(request):
         next_sequence = conversation.last_sequence + 1
         MessengerInboundMessage.objects.create(
             conversation=conversation,
-            message_id=clean_message_id,
+            message_id=inbound_message_id,
             sequence=next_sequence,
             text=clean_message,
             postback=clean_postback,
         )
-        superseded_previous = bool(conversation.active_turn_token)
-        if superseded_previous:
-            MessengerAITurn.objects.filter(
+        active_turn = None
+        if conversation.active_turn_token:
+            active_turn = MessengerAITurn.objects.select_for_update().filter(
                 conversation=conversation,
                 token=conversation.active_turn_token,
-                status=MessengerAITurn.STATUS_ACTIVE,
-            ).update(status=MessengerAITurn.STATUS_SUPERSEDED)
+            ).first()
+        superseded_previous = bool(
+            active_turn
+            and active_turn.status in [MessengerAITurn.STATUS_ACTIVE, MessengerAITurn.STATUS_CLAIMED]
+        )
+        if superseded_previous:
+            active_turn.status = MessengerAITurn.STATUS_SUPERSEDED
+            active_turn.save(update_fields=["status", "updated_at"])
 
         turn = MessengerAITurn.objects.create(
             conversation=conversation,
@@ -577,13 +799,23 @@ def ai_turn_claim(request):
                 "stale": True,
                 "has_pending": conversation.last_sequence > conversation.completed_sequence,
             }, status=200)
-        turn = MessengerAITurn.objects.filter(conversation=conversation, token=turn_token.strip()).first()
+        turn = MessengerAITurn.objects.select_for_update().filter(conversation=conversation, token=turn_token.strip()).first()
         if not turn:
             return JsonResponse({
                 "claimed": False,
                 "stale": True,
                 "has_pending": conversation.last_sequence > conversation.completed_sequence,
             }, status=200)
+        if turn.status == MessengerAITurn.STATUS_CLAIMED:
+            return JsonResponse({"claimed": False, "stale": False, "has_pending": False}, status=200)
+        if turn.status != MessengerAITurn.STATUS_ACTIVE:
+            return JsonResponse({
+                "claimed": False,
+                "stale": turn.status in [MessengerAITurn.STATUS_SUPERSEDED, MessengerAITurn.STATUS_STALE],
+                "has_pending": conversation.last_sequence > conversation.completed_sequence,
+            }, status=200)
+        turn.status = MessengerAITurn.STATUS_CLAIMED
+        turn.save(update_fields=["status", "updated_at"])
         payload = _turn_payload(conversation, turn)
 
     return JsonResponse({"claimed": True, "stale": False, **payload}, status=200)
@@ -621,12 +853,13 @@ def ai_turn_complete(request):
         turn = MessengerAITurn.objects.filter(conversation=conversation, token=turn_token.strip()).first()
         is_current = bool(
             turn
+            and turn.status in [MessengerAITurn.STATUS_ACTIVE, MessengerAITurn.STATUS_CLAIMED]
             and conversation.active_turn_token == turn_token.strip()
             and conversation.active_input_sequence == input_sequence
             and turn.input_sequence == input_sequence
         )
         if not is_current:
-            if turn and turn.status == MessengerAITurn.STATUS_ACTIVE:
+            if turn and turn.status in [MessengerAITurn.STATUS_ACTIVE, MessengerAITurn.STATUS_CLAIMED]:
                 turn.status = MessengerAITurn.STATUS_STALE
                 turn.save(update_fields=["status", "updated_at"])
             return JsonResponse({
@@ -726,6 +959,150 @@ def _facebook_body_for_turn(psid, reply_text, facebook_body):
     }
 
 
+def _facebook_bodies_for_turn(psid, reply_text, facebook_body, facebook_bodies=None):
+    if facebook_bodies is not None:
+        if not isinstance(facebook_bodies, list):
+            return None
+        if facebook_bodies:
+            bodies = []
+            for body in facebook_bodies:
+                prepared_body = _facebook_body_for_turn(psid, "", body)
+                if prepared_body is None:
+                    return None
+                bodies.append(prepared_body)
+            return bodies
+
+    prepared_body = _facebook_body_for_turn(psid, reply_text, facebook_body)
+    if prepared_body is None:
+        return None
+    return [prepared_body]
+
+
+def _record_messenger_outbound_messages(turn, facebook_bodies):
+    outbound_messages = []
+    for body_index, body in enumerate(facebook_bodies):
+        body_hash = _stable_json_hash(body)
+        outbound, created = MessengerOutboundMessage.objects.select_for_update().get_or_create(
+            turn=turn,
+            body_index=body_index,
+            defaults={
+                "body_hash": body_hash,
+                "body": body,
+                "status": MessengerOutboundMessage.STATUS_PENDING,
+            },
+        )
+        if not created and outbound.status in [
+            MessengerOutboundMessage.STATUS_PENDING,
+            MessengerOutboundMessage.STATUS_FAILED,
+        ] and (
+            outbound.body_hash != body_hash or outbound.body != body
+        ):
+            outbound.body_hash = body_hash
+            outbound.body = body
+            outbound.status = MessengerOutboundMessage.STATUS_PENDING
+            outbound.error = ""
+            outbound.save(update_fields=["body_hash", "body", "status", "error", "updated_at"])
+        outbound_messages.append(outbound)
+    return outbound_messages
+
+
+def _send_reply_payload(send_reply, stale, has_pending, sent, error=""):
+    payload = {
+        "send_reply": send_reply,
+        "stale": stale,
+        "has_pending": has_pending,
+        "sent": sent,
+    }
+    if error:
+        payload["error"] = error
+    return payload
+
+
+def _complete_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence, reply_text):
+    with transaction.atomic():
+        conversation = MessengerConversation.objects.select_for_update().filter(
+            connection=connection,
+            psid=clean_psid,
+        ).first()
+        if not conversation:
+            return _send_reply_payload(False, True, False, False)
+        turn = MessengerAITurn.objects.select_for_update().filter(
+            conversation=conversation,
+            token=clean_turn_token,
+        ).first()
+        if not turn or turn.input_sequence != input_sequence or turn.status in [
+            MessengerAITurn.STATUS_SUPERSEDED,
+            MessengerAITurn.STATUS_STALE,
+        ]:
+            return _send_reply_payload(
+                False,
+                True,
+                conversation.last_sequence > conversation.completed_sequence,
+                False,
+            )
+
+        clean_reply = reply_text.strip()
+        should_record_reply = turn.status != MessengerAITurn.STATUS_COMPLETED
+        if should_record_reply and conversation.completed_sequence < input_sequence:
+            messages = _pending_turn_messages(conversation, input_sequence)
+        elif should_record_reply:
+            messages = list(conversation.inbound_messages.filter(sequence=input_sequence).order_by("sequence"))
+        else:
+            messages = []
+        if should_record_reply:
+            history = conversation.history if isinstance(conversation.history, list) else []
+            user_content = _turn_user_content(messages)
+            if user_content and clean_reply:
+                history = (history + [
+                    {"role": "user", "content": user_content},
+                    {"role": "assistant", "content": clean_reply},
+                ])[-16:]
+            conversation.history = history
+        if conversation.completed_sequence < input_sequence:
+            conversation.completed_sequence = input_sequence
+        if conversation.active_turn_token == clean_turn_token:
+            conversation.active_turn_token = ""
+            conversation.active_input_sequence = 0
+        conversation.save(update_fields=[
+            "history",
+            "completed_sequence",
+            "active_turn_token",
+            "active_input_sequence",
+            "updated_at",
+        ])
+        turn.status = MessengerAITurn.STATUS_COMPLETED
+        turn.reply_text = clean_reply
+        turn.save(update_fields=["status", "reply_text", "updated_at"])
+        has_pending = conversation.last_sequence > conversation.completed_sequence
+
+    return _send_reply_payload(True, False, has_pending, True)
+
+
+def _reset_failed_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence):
+    with transaction.atomic():
+        conversation = MessengerConversation.objects.select_for_update().filter(
+            connection=connection,
+            psid=clean_psid,
+        ).first()
+        if not conversation:
+            return False
+        turn = MessengerAITurn.objects.select_for_update().filter(
+            conversation=conversation,
+            token=clean_turn_token,
+            input_sequence=input_sequence,
+        ).first()
+        if turn and turn.status == MessengerAITurn.STATUS_SENDING:
+            if (
+                conversation.active_turn_token == clean_turn_token
+                and conversation.active_input_sequence == input_sequence
+            ):
+                turn.status = MessengerAITurn.STATUS_ACTIVE
+            else:
+                turn.status = MessengerAITurn.STATUS_STALE
+            turn.save(update_fields=["status", "updated_at"])
+        return conversation.last_sequence > input_sequence
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def ai_turn_send_reply(request):
@@ -744,13 +1121,201 @@ def ai_turn_send_reply(request):
     if not all(isinstance(value, str) for value in [page_id, psid, turn_token, reply_text]) or not input_sequence:
         return JsonResponse({"error": "Invalid request data"}, status=400)
     clean_psid = psid.strip()
-    facebook_body = _facebook_body_for_turn(clean_psid, reply_text, data.get("facebook_body"))
-    if not clean_psid or facebook_body is None:
+    facebook_bodies = _facebook_bodies_for_turn(
+        clean_psid,
+        reply_text,
+        data.get("facebook_body"),
+        data.get("facebook_bodies"),
+    )
+    if not clean_psid or facebook_bodies is None:
         return JsonResponse({"error": "Invalid request data"}, status=400)
 
     connection = _active_connection_for_page(page_id.strip())
     if not connection:
         return JsonResponse({"send_reply": False, "stale": True, "has_pending": False, "sent": False}, status=200)
+
+    clean_turn_token = turn_token.strip()
+    complete_after_claim = ""
+    with transaction.atomic():
+        conversation = MessengerConversation.objects.select_for_update().filter(
+            connection=connection,
+            psid=clean_psid,
+        ).first()
+        if not conversation:
+            return JsonResponse({"send_reply": False, "stale": True, "has_pending": False, "sent": False}, status=200)
+        turn = MessengerAITurn.objects.select_for_update().filter(conversation=conversation, token=clean_turn_token).first()
+        is_completed_retry = bool(
+            turn
+            and turn.status == MessengerAITurn.STATUS_COMPLETED
+            and turn.input_sequence == input_sequence
+            and conversation.completed_sequence >= input_sequence
+        )
+        if is_completed_retry:
+            has_pending = conversation.last_sequence > conversation.completed_sequence
+            if MessengerOutboundMessage.objects.filter(
+                turn=turn,
+                body_index__lt=len(facebook_bodies),
+                status=MessengerOutboundMessage.STATUS_UNKNOWN,
+            ).exists():
+                return JsonResponse(_send_reply_payload(
+                    False,
+                    False,
+                    has_pending,
+                    False,
+                    "facebook_send_status_unknown",
+                ), status=200)
+            return JsonResponse(_send_reply_payload(True, False, has_pending, True), status=200)
+        if turn and turn.status == MessengerAITurn.STATUS_SENDING and turn.input_sequence == input_sequence:
+            sending_exists = MessengerOutboundMessage.objects.filter(
+                turn=turn,
+                body_index__lt=len(facebook_bodies),
+                status=MessengerOutboundMessage.STATUS_SENDING,
+            ).exists()
+            if sending_exists:
+                return JsonResponse(_send_reply_payload(
+                    False,
+                    False,
+                    conversation.last_sequence > input_sequence,
+                    False,
+                    "facebook_send_in_progress",
+                ), status=200)
+            if MessengerOutboundMessage.objects.filter(
+                turn=turn,
+                body_index__lt=len(facebook_bodies),
+                status=MessengerOutboundMessage.STATUS_UNKNOWN,
+            ).exists():
+                complete_after_claim = "unknown"
+            elif not MessengerOutboundMessage.objects.filter(
+                turn=turn,
+                body_index__lt=len(facebook_bodies),
+            ).exclude(status=MessengerOutboundMessage.STATUS_SENT).exists():
+                complete_after_claim = "sent"
+        is_current = bool(
+            turn
+            and turn.status in [MessengerAITurn.STATUS_ACTIVE, MessengerAITurn.STATUS_CLAIMED]
+            and conversation.active_turn_token == clean_turn_token
+            and conversation.active_input_sequence == input_sequence
+            and turn.input_sequence == input_sequence
+            and conversation.last_sequence == input_sequence
+        )
+        if not is_current and not complete_after_claim:
+            if turn and turn.status in [MessengerAITurn.STATUS_ACTIVE, MessengerAITurn.STATUS_CLAIMED]:
+                turn.status = MessengerAITurn.STATUS_STALE
+                turn.save(update_fields=["status", "updated_at"])
+            return JsonResponse(_send_reply_payload(
+                False,
+                True,
+                conversation.last_sequence > conversation.completed_sequence,
+                False,
+            ), status=200)
+
+        outbound_ids_to_send = []
+        if is_current:
+            outbound_messages = _record_messenger_outbound_messages(turn, facebook_bodies)
+            if any(outbound.status == MessengerOutboundMessage.STATUS_SENDING for outbound in outbound_messages):
+                return JsonResponse(_send_reply_payload(
+                    False,
+                    False,
+                    conversation.last_sequence > input_sequence,
+                    False,
+                    "facebook_send_in_progress",
+                ), status=200)
+            for outbound in outbound_messages:
+                if outbound.status in [
+                    MessengerOutboundMessage.STATUS_PENDING,
+                    MessengerOutboundMessage.STATUS_FAILED,
+                ]:
+                    outbound_ids_to_send.append(outbound.pk)
+            if outbound_ids_to_send:
+                turn.status = MessengerAITurn.STATUS_SENDING
+                turn.reply_text = reply_text.strip()
+                turn.save(update_fields=["status", "reply_text", "updated_at"])
+            elif MessengerOutboundMessage.objects.filter(
+                turn=turn,
+                body_index__lt=len(facebook_bodies),
+                status=MessengerOutboundMessage.STATUS_UNKNOWN,
+            ).exists():
+                complete_after_claim = "unknown"
+            elif not MessengerOutboundMessage.objects.filter(
+                turn=turn,
+                body_index__lt=len(facebook_bodies),
+            ).exclude(status=MessengerOutboundMessage.STATUS_SENT).exists():
+                complete_after_claim = "sent"
+
+    if complete_after_claim:
+        result = _complete_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence, reply_text)
+        if complete_after_claim == "unknown":
+            result.update({"send_reply": False, "sent": False, "error": "facebook_send_status_unknown"})
+        return JsonResponse(result, status=200)
+
+    for outbound_index, outbound_id in enumerate(outbound_ids_to_send):
+        with transaction.atomic():
+            outbound = MessengerOutboundMessage.objects.select_for_update().get(pk=outbound_id)
+            if outbound.status == MessengerOutboundMessage.STATUS_SENT:
+                continue
+            if outbound.status == MessengerOutboundMessage.STATUS_UNKNOWN:
+                result = _complete_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence, reply_text)
+                result.update({"send_reply": False, "sent": False, "error": "facebook_send_status_unknown"})
+                return JsonResponse(result, status=200)
+            if outbound.status == MessengerOutboundMessage.STATUS_SENDING:
+                return JsonResponse(_send_reply_payload(
+                    False,
+                    False,
+                    False,
+                    False,
+                    "facebook_send_in_progress",
+                ), status=200)
+            outbound.status = MessengerOutboundMessage.STATUS_SENDING
+            outbound.error = ""
+            outbound.save(update_fields=["status", "error", "updated_at"])
+            outbound_body = outbound.body
+        try:
+            response = requests.post(
+                "https://graph.facebook.com/v18.0/me/messages",
+                headers={"Authorization": f"Bearer {connection.page_access_token}"},
+                json=outbound_body,
+                timeout=10,
+                allow_redirects=False,
+            )
+        except requests.RequestException:
+            logger.error("Messenger turn reply delivery status unknown")
+            with transaction.atomic():
+                unknown_outbound = MessengerOutboundMessage.objects.select_for_update().get(pk=outbound_id)
+                unknown_outbound.status = MessengerOutboundMessage.STATUS_UNKNOWN
+                unknown_outbound.error = "facebook_send_status_unknown"
+                unknown_outbound.save(update_fields=["status", "error", "updated_at"])
+                MessengerOutboundMessage.objects.filter(
+                    pk__in=outbound_ids_to_send[outbound_index + 1:],
+                    status__in=[
+                        MessengerOutboundMessage.STATUS_PENDING,
+                        MessengerOutboundMessage.STATUS_FAILED,
+                    ],
+                ).update(status=MessengerOutboundMessage.STATUS_UNKNOWN, error="facebook_send_status_unknown")
+            result = _complete_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence, reply_text)
+            result.update({"send_reply": False, "sent": False, "error": "facebook_send_status_unknown"})
+            return JsonResponse(result, status=200)
+        try:
+            response.raise_for_status()
+        except requests.RequestException:
+            logger.error("Failed to send Messenger turn reply")
+            with transaction.atomic():
+                failed_outbound = MessengerOutboundMessage.objects.select_for_update().get(pk=outbound_id)
+                failed_outbound.status = MessengerOutboundMessage.STATUS_FAILED
+                failed_outbound.error = "facebook_send_failed"
+                failed_outbound.save(update_fields=["status", "error", "updated_at"])
+            has_pending = _reset_failed_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence)
+            return JsonResponse(_send_reply_payload(
+                False,
+                False,
+                has_pending,
+                False,
+                "facebook_send_failed",
+            ), status=502)
+        with transaction.atomic():
+            sent_outbound = MessengerOutboundMessage.objects.select_for_update().get(pk=outbound_id)
+            sent_outbound.status = MessengerOutboundMessage.STATUS_SENT
+            sent_outbound.error = ""
+            sent_outbound.save(update_fields=["status", "error", "updated_at"])
 
     with transaction.atomic():
         conversation = MessengerConversation.objects.select_for_update().filter(
@@ -759,70 +1324,57 @@ def ai_turn_send_reply(request):
         ).first()
         if not conversation:
             return JsonResponse({"send_reply": False, "stale": True, "has_pending": False, "sent": False}, status=200)
-        turn = MessengerAITurn.objects.filter(conversation=conversation, token=turn_token.strip()).first()
+        turn = MessengerAITurn.objects.select_for_update().filter(conversation=conversation, token=clean_turn_token).first()
         is_current = bool(
             turn
-            and turn.status == MessengerAITurn.STATUS_ACTIVE
-            and conversation.active_turn_token == turn_token.strip()
-            and conversation.active_input_sequence == input_sequence
+            and turn.status == MessengerAITurn.STATUS_SENDING
             and turn.input_sequence == input_sequence
-            and conversation.last_sequence == input_sequence
+            and conversation.last_sequence >= input_sequence
         )
         if not is_current:
-            if turn and turn.status == MessengerAITurn.STATUS_ACTIVE:
-                turn.status = MessengerAITurn.STATUS_STALE
-                turn.save(update_fields=["status", "updated_at"])
-            return JsonResponse({
-                "send_reply": False,
-                "stale": True,
-                "has_pending": conversation.last_sequence > conversation.completed_sequence,
-                "sent": False,
-            }, status=200)
+            return JsonResponse(_send_reply_payload(
+                False,
+                True,
+                conversation.last_sequence > input_sequence,
+                False,
+            ), status=200)
+        if MessengerOutboundMessage.objects.filter(
+            turn=turn,
+            body_index__lt=len(facebook_bodies),
+            status=MessengerOutboundMessage.STATUS_UNKNOWN,
+        ).exists():
+            complete_after_send = "unknown"
+        elif MessengerOutboundMessage.objects.filter(
+            turn=turn,
+            body_index__lt=len(facebook_bodies),
+            status=MessengerOutboundMessage.STATUS_SENDING,
+        ).exists():
+            return JsonResponse(_send_reply_payload(
+                False,
+                False,
+                conversation.last_sequence > input_sequence,
+                False,
+                "facebook_send_in_progress",
+            ), status=200)
+        elif MessengerOutboundMessage.objects.filter(
+            turn=turn,
+            body_index__lt=len(facebook_bodies),
+        ).exclude(status=MessengerOutboundMessage.STATUS_SENT).exists():
+            has_pending = _reset_failed_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence)
+            return JsonResponse(_send_reply_payload(
+                False,
+                False,
+                has_pending,
+                False,
+                "facebook_send_failed",
+            ), status=502)
+        else:
+            complete_after_send = "sent"
 
-        try:
-            response = requests.post(
-                "https://graph.facebook.com/v18.0/me/messages",
-                params={"access_token": connection.page_access_token},
-                json=facebook_body,
-                timeout=10,
-            )
-            response.raise_for_status()
-        except requests.RequestException:
-            logger.error("Failed to send Messenger turn reply")
-            return JsonResponse({
-                "send_reply": False,
-                "stale": False,
-                "has_pending": False,
-                "sent": False,
-                "error": "facebook_send_failed",
-            }, status=200)
-
-        messages = _pending_turn_messages(conversation, input_sequence)
-        clean_reply = reply_text.strip()
-        history = conversation.history if isinstance(conversation.history, list) else []
-        user_content = _turn_user_content(messages)
-        if user_content and clean_reply:
-            history = (history + [
-                {"role": "user", "content": user_content},
-                {"role": "assistant", "content": clean_reply},
-            ])[-16:]
-        conversation.history = history
-        conversation.completed_sequence = input_sequence
-        conversation.active_turn_token = ""
-        conversation.active_input_sequence = 0
-        conversation.save(update_fields=[
-            "history",
-            "completed_sequence",
-            "active_turn_token",
-            "active_input_sequence",
-            "updated_at",
-        ])
-        turn.status = MessengerAITurn.STATUS_COMPLETED
-        turn.reply_text = clean_reply
-        turn.save(update_fields=["status", "reply_text", "updated_at"])
-        has_pending = conversation.last_sequence > conversation.completed_sequence
-
-    return JsonResponse({"send_reply": True, "stale": False, "has_pending": has_pending, "sent": True}, status=200)
+    result = _complete_messenger_turn_after_send(connection, clean_psid, clean_turn_token, input_sequence, reply_text)
+    if complete_after_send == "unknown":
+        result.update({"send_reply": False, "sent": False, "error": "facebook_send_status_unknown"})
+    return JsonResponse(result, status=200)
 
 
 @csrf_exempt
@@ -851,16 +1403,7 @@ def widget_ai_availability(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def widget_ai_book(request):
-    return _ai_tool_response(request, lambda data: book_widget_confirmed_appointment(
-        data.get("clinic_slug", ""),
-        data.get("service_id"),
-        data.get("starts_at"),
-        data.get("full_name", ""),
-        data.get("phone", ""),
-        _normalize_confirmed(data.get("confirmed", False)),
-        data.get("email", ""),
-        data.get("reason", ""),
-    ))
+    return _ai_tool_response(request, lambda data: _legacy_widget_mutation_response("created"))
 
 
 @csrf_exempt
@@ -876,25 +1419,13 @@ def widget_ai_appointment_lookup(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def widget_ai_appointment_cancel(request):
-    return _ai_tool_response(request, lambda data: cancel_widget_verified_appointment(
-        data.get("clinic_slug", ""),
-        data.get("reference_code", ""),
-        data.get("phone", ""),
-        _normalize_confirmed(data.get("confirmed", False)),
-        data.get("reason", ""),
-    ))
+    return _ai_tool_response(request, lambda data: _legacy_widget_mutation_response("cancelled"))
 
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def widget_ai_appointment_reschedule(request):
-    return _ai_tool_response(request, lambda data: reschedule_widget_verified_appointment(
-        data.get("clinic_slug", ""),
-        data.get("reference_code", ""),
-        data.get("phone", ""),
-        data.get("starts_at", ""),
-        _normalize_confirmed(data.get("confirmed", False)),
-    ))
+    return _ai_tool_response(request, lambda data: _legacy_widget_mutation_response("rescheduled"))
 
 
 def _normalize_confirmed(value):
@@ -930,7 +1461,13 @@ def _send_facebook_reply(page_token, psid, actions):
         else:
             continue
         try:
-            response = requests.post(url, params={"access_token": page_token}, json=msg_payload, timeout=10)
+            response = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {page_token}"},
+                json=msg_payload,
+                timeout=10,
+                allow_redirects=False,
+            )
             response.raise_for_status()
         except requests.RequestException:
             logger.error("Failed to send Messenger reply")
@@ -939,7 +1476,7 @@ def _send_facebook_reply(page_token, psid, actions):
 @csrf_exempt
 @require_http_methods(["POST"])
 def n8n_webhook(request):
-    """Receive webhook calls from n8n and return reply actions + page token."""
+    """Receive webhook calls from n8n and return reply actions."""
     # Verify shared secret
     if not _verify_n8n_secret(request):
         return JsonResponse({"error": "Unauthorized"}, status=401)
@@ -960,23 +1497,21 @@ def n8n_webhook(request):
         return JsonResponse({"error": "Invalid request data"}, status=400)
 
     if not page_id or not psid:
-        return JsonResponse({"replies": [], "page_token": ""}, status=200)
+        return JsonResponse({"replies": []}, status=200)
 
     connection = _active_connection_for_page(page_id)
     if not connection:
-        return JsonResponse({"replies": [], "page_token": ""}, status=200)
+        return JsonResponse({"replies": []}, status=200)
     force_quick_replies = data.get("force_quick_replies") is True
     if _uses_messenger_ai_mode(connection) and not force_quick_replies:
         return JsonResponse({
             "replies": [_messenger_ai_fallback_action(connection)],
-            "page_token": connection.page_access_token,
         }, status=200)
 
     with transaction.atomic():
         if not _validate_locked_messenger_turn(connection, psid, turn_token, input_sequence):
             return JsonResponse({
                 "replies": [],
-                "page_token": "",
                 "page_id": page_id,
                 "psid": psid,
                 "stale": True,
@@ -995,7 +1530,6 @@ def n8n_webhook(request):
         actions = handle_message(session, text, postback)
     return JsonResponse({
         "replies": actions or [],
-        "page_token": connection.page_access_token,
         "page_id": page_id,
         "psid": psid,
     }, status=200)

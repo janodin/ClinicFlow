@@ -12,6 +12,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.http import require_POST
 
@@ -20,7 +21,7 @@ from clinics.models import Clinic, ClinicAISettings
 from patients.models import Patient, normalize_phone
 from scheduling.utils import generate_slots
 from widget.ai_client import AssistantUnavailable, call_assistant_webhook, fallback_message_for
-from yakap.services import create_appointment_yakap_snapshot
+from yakap.services import create_appointment_yakap_snapshot, is_public_yakap_request_allowed, public_yakap_badge_label
 
 
 MIN_BOOKING_PHONE_DIGITS = 7
@@ -30,6 +31,13 @@ WIDGET_AI_DEFAULT_MAX_MESSAGE_LENGTH = 1000
 WIDGET_AI_DEFAULT_RATE_LIMIT = 20
 WIDGET_AI_DEFAULT_RATE_WINDOW_SECONDS = 300
 WIDGET_AI_CONVERSATION_ID_MAX_LENGTH = 64
+GUEST_FULL_NAME_MAX_LENGTH = 160
+GUEST_PHONE_MAX_LENGTH = 40
+GUEST_EMAIL_MAX_LENGTH = 254
+GUEST_REASON_MAX_LENGTH = 2000
+WIDGET_PUBLIC_BOOKING_DEFAULT_RATE_LIMIT = 5
+WIDGET_PUBLIC_BOOKING_DEFAULT_RATE_WINDOW_SECONDS = 300
+BOOKING_RATE_LIMIT_MESSAGE = "Too many booking attempts. Please wait before trying again."
 
 
 def _clinic_localdate(clinic):
@@ -55,18 +63,25 @@ def _enabled_yakap_settings(clinic):
     return yakap_settings if yakap_settings.is_enabled else None
 
 
+def _parse_service_id(value):
+    if not value:
+        return None
+    try:
+        service_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return service_id if service_id > 0 else None
+
+
 def _booking_context(clinic, request):
     services = clinic.services.filter(is_active=True, is_archived=False).select_related("yakap_rule", "yakap_rule__category")
-    service_id = request.GET.get("service")
+    service_id = _parse_service_id(request.GET.get("service"))
     service = services.filter(pk=service_id).first() if service_id else services.first()
     date_str = request.GET.get("date")
     clinic_today = _clinic_localdate(clinic)
     selected_date = clinic_today + timedelta(days=1)
     if date_str:
-        try:
-            selected_date = timezone.datetime.fromisoformat(date_str).date()
-        except ValueError:
-            pass
+        selected_date = parse_date(date_str) or selected_date
     slots = []
     if service:
         slots = generate_slots(clinic, service, selected_date)
@@ -74,6 +89,13 @@ def _booking_context(clinic, request):
     if not slots:
         next_available_date = _find_next_available_date(clinic, service, selected_date)
     dates = [clinic_today + timedelta(days=i) for i in range(1, 15)]
+    yakap_settings = _enabled_yakap_settings(clinic)
+    promotable_service_ids = []
+    if yakap_settings:
+        for item in services:
+            if is_public_yakap_request_allowed(clinic, item, settings=yakap_settings):
+                promotable_service_ids.append(item.id)
+                item.public_yakap_badge_label = public_yakap_badge_label(item.yakap_rule)
     return {
         "clinic": clinic,
         "services": services,
@@ -82,7 +104,9 @@ def _booking_context(clinic, request):
         "selected_date": selected_date,
         "slots": slots,
         "next_available_date": next_available_date,
-        "yakap_settings": _enabled_yakap_settings(clinic),
+        "yakap_settings": yakap_settings,
+        "yakap_promotable_service_ids": promotable_service_ids,
+        "has_public_yakap_services": bool(promotable_service_ids),
     }
 
 
@@ -93,15 +117,17 @@ def _get_public_clinic_or_404(clinic_slug):
 @xframe_options_exempt
 def widget_book(request, clinic_slug):
     clinic = _get_public_clinic_or_404(clinic_slug)
+    source = _public_booking_source(request)
     if request.method == "POST":
-        appointment, error = _process_guest_booking(clinic, request.POST, _public_booking_source(request))
+        appointment, error = _process_guest_booking(clinic, request, source)
         if request.headers.get("HX-Request"):
             if error:
-                return render(request, "widget/partials/booking_error.html", {"clinic": clinic, "error": error}, status=409)
-            return render(request, "widget/partials/booking_success.html", {"clinic": clinic, "appointment": appointment})
+                status = 429 if error == BOOKING_RATE_LIMIT_MESSAGE else 409
+                return render(request, "widget/partials/booking_error.html", {"clinic": clinic, "error": error, "widget_source": source}, status=status)
+            return render(request, "widget/partials/booking_success.html", {"clinic": clinic, "appointment": appointment, "widget_source": source})
         if error:
             return redirect("widget:home", clinic_slug=clinic.slug)
-        return render(request, "widget/booking_success.html", {"clinic": clinic, "appointment": appointment})
+        return render(request, "widget/booking_success.html", {"clinic": clinic, "appointment": appointment, "widget_source": source})
     return redirect("widget:home", clinic_slug=clinic.slug)
 
 
@@ -126,27 +152,72 @@ def _public_booking_source(request):
     return Appointment.SOURCE_CHAT_WIDGET
 
 
-def _validate_guest_identity(full_name, phone, email):
+def _validate_guest_identity(full_name, phone, email, reason=""):
     if not full_name or not phone:
         return "Please provide your full name and phone number."
+    if len(full_name) > GUEST_FULL_NAME_MAX_LENGTH:
+        return "Please keep your full name under 160 characters."
+    if len(phone) > GUEST_PHONE_MAX_LENGTH:
+        return "Please keep your phone number under 40 characters."
     if len(normalize_phone(phone)) < MIN_BOOKING_PHONE_DIGITS:
         return "Please enter a valid phone number."
     if not email:
         return "Please provide your email address."
+    if len(email) > GUEST_EMAIL_MAX_LENGTH:
+        return "Please keep your email address under 254 characters."
     try:
         validate_email(email)
     except ValidationError:
         return "Please enter a valid email address."
+    if len(reason) > GUEST_REASON_MAX_LENGTH:
+        return "Please keep appointment notes under 2000 characters."
     return ""
 
 
-def _process_guest_booking(clinic, data, source):
+def _client_ip(request):
+    return request.META.get("REMOTE_ADDR", "unknown")
+
+
+def _rate_limit_increment_allowed(key, limit, window_seconds):
+    if cache.add(key, 1, timeout=window_seconds):
+        return True
+    try:
+        count = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, timeout=window_seconds)
+        return True
+    return count <= limit
+
+
+def _public_booking_rate_limit_error(clinic, request, phone, email):
+    limit = getattr(settings, "WIDGET_PUBLIC_BOOKING_RATE_LIMIT", WIDGET_PUBLIC_BOOKING_DEFAULT_RATE_LIMIT)
+    if limit <= 0:
+        return ""
+    window_seconds = getattr(
+        settings,
+        "WIDGET_PUBLIC_BOOKING_RATE_WINDOW_SECONDS",
+        WIDGET_PUBLIC_BOOKING_DEFAULT_RATE_WINDOW_SECONDS,
+    )
+    ip = _client_ip(request)
+    identity = normalize_phone(phone) or email.lower()
+    keys = [f"widget_booking_rate:clinic:{clinic.id}:ip:{ip}"]
+    if identity:
+        keys.append(f"widget_booking_rate:clinic:{clinic.id}:identity:{identity}")
+    for key in keys:
+        if not _rate_limit_increment_allowed(key, limit, window_seconds):
+            return BOOKING_RATE_LIMIT_MESSAGE
+    return ""
+
+
+def _process_guest_booking(clinic, request_or_data, source):
+    request = request_or_data if hasattr(request_or_data, "POST") else None
+    data = request.POST if request else request_or_data
     full_name = data.get("full_name", "").strip()
     phone = data.get("phone", "").strip()
     email = data.get("email", "").strip()
     reason = data.get("reason", "").strip()
     yakap_requested = data.get("yakap_requested") == "on"
-    error = _validate_guest_identity(full_name, phone, email)
+    error = _validate_guest_identity(full_name, phone, email, reason)
     if error:
         return None, error
 
@@ -162,7 +233,8 @@ def _process_guest_booking(clinic, data, source):
         locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
         if locked_clinic.requires_onboarding or not locked_clinic.is_active:
             return None, "Online booking is not available for this clinic yet."
-        service = locked_clinic.services.filter(is_active=True, is_archived=False, pk=data.get("service")).first()
+        service_id = _parse_service_id(data.get("service"))
+        service = locked_clinic.services.filter(is_active=True, is_archived=False, pk=service_id).first() if service_id else None
         if service is None:
             return None, "Please choose a valid service."
         if starts_at <= timezone.now():
@@ -176,6 +248,10 @@ def _process_guest_booking(clinic, data, source):
         )
         if not available:
             return None, SLOT_CONFLICT_MESSAGE
+        if request:
+            error = _public_booking_rate_limit_error(locked_clinic, request, phone, email)
+            if error:
+                return None, error
 
         patient, _ = Patient.find_or_create_for_booking(
             clinic=locked_clinic,
@@ -197,7 +273,8 @@ def _process_guest_booking(clinic, data, source):
             )
         except ValidationError:
             return None, SLOT_CONFLICT_MESSAGE
-        if yakap_requested and _enabled_yakap_settings(locked_clinic):
+        yakap_settings = _enabled_yakap_settings(locked_clinic)
+        if yakap_requested and is_public_yakap_request_allowed(locked_clinic, service, settings=yakap_settings):
             create_appointment_yakap_snapshot(appointment, requested=True)
     return appointment, None
 
@@ -259,7 +336,7 @@ def chat_api(request, clinic_slug):
     clinic = _get_public_clinic_or_404(clinic_slug)
     services = list(
         clinic.services.filter(is_active=True, is_archived=False).values(
-            "id", "name", "duration_minutes", "price", "display_price"
+            "id", "name", "duration_minutes"
         )
     )
     return JsonResponse({"message": clinic.widget_welcome_message, "services": services})
@@ -281,6 +358,38 @@ def _widget_chat_history_key(clinic, conversation_id="default"):
     return f"widget_chat_history_{clinic.id}_{conversation_id}"
 
 
+def _widget_chat_history_updated_at_key(clinic, conversation_id="default"):
+    return f"widget_chat_history_updated_at_{clinic.id}_{conversation_id}"
+
+
+def _widget_chat_history_timeout():
+    try:
+        minutes = int(getattr(
+            settings,
+            "WIDGET_AI_CHAT_HISTORY_TIMEOUT_MINUTES",
+            getattr(settings, "MESSENGER_SESSION_TIMEOUT_MINUTES", 30),
+        ))
+    except (TypeError, ValueError):
+        minutes = 30
+    return timedelta(minutes=minutes)
+
+
+def _widget_chat_history_expired(request, clinic, conversation_id="default"):
+    history = request.session.get(_widget_chat_history_key(clinic, conversation_id), [])
+    if not history:
+        return False
+    raw_updated_at = request.session.get(_widget_chat_history_updated_at_key(clinic, conversation_id))
+    if not raw_updated_at:
+        return True
+    try:
+        updated_at = datetime.fromisoformat(raw_updated_at)
+    except (TypeError, ValueError):
+        return True
+    if timezone.is_naive(updated_at):
+        updated_at = timezone.make_aware(updated_at, dt_timezone.utc)
+    return updated_at < timezone.now() - _widget_chat_history_timeout()
+
+
 def _widget_chat_history(request, clinic, ai_settings=None, conversation_id="default"):
     history_key = _widget_chat_history_key(clinic, conversation_id)
     if ai_settings:
@@ -291,11 +400,17 @@ def _widget_chat_history(request, clinic, ai_settings=None, conversation_id="def
             request.session[version_key] = current_version
             request.session.modified = True
             return []
+    if _widget_chat_history_expired(request, clinic, conversation_id):
+        request.session[history_key] = []
+        request.session[_widget_chat_history_updated_at_key(clinic, conversation_id)] = timezone.now().isoformat()
+        request.session.modified = True
+        return []
     return request.session.get(history_key, [])
 
 
 def _save_widget_chat_history(request, clinic, history, ai_settings=None, conversation_id="default"):
     request.session[_widget_chat_history_key(clinic, conversation_id)] = history[-10:]
+    request.session[_widget_chat_history_updated_at_key(clinic, conversation_id)] = timezone.now().isoformat()
     if ai_settings:
         request.session[_widget_chat_history_version_key(clinic, conversation_id)] = ai_settings.updated_at.isoformat()
 

@@ -4,8 +4,8 @@
 <div x-data="{detailOpen:false, trapModalFocus(event, root) { const focusable = Array.from(root.querySelectorAll(`a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])`)).filter((el) => el.offsetParent !== null); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } }" @keydown.escape.window="detailOpen=false" class="cf-page">
   <div class="cf-page-header">
     <div>
-      <h1 class="cf-page-title ui-page-title">YAKAP</h1>
-      <p class="cf-page-description">Configure patient-facing YAKAP copy, category-specific estimated limits, and clinic-owned coverage categories.</p>
+      <h1 class="cf-page-title ui-page-title">YAKAP requests</h1>
+      <p class="cf-page-description">Review YAKAP check requests, verify visits, and monitor clinic-estimated usage.</p>
     </div>
     <span class="cf-badge {% if yakap_settings.is_enabled %}cf-badge-active{% else %}cf-badge-inactive{% endif %}">
       {% if yakap_settings.is_enabled %}Enabled{% else %}Disabled{% endif %}
@@ -28,7 +28,7 @@
           <label class="cf-label" for="{{ export_form.ended_at.id_for_label }}">End</label>
           {{ export_form.ended_at }}
         </div>
-        <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="download" class="h-4 w-4"></i>Export CSV</button>
+        <button type="submit" class="cf-btn cf-btn-primary w-full sm:w-auto"><i data-lucide="download" class="h-4 w-4"></i>Export CSV</button>
       </div>
     </form>
   </section>
@@ -77,7 +77,7 @@
       <p class="mt-1 text-xs text-[var(--cf-muted)]">Negative estimated remaining</p>
     </div>
     <div class="cf-card p-4">
-      <p class="cf-kpi-label">Services missing YAKAP rules</p>
+      <p class="cf-kpi-label">Services needing YAKAP setup</p>
       <p class="mt-2 text-3xl font-light tabular-nums text-[var(--cf-ink)]">{{ services_missing_rules_count }}</p>
       <p class="mt-1 text-xs text-[var(--cf-muted)]">Active services to classify</p>
     </div>
@@ -87,15 +87,15 @@
     <section class="cf-card p-6">
       <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 class="cf-section-title">Upcoming YAKAP appointments</h2>
-          <p class="mt-1 text-sm text-[var(--cf-muted)]">Future visits where patients requested estimated YAKAP coverage.</p>
+          <h2 class="cf-section-title">Needs verification</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Appointments where patients asked the clinic to check if YAKAP can apply.</p>
         </div>
         <span class="cf-badge cf-badge-info">{{ upcoming_yakap_appointments_count }} upcoming</span>
       </div>
       {% if upcoming_yakap_appointments %}
         <div class="cf-table-wrap">
           <div class="cf-table-scroll" tabindex="0" aria-label="Upcoming YAKAP appointments table">
-            <table class="cf-table cf-table-compact">
+            <table class="cf-table">
               <thead>
                 <tr>
                   <th class="p-4">Patient</th>
@@ -132,20 +132,20 @@
     <section class="cf-card p-6">
       <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 class="cf-section-title">Services missing YAKAP rules</h2>
+          <h2 class="cf-section-title">Services needing YAKAP setup</h2>
           <p class="mt-1 text-sm text-[var(--cf-muted)]">Classify active services so staff and booking flows show consistent estimates.</p>
         </div>
         <span class="cf-badge cf-badge-info">{{ services_missing_rules_count }} services</span>
       </div>
       {% if services_missing_rules %}
         <div class="cf-table-wrap">
-          <div class="cf-table-scroll" tabindex="0" aria-label="Services missing YAKAP rules table">
+          <div class="cf-table-scroll" tabindex="0" aria-label="Services needing YAKAP setup table">
             <table class="cf-table cf-table-compact">
               <thead>
                 <tr>
                   <th class="p-4">Service</th>
                   <th class="p-4">Duration</th>
-                  <th class="p-4">Price</th>
+                  <th class="p-4">Action</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-[var(--cf-line-soft)]">
@@ -153,7 +153,7 @@
                   <tr>
                     <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ service.name }}</td>
                     <td class="p-4 tabular-nums text-[var(--cf-muted)]">{{ service.effective_duration }} min</td>
-                    <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ service.price }}</td>
+                    <td class="p-4"><a href="{% url 'dashboard:services' %}" class="cf-btn cf-btn-xs cf-btn-secondary">Open services</a></td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -163,7 +163,7 @@
       {% else %}
         <div class="cf-empty-state">
           <div class="cf-icon-box mb-4 p-4"><i data-lucide="list-checks" class="h-6 w-6"></i></div>
-          <p class="cf-section-title">All active services have YAKAP rules.</p>
+          <p class="cf-section-title">All active services have YAKAP setup.</p>
         </div>
       {% endif %}
     </section>
@@ -181,7 +181,7 @@
       {% if low_balance_patients %}
         <div class="cf-table-wrap">
           <div class="cf-table-scroll" tabindex="0" aria-label="Low estimated YAKAP balances table">
-            <table class="cf-table cf-table-compact">
+            <table class="cf-table">
               <thead>
                 <tr>
                   <th class="p-4">Patient</th>
@@ -222,7 +222,7 @@
       {% if over_limit_patients %}
         <div class="cf-table-wrap">
           <div class="cf-table-scroll" tabindex="0" aria-label="Over estimated YAKAP limits table">
-            <table class="cf-table cf-table-compact">
+            <table class="cf-table">
               <thead>
                 <tr>
                   <th class="p-4">Patient</th>
@@ -264,7 +264,7 @@
     {% if recent_ledger_entries %}
       <div class="cf-table-wrap">
         <div class="cf-table-scroll" tabindex="0" aria-label="Recent YAKAP ledger entries table">
-          <table class="cf-table cf-table-compact">
+          <table class="cf-table cf-table-wide">
             <thead>
               <tr>
                 <th class="p-4">Occurred</th>
@@ -281,7 +281,7 @@
                   <td class="p-4 tabular-nums text-[var(--cf-ink)]">{{ entry.occurred_at|date:"M j, Y g:i A" }}</td>
                   <td class="p-4 font-semibold text-[var(--cf-ink)]">{{ entry.patient.full_name }}</td>
                   <td class="p-4 text-[var(--cf-muted)]">{{ entry.category.name }}</td>
-                  <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ entry.amount }}</td>
+                  <td class="p-4 tabular-nums text-[var(--cf-ink)]">PHP {{ entry.signed_amount }}</td>
                   <td class="p-4"><span class="cf-badge {% if entry.verification_status == 'verified' %}cf-badge-active{% else %}cf-badge-warning cf-status-pending{% endif %}">{{ entry.get_verification_status_display }}</span></td>
                   <td class="p-4 text-[var(--cf-muted)]">{{ entry.note|default:"-" }}</td>
                 </tr>
@@ -415,8 +415,8 @@
           </div>
         </div>
 
-        <div class="flex justify-end border-t border-[var(--cf-line)] pt-4">
-          <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4"></i>Save YAKAP Settings</button>
+        <div class="flex flex-col justify-end gap-3 border-t border-[var(--cf-line)] pt-4 sm:flex-row">
+          <button type="submit" class="cf-btn cf-btn-primary w-full sm:w-auto"><i data-lucide="save" class="h-4 w-4"></i>Save YAKAP Settings</button>
         </div>
       </form>
     </section>
@@ -475,8 +475,8 @@
           </div>
         </div>
 
-        <div class="flex justify-end border-t border-[var(--cf-line)] pt-4">
-          <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add Category</button>
+        <div class="flex flex-col justify-end gap-3 border-t border-[var(--cf-line)] pt-4 sm:flex-row">
+          <button type="submit" class="cf-btn cf-btn-primary w-full sm:w-auto"><i data-lucide="plus-circle" class="h-4 w-4"></i>Add Category</button>
         </div>
       </form>
     </section>
@@ -495,7 +495,7 @@
     {% if categories %}
       <div class="cf-table-wrap">
         <div class="cf-table-scroll" tabindex="0" aria-label="YAKAP coverage categories table">
-          <table class="cf-table cf-table-compact">
+          <table class="cf-table">
             <thead>
               <tr>
                 <th class="p-4">Category</th>
@@ -554,12 +554,12 @@
               <label class="cf-label" for="category-notes-{{ category.id }}">Notes</label>
               <textarea id="category-notes-{{ category.id }}" name="notes" rows="2" class="cf-textarea">{{ category.notes }}</textarea>
             </div>
-            <div class="flex flex-wrap items-center justify-between gap-3 lg:col-span-1 lg:items-end">
+            <div class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between lg:col-span-1 lg:items-end">
               <label class="flex items-center gap-2 text-sm font-semibold text-[var(--cf-ink)]">
                 <input type="checkbox" name="is_active" class="cf-checkbox" {% if category.is_active %}checked{% endif %}>
                 Active
               </label>
-              <button type="submit" class="cf-btn cf-btn-secondary"><i data-lucide="save" class="h-4 w-4"></i>Save</button>
+              <button type="submit" class="cf-btn cf-btn-secondary w-full sm:w-auto"><i data-lucide="save" class="h-4 w-4"></i>Save</button>
             </div>
           </form>
         {% endfor %}
@@ -586,7 +586,7 @@
     {% if unverified_appointments %}
       <div class="cf-table-wrap">
         <div class="cf-table-scroll" tabindex="0" aria-label="Unverified YAKAP requests table">
-          <table class="cf-table cf-table-compact">
+          <table class="cf-table">
             <thead>
               <tr>
                 <th class="p-4">Patient</th>

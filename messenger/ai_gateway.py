@@ -69,6 +69,15 @@ CURRENT_BOOKING_SAFETY_RULES = """Current KliniAssist booking safety rules:
 - Do not call book_confirmed_appointment in the same turn where the patient first provides or changes a required booking detail.
 - If the requested service is not an active clinic service, say it is unavailable; do not substitute a different service unless the patient explicitly accepts it.
 - If the patient uses a weekday such as this Saturday, keep the weekday and calendar date consistent with the clinic timezone."""
+YAKAP_AI_SAFETY_RULES = """YAKAP safety rules:
+- If the patient wants to request YAKAP, direct them to the booking form so the service-gated YAKAP checkbox can be validated server-side.
+- Do not promise YAKAP eligibility, free care, official PhilHealth approval, or official remaining balance.
+- Do not invent or quote YAKAP covered amounts from the public AI context."""
+CORE_AI_SAFETY_RULES = """Core KliniAssist assistant safety rules:
+- Only answer using the clinic context JSON, active services, FAQs, current clinic date/time, and tool results.
+- Do not assign a doctor or provider unless the clinic context explicitly names one for that service or FAQ.
+- If doctor/provider information is missing, say you do not have that information and offer clinic contact details if available.
+- Before saying any date/time is available, unavailable, fully booked, open, or closed, call check_availability in the current turn and base the claim only on its result."""
 WEEKDAY_NAMES = {
     "monday": 0,
     "tuesday": 1,
@@ -115,6 +124,7 @@ def _safe_context_for_prompt(value):
             normalized_key = key_text.replace("-", "_")
             if (
                 normalized_key in SECRET_CONTEXT_KEYS
+                or normalized_key == "instructions"
                 or "token" in normalized_key
                 or "secret" in normalized_key
                 or "api_key" in normalized_key
@@ -150,7 +160,7 @@ def _text_has_contact_detail(text):
 def _text_confirms_booking(text):
     return bool(
         re.search(
-            r"\b(?:yes|confirm|confirmed|go ahead|book it|please book|finalize|proceed)\b",
+            r"\b(?:yes|confirm|confirmed|go ahead|book it|please book|finalize|proceed|oo|opo|sige|tuloy(?:\s+na)?|ituloy|go\s+na)\b",
             str(text or ""),
             flags=re.IGNORECASE,
         )
@@ -334,6 +344,165 @@ def _known_patient_details_prompt(data):
     return "\n".join(lines)
 
 
+def _latest_assistant_history_text(data):
+    history = data.get("history", [])
+    if not isinstance(history, list):
+        return ""
+    for entry in reversed(history):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("role", "")).strip().lower() == "assistant":
+            return str(entry.get("content", "")).strip()
+    return ""
+
+
+def _text_has_complete_booking_summary_terms(text):
+    value = str(text or "").strip()
+    if not value:
+        return False
+    lower = value.lower()
+    if "confirm" not in lower:
+        return False
+    has_service = "service" in lower
+    has_datetime = ("date" in lower and "time" in lower) or "date/time" in lower
+    has_name = any(term in lower for term in ["full name", "name", "patient"])
+    has_phone = any(term in lower for term in ["phone", "mobile", "contact number"])
+    has_email = "email" in lower or "e-mail" in lower
+    if not all([has_service, has_datetime, has_name, has_phone, has_email]):
+        return False
+    return True
+
+
+def _local_start_from_booking_args(clinic, args):
+    if not clinic or not isinstance(args, dict) or not args.get("starts_at"):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(args.get("starts_at")).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    clinic_tz = ZoneInfo(clinic.timezone)
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, clinic_tz)
+    return parsed.astimezone(clinic_tz)
+
+
+def _date_markers_for_summary(clinic, local_start):
+    clinic_today = timezone.now().astimezone(ZoneInfo(clinic.timezone)).date()
+    target_date = local_start.date()
+    month = local_start.strftime("%B")
+    short_month = local_start.strftime("%b")
+    day = str(local_start.day)
+    year = str(local_start.year)
+    markers = {
+        target_date.isoformat(),
+        f"{month} {day}",
+        f"{month} {day}, {year}",
+        f"{short_month} {day}",
+        f"{short_month} {day}, {year}",
+    }
+    if target_date == clinic_today:
+        markers.add("today")
+    if target_date == clinic_today + timedelta(days=1):
+        markers.add("tomorrow")
+    return {marker.lower() for marker in markers}
+
+
+def _time_markers_for_summary(local_start):
+    hour_12 = local_start.strftime("%I:%M %p").lstrip("0")
+    hour_24 = local_start.strftime("%H:%M")
+    markers = {hour_12, hour_12.replace(" ", ""), hour_24}
+    if local_start.minute == 0:
+        hour_only = local_start.strftime("%I %p").lstrip("0")
+        markers.add(hour_only)
+        markers.add(hour_only.replace(" ", ""))
+    return {marker.lower() for marker in markers}
+
+
+def _booking_summary_tool_mismatch_error(text, args=None, clinic=None):
+    if not clinic or not isinstance(args, dict):
+        return ""
+    lower = str(text or "").lower()
+    service_name = ""
+    try:
+        service_id = int(args.get("service_id"))
+    except (TypeError, ValueError):
+        service_id = 0
+    if service_id:
+        service_name = (
+            clinic.services.filter(id=service_id, is_active=True, is_archived=False)
+            .values_list("name", flat=True)
+            .first()
+            or ""
+        )
+    if service_name and service_name.lower() not in lower:
+        return "Appointment creation rejected because the tool service does not match the preceding booking summary."
+
+    local_start = _local_start_from_booking_args(clinic, args)
+    if local_start:
+        if not any(marker in lower for marker in _date_markers_for_summary(clinic, local_start)):
+            return "Appointment creation rejected because the tool date does not match the preceding booking summary."
+        if not any(marker in lower for marker in _time_markers_for_summary(local_start)):
+            return "Appointment creation rejected because the tool time does not match the preceding booking summary."
+    return ""
+
+
+def _text_has_complete_booking_summary(text, args=None, clinic=None):
+    if not _text_has_complete_booking_summary_terms(text):
+        return False
+
+    value = str(text or "").strip()
+    lower = value.lower()
+
+    args = args or {}
+    email = str(args.get("email") or "").strip().lower()
+    if email and email not in lower:
+        return False
+
+    phone = re.sub(r"\D", "", str(args.get("phone") or ""))
+    text_digits = re.sub(r"\D", "", value)
+    if phone and phone[-7:] not in text_digits:
+        return False
+
+    full_name = str(args.get("full_name") or "").strip().lower()
+    if full_name:
+        name_parts = [part for part in re.split(r"\s+", full_name) if part]
+        if name_parts and not all(part in lower for part in (name_parts[:1] + name_parts[-1:])):
+            return False
+
+    return not _booking_summary_tool_mismatch_error(value, args, clinic)
+
+
+def _latest_assistant_has_complete_booking_summary(data, args=None, clinic=None):
+    return _text_has_complete_booking_summary(_latest_assistant_history_text(data), args, clinic)
+
+
+def _current_confirmation_followup_prompt(data):
+    if not _confirmed_in_current_turn(data):
+        return ""
+    previous_assistant = _latest_assistant_history_text(data).lower()
+    if "confirm" not in previous_assistant:
+        return ""
+    if "cancel" in previous_assistant or "cancellation" in previous_assistant:
+        return "\n".join([
+            "current patient message explicitly confirms the immediately preceding cancellation request.",
+            "call cancel_verified_appointment with confirmed=true using the verified appointment details from the conversation.",
+            "Do not repeat the same cancellation confirmation prompt.",
+        ])
+    if "reschedule" in previous_assistant and "confirm" in previous_assistant:
+        return "\n".join([
+            "current patient message explicitly confirms the immediately preceding reschedule request.",
+            "call reschedule_verified_appointment with confirmed=true using the verified appointment details and selected new time from the conversation.",
+            "Do not repeat the same reschedule confirmation prompt.",
+        ])
+    if ("booking" in previous_assistant or "appointment" in previous_assistant) and _latest_assistant_has_complete_booking_summary(data):
+        return "\n".join([
+            "current patient message explicitly confirms the immediately preceding booking request.",
+            "call book_confirmed_appointment with confirmed=true using the service_id, selected appointment time, full_name, phone, and email from the immediately preceding booking summary and conversation.",
+            "Do not repeat the same booking confirmation prompt.",
+        ])
+    return ""
+
+
 def _slot_summary(slot):
     if not isinstance(slot, dict):
         return ""
@@ -358,6 +527,26 @@ def _reply_from_tool_result(result):
         if reference:
             reply += f". Reference code: {reference}"
         return reply + "."
+    if result.get("cancelled") is True and isinstance(result.get("appointment"), dict):
+        appointment = result["appointment"]
+        service = appointment.get("service", "appointment")
+        reference = appointment.get("reference_code", "")
+        reply = f"Your {service} appointment has been cancelled"
+        if reference:
+            reply += f". Reference code: {reference}"
+        return reply + "."
+    if result.get("rescheduled") is True and isinstance(result.get("appointment"), dict):
+        appointment = result["appointment"]
+        service = appointment.get("service", "appointment")
+        date_label = appointment.get("local_date_label", "")
+        time_label = appointment.get("local_time_label", "")
+        reference = appointment.get("reference_code", "")
+        reply = f"Your {service} appointment has been rescheduled"
+        if date_label or time_label:
+            reply += f" for {date_label} {time_label}".rstrip()
+        if reference:
+            reply += f". Reference code: {reference}"
+        return reply + "."
     if result.get("available") is True:
         selected = result.get("selected_slot")
         if selected:
@@ -375,18 +564,47 @@ def _reply_from_tool_result(result):
     return ""
 
 
-def _system_message(clinic, context, patient_details_prompt=""):
+def _contains_unverified_availability_claim(reply):
+    text = str(reply or "").lower()
+    if not text:
+        return False
+    date_words = r"(?:today|tomorrow|\b\d{4}-\d{2}-\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
+    time_words = r"(?:\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b)"
+    scheduling_cue = rf"(?:{time_words}|{date_words}|\bslots?\b|\bappointments?\b|\bbook(?:ing)?\b)"
+    patterns = [
+        r"\b(?:unavailable|fully booked)\b",
+        rf"{scheduling_cue}.{{0,60}}\bavailable\b",
+        rf"\bavailable\b.{{0,60}}{scheduling_cue}",
+        r"\bno\s+slots?\b",
+        r"\bslots?\b.{0,40}\b(?:available|open)\b",
+        rf"{time_words}.{{0,40}}\b(?:available|open|slot)\b",
+        rf"\b(?:open|closed)\b.{{0,40}}{date_words}",
+        rf"{date_words}.{{0,40}}\b(?:open|closed)\b",
+    ]
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _system_message(clinic, context, patient_details_prompt="", confirmation_followup_prompt=""):
     ai_settings = get_or_create_clinic_ai_settings(clinic)
-    instructions = (ai_settings.instructions or DEFAULT_MESSENGER_AI_PROMPT).strip()
+    custom_instructions = (ai_settings.instructions or "").strip()
+    default_instructions = DEFAULT_MESSENGER_AI_PROMPT.strip()
     safe_context = _safe_context_for_prompt(context)
     content_parts = [
-        instructions,
+        default_instructions,
+    ]
+    if custom_instructions and custom_instructions != default_instructions:
+        content_parts.append("Clinic custom instructions:\n" + custom_instructions)
+    content_parts.extend([
+        CORE_AI_SAFETY_RULES,
         CURRENT_BOOKING_SAFETY_RULES,
+        YAKAP_AI_SAFETY_RULES,
         "Clinic context JSON:",
         json.dumps(safe_context, default=str),
-    ]
+    ])
     if patient_details_prompt:
         content_parts.append(patient_details_prompt)
+    if confirmation_followup_prompt:
+        content_parts.append(confirmation_followup_prompt)
     return {
         "role": "system",
         "content": "\n\n".join(content_parts),
@@ -398,7 +616,12 @@ def _clean_gateway_content(value):
 
 
 def _messages_for_request(clinic, context, data):
-    messages = [_system_message(clinic, context, _known_patient_details_prompt(data))]
+    messages = [_system_message(
+        clinic,
+        context,
+        _known_patient_details_prompt(data),
+        _current_confirmation_followup_prompt(data),
+    )]
     history = data.get("history", [])
     if isinstance(history, list):
         for item in history[-16:]:
@@ -595,9 +818,46 @@ def _bool_value(value):
     return value is True
 
 
+def _clean_input_sequence(value):
+    try:
+        sequence = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return sequence if sequence > 0 else 0
+
+
+def _has_messenger_turn_binding(data):
+    return bool(
+        str(data.get("psid", "")).strip()
+        and str(data.get("turn_token", "")).strip()
+        and _clean_input_sequence(data.get("input_sequence"))
+    )
+
+
+def _mutation_turn_binding_error(name):
+    message = "Messenger appointment mutation requires current turn metadata."
+    if name == "book_confirmed_appointment":
+        return {"created": False, "error": message}
+    if name == "cancel_verified_appointment":
+        return {"cancelled": False, "error": message}
+    if name == "reschedule_verified_appointment":
+        return {"rescheduled": False, "error": message}
+    return {"error": message}
+
+
 def _tool_name(call):
     function = call.get("function") if isinstance(call, dict) else None
     return function.get("name", "") if isinstance(function, dict) else ""
+
+
+def _mutating_tool_succeeded(name, result):
+    if not isinstance(result, dict):
+        return False
+    return (
+        (name == "book_confirmed_appointment" and result.get("created") is True)
+        or (name == "cancel_verified_appointment" and result.get("cancelled") is True)
+        or (name == "reschedule_verified_appointment" and result.get("rescheduled") is True)
+    )
 
 
 def _tool_calls_are_allowed(tool_calls, mutation_already_executed=False):
@@ -616,12 +876,27 @@ def _tool_calls_are_allowed(tool_calls, mutation_already_executed=False):
     return True
 
 
-def _booking_confirmed_argument(data, args):
+def _booking_confirmed_argument(channel, data, args):
+    if not _bool_value(args.get("confirmed")):
+        return False, ""
+    clinic = _clinic_for_tool(channel, data)
+    previous_assistant = _latest_assistant_history_text(data)
+    if _confirmed_in_current_turn(data) and _latest_assistant_has_complete_booking_summary(data, args, clinic):
+        return True, ""
+    if _confirmed_in_current_turn(data):
+        mismatch_error = _booking_summary_tool_mismatch_error(previous_assistant, args, clinic)
+        if _text_has_complete_booking_summary_terms(previous_assistant) and mismatch_error:
+            return False, f"{mismatch_error} Please restate the correct full summary and ask the patient to confirm again."
+        return False, "Appointment creation requires explicit user confirmation after a complete booking summary with service, date/time, full name, phone, and email."
+    return False, "Appointment creation requires explicit user confirmation; current patient message did not explicitly confirm the complete details."
+
+
+def _appointment_change_confirmed_argument(data, args):
     if not _bool_value(args.get("confirmed")):
         return False, ""
     if _confirmed_in_current_turn(data):
         return True, ""
-    return False, "Appointment creation requires explicit user confirmation; current patient message did not explicitly confirm the complete details."
+    return False, "Appointment change requires explicit user confirmation; current patient message did not explicitly confirm the appointment change details."
 
 
 def _execute_tool(channel, data, name, args):
@@ -630,6 +905,8 @@ def _execute_tool(channel, data, name, args):
         psid = data.get("psid", "")
         turn_token = data.get("turn_token", "")
         input_sequence = data.get("input_sequence")
+        if name in MUTATING_TOOL_NAMES and not _has_messenger_turn_binding(data):
+            return _mutation_turn_binding_error(name)
         if name == "match_services":
             return match_services(page_id, args.get("query", ""))
         if name == "check_availability":
@@ -645,23 +922,29 @@ def _execute_tool(channel, data, name, args):
         if name == "find_verified_appointment":
             return find_verified_appointment(page_id, args.get("reference_code", ""), args.get("phone", ""))
         if name == "cancel_verified_appointment":
+            confirmed, confirmation_error = _appointment_change_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"cancelled": False, "error": confirmation_error}
             return cancel_verified_appointment(
                 page_id,
                 args.get("reference_code", ""),
                 args.get("phone", ""),
-                _bool_value(args.get("confirmed")),
+                confirmed,
                 reason=args.get("reason", ""),
                 psid=psid,
                 turn_token=turn_token,
                 input_sequence=input_sequence,
             )
         if name == "reschedule_verified_appointment":
+            confirmed, confirmation_error = _appointment_change_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"rescheduled": False, "error": confirmation_error}
             return reschedule_verified_appointment(
                 page_id,
                 args.get("reference_code", ""),
                 args.get("phone", ""),
                 args.get("starts_at", ""),
-                _bool_value(args.get("confirmed")),
+                confirmed,
                 psid=psid,
                 turn_token=turn_token,
                 input_sequence=input_sequence,
@@ -670,7 +953,7 @@ def _execute_tool(channel, data, name, args):
             mismatch = _weekday_mismatch_result(channel, data, args, mutation=True)
             if mismatch:
                 return mismatch
-            confirmed, confirmation_error = _booking_confirmed_argument(data, args)
+            confirmed, confirmation_error = _booking_confirmed_argument(channel, data, args)
             if confirmation_error:
                 return {"created": False, "error": confirmation_error}
             return book_confirmed_appointment(
@@ -703,26 +986,32 @@ def _execute_tool(channel, data, name, args):
         if name == "find_verified_appointment":
             return find_widget_verified_appointment(clinic_slug, args.get("reference_code", ""), args.get("phone", ""))
         if name == "cancel_verified_appointment":
+            confirmed, confirmation_error = _appointment_change_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"cancelled": False, "error": confirmation_error}
             return cancel_widget_verified_appointment(
                 clinic_slug,
                 args.get("reference_code", ""),
                 args.get("phone", ""),
-                _bool_value(args.get("confirmed")),
+                confirmed,
                 reason=args.get("reason", ""),
             )
         if name == "reschedule_verified_appointment":
+            confirmed, confirmation_error = _appointment_change_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"rescheduled": False, "error": confirmation_error}
             return reschedule_widget_verified_appointment(
                 clinic_slug,
                 args.get("reference_code", ""),
                 args.get("phone", ""),
                 args.get("starts_at", ""),
-                _bool_value(args.get("confirmed")),
+                confirmed,
             )
         if name == "book_confirmed_appointment":
             mismatch = _weekday_mismatch_result(channel, data, args, mutation=True)
             if mismatch:
                 return mismatch
-            confirmed, confirmation_error = _booking_confirmed_argument(data, args)
+            confirmed, confirmation_error = _booking_confirmed_argument(channel, data, args)
             if confirmation_error:
                 return {"created": False, "error": confirmation_error}
             return book_widget_confirmed_appointment(
@@ -756,6 +1045,7 @@ def build_gateway_reply(data):
     max_iterations = max(1, getattr(settings, "AI_GATEWAY_MAX_TOOL_ITERATIONS", 5))
     mutation_executed = False
     last_tool_result = None
+    last_tool_name = ""
     for _iteration in range(max_iterations):
         provider_message, provider_error = _call_provider_with_fallback(provider_settings, messages, tools)
         if provider_message is None:
@@ -769,6 +1059,12 @@ def build_gateway_reply(data):
             reply = _clean_gateway_content(provider_message.get("content", ""))
             if not reply:
                 return _fallback_for_clinic(clinic, "empty_provider_reply")
+            if _contains_unverified_availability_claim(reply):
+                if last_tool_name == "check_availability":
+                    tool_reply = _reply_from_tool_result(last_tool_result)
+                    if tool_reply:
+                        return {"reply": tool_reply, "fallback": False, "error": ""}
+                return _fallback_for_clinic(clinic, "unverified_availability_claim")
             return {"reply": reply, "fallback": False, "error": ""}
         if not _tool_calls_are_allowed(tool_calls, mutation_executed):
             return _fallback_for_clinic(clinic, "invalid_tool_call")
@@ -789,8 +1085,13 @@ def build_gateway_reply(data):
                 )
                 result = {"error": "Tool execution failed."}
             last_tool_result = result
+            last_tool_name = name
             if name in MUTATING_TOOL_NAMES:
                 mutation_executed = True
+                if _mutating_tool_succeeded(name, result):
+                    reply = _reply_from_tool_result(result)
+                    if reply:
+                        return {"reply": reply, "fallback": False, "error": ""}
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.get("id", "") if isinstance(call, dict) else "",

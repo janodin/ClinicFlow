@@ -7,7 +7,7 @@ from .models import Service
 
 @admin.register(Service)
 class ServiceAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
-    list_display = ("name", "clinic", "duration_minutes", "price", "is_active")
+    list_display = ("name", "clinic", "duration_minutes", "is_active")
     list_filter = ("clinic", "is_active")
     search_fields = ("name",)
 
