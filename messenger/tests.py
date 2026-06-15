@@ -2474,11 +2474,75 @@ def test_ai_gateway_endpoint_returns_provider_reply_without_secret(mock_call, cl
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("message", [
+    "I want an in-depth review of what I can implement or integrate in the system.",
+    "Can you review the software architecture and integrations?",
+    "What technical setup or internal features can I add?",
+    "What software powers this booking widget?",
+    "Can you explain the booking system architecture?",
+])
+def test_ai_gateway_returns_scoped_refusal_for_out_of_scope_widget_system_questions(mock_call, message):
+    from clinics.models import ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_out_of_scope", "PAGE-GATEWAY-OUT-OF-SCOPE")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        fallback_message="Please use the booking form.",
+    )
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": message,
+    })
+
+    assert result == {
+        "reply": "I can help with Clinic owner_gateway_out_of_scope services, FAQs, and appointments. I don't have information about system integrations or technical implementation.",
+        "fallback": False,
+        "error": "",
+    }
+    mock_call.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("raw_reply", [
+    "I do not have information about system integrations.",
+    "That technical feature is unavailable in this assistant.",
+    "I am not able to review software architecture.",
+    "The booking system is unavailable right now.",
+    "The appointment software is unavailable in this assistant.",
+])
+def test_ai_gateway_allows_non_scheduling_unavailable_provider_replies(mock_call, raw_reply):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_non_scheduling_unavailable", "PAGE-GATEWAY-NON-SCHEDULING")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-non-scheduling-unavailable")
+    mock_call.return_value = {"role": "assistant", "content": raw_reply}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "Can you help with a general question?",
+    })
+
+    assert result == {"reply": raw_reply, "fallback": False, "error": ""}
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 @pytest.mark.parametrize("raw_reply", [
     "Yes, 9:00 AM is available tomorrow.",
     "The clinic is fully booked tomorrow.",
     "The clinic is closed tomorrow.",
     "Slots are open at 10:00 AM and 10:30 AM.",
+    "That appointment time is unavailable.",
+    "The clinic is fully booked.",
+    "That time is unavailable.",
 ])
 def test_ai_gateway_rejects_raw_availability_claim_without_tool_call(mock_call, raw_reply):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings

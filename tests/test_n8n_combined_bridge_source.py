@@ -185,6 +185,8 @@ def test_combined_bridge_uses_flat_route_branch_constants_for_sdk_parser():
 def test_combined_bridge_reads_django_urls_from_callback_urls():
     source = SOURCE.read_text(encoding="utf-8")
 
+    assert "new URL(value)" not in source
+    assert "url.protocol" not in source
     assert "process.env.DJANGO_BASE_URL" not in source
     assert "$env.DJANGO_BASE_URL" not in source
     assert "$vars.DJANGO_BASE_URL" not in source

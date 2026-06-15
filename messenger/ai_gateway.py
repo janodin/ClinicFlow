@@ -87,6 +87,38 @@ WEEKDAY_NAMES = {
     "saturday": 5,
     "sunday": 6,
 }
+OUT_OF_SCOPE_SYSTEM_PATTERNS = [
+    r"\bsystem integrations?\b",
+    r"\bintegrat(?:e|ing|ion|ions)\b.{0,40}\b(?:system|software|platform|api|workflow|webhook)\b",
+    r"\b(?:system|software|platform|api|workflow|webhook)\b.{0,40}\bintegrat(?:e|ing|ion|ions)\b",
+    r"\btechnical implementation\b",
+    r"\bimplement(?:ation|ing)?\b.{0,40}\b(?:system|software|platform|feature|integration)\b",
+    r"\b(?:system|software|platform|feature|integration)\b.{0,40}\bimplement(?:ation|ing)?\b",
+    r"\bsoftware architecture\b",
+    r"\btechnical setup\b",
+    r"\binternal features?\b",
+    r"\bsystem architecture\b",
+    r"\bwhat\s+software\b.{0,80}\b(?:booking|widget|system|platform)\b",
+    r"\bsource code\b",
+    r"\bcodebase\b",
+    r"\bdatabase schema\b",
+    r"\bn8n workflow\b",
+]
+
+
+def _is_out_of_scope_system_question(message):
+    text = str(message or "").strip().lower()
+    if not text:
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in OUT_OF_SCOPE_SYSTEM_PATTERNS)
+
+
+def _scoped_out_of_scope_reply(clinic):
+    clinic_name = clinic.name if clinic else "the clinic"
+    return (
+        f"I can help with {clinic_name} services, FAQs, and appointments. "
+        "I don't have information about system integrations or technical implementation."
+    )
 
 
 def _fallback_for_clinic(clinic, error):
@@ -568,18 +600,24 @@ def _contains_unverified_availability_claim(reply):
     text = str(reply or "").lower()
     if not text:
         return False
-    date_words = r"(?:today|tomorrow|\b\d{4}-\d{2}-\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
+    date_words = (
+        r"(?:today|tomorrow|"
+        r"\b\d{4}-\d{2}-\d{2}\b|"
+        r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|"
+        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
+    )
     time_words = r"(?:\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b)"
-    scheduling_cue = rf"(?:{time_words}|{date_words}|\bslots?\b|\bappointments?\b|\bbook(?:ing)?\b)"
+    technical_object_words = r"(?:system|software|widget|platform|page|portal|app)"
+    appointment_cue = rf"(?:\bappointments?\b(?!\s+{technical_object_words})|\bappointment\s+times?\b)"
+    booking_cue = rf"(?:\bbook(?:ing)?\b(?!\s+{technical_object_words}))"
+    scheduling_cue = rf"(?:{time_words}|{date_words}|\bslots?\b|{appointment_cue}|{booking_cue})"
+    availability_words = r"(?:available|unavailable|fully booked|open|closed)"
     patterns = [
-        r"\b(?:unavailable|fully booked)\b",
-        rf"{scheduling_cue}.{{0,60}}\bavailable\b",
-        rf"\bavailable\b.{{0,60}}{scheduling_cue}",
+        rf"{scheduling_cue}.{{0,60}}\b{availability_words}\b",
+        rf"\b{availability_words}\b.{{0,60}}{scheduling_cue}",
+        r"\bfully booked\b",
+        r"\b(?:(?:that|this|the)\s+)?time\s+(?:is\s+)?(?:available|unavailable|open|closed)\b",
         r"\bno\s+slots?\b",
-        r"\bslots?\b.{0,40}\b(?:available|open)\b",
-        rf"{time_words}.{{0,40}}\b(?:available|open|slot)\b",
-        rf"\b(?:open|closed)\b.{{0,40}}{date_words}",
-        rf"{date_words}.{{0,40}}\b(?:open|closed)\b",
     ]
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
@@ -1034,6 +1072,8 @@ def build_gateway_reply(data):
         return _fallback_for_clinic(None, "clinic_not_found")
     if not _gateway_ai_enabled(channel, clinic):
         return _fallback_for_clinic(clinic, "ai_disabled")
+    if channel == "widget" and _is_out_of_scope_system_question(data.get("message", "")):
+        return {"reply": _scoped_out_of_scope_reply(clinic), "fallback": False, "error": ""}
 
     provider_settings = _provider_settings_for_clinic(clinic)
     if not provider_settings.is_configured:
