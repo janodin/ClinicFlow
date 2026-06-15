@@ -264,8 +264,8 @@ def test_normalizers_validate_required_callback_urls_before_http_nodes():
     ]:
         assert f"'{callback_key}'" in messenger_block
     assert "for (const key of requiredCallbackUrls)" in messenger_block
-    assert "new URL(value)" in messenger_block
-    assert "url.protocol !== 'https:'" in messenger_block
+    assert "new URL(value)" not in messenger_block
+    assert "value.startsWith('https://')" in messenger_block
 
     for callback_key in [
         "widget_ai_context_url",
@@ -274,8 +274,8 @@ def test_normalizers_validate_required_callback_urls_before_http_nodes():
     ]:
         assert f"'{callback_key}'" in widget_block
     assert "for (const key of requiredCallbackUrls)" in widget_block
-    assert "new URL(value)" in widget_block
-    assert "url.protocol !== 'https:'" in widget_block
+    assert "new URL(value)" not in widget_block
+    assert "value.startsWith('https://')" in widget_block
 
 
 def test_messenger_post_webhook_requires_django_shared_secret():

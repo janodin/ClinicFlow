@@ -137,8 +137,7 @@ for (const key of requiredCallbackUrls) {
   if (!value) {
     throw new Error('callback_urls.' + key + ' is required');
   }
-  const url = new URL(value);
-  if (url.protocol !== 'https:') {
+  if (!value.startsWith('https://')) {
     throw new Error('callback_urls.' + key + ' must use https');
   }
 }
@@ -575,8 +574,7 @@ for (const key of requiredCallbackUrls) {
   if (!value) {
     throw new Error('callback_urls.' + key + ' is required');
   }
-  const url = new URL(value);
-  if (url.protocol !== 'https:') {
+  if (!value.startsWith('https://')) {
     throw new Error('callback_urls.' + key + ' must use https');
   }
 }
