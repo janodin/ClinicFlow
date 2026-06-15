@@ -921,6 +921,69 @@ def test_direct_webhook_does_not_emit_quick_replies_when_messenger_mode_is_ai():
 
 
 @pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="meta-app-secret")
+@patch("messenger.views._send_facebook_reply")
+def test_direct_webhook_messenger_like_starts_welcome_quick_replies(mock_send):
+    client = Client()
+    clinic, connection = _create_messenger_clinic("owner_direct_like", "PAGE-DIRECT-LIKE")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    clinic.widget_welcome_message = "Welcome to Like Clinic!"
+    clinic.save(update_fields=["widget_welcome_message"])
+    raw_body, signature = _signed_meta_like_payload(
+        connection.page_id,
+        "PSID-DIRECT-LIKE",
+        "mid-direct-like",
+    )
+
+    response = client.post(
+        reverse("messenger:webhook"),
+        data=raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+        secure=True,
+    )
+
+    assert response.status_code == 200
+    session = MessengerSession.objects.get(connection=connection, psid="PSID-DIRECT-LIKE")
+    assert session.state == MessengerSession.STATE_GREETING
+    mock_send.assert_called_once()
+    _page_token, psid, actions = mock_send.call_args.args
+    assert psid == "PSID-DIRECT-LIKE"
+    assert actions[0] == {"type": "text", "text": "Welcome to Like Clinic!"}
+    assert actions[1]["type"] == "quick_replies"
+    assert any(option["payload"] == "start_booking" for option in actions[1]["options"])
+
+
+@pytest.mark.django_db
+@override_settings(MESSENGER_APP_SECRET="meta-app-secret")
+@patch("messenger.views._send_facebook_reply")
+def test_direct_webhook_unknown_attachment_without_text_remains_ignored(mock_send):
+    client = Client()
+    clinic, connection = _create_messenger_clinic("owner_direct_unknown_attachment", "PAGE-DIRECT-UNKNOWN-ATTACHMENT")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body, signature = _signed_meta_like_payload(
+        connection.page_id,
+        "PSID-DIRECT-UNKNOWN-ATTACHMENT",
+        "mid-direct-unknown-attachment",
+        sticker_id=123456,
+    )
+
+    response = client.post(
+        reverse("messenger:webhook"),
+        data=raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+        secure=True,
+    )
+
+    assert response.status_code == 200
+    assert not MessengerSession.objects.filter(connection=connection, psid="PSID-DIRECT-UNKNOWN-ATTACHMENT").exists()
+    mock_send.assert_not_called()
+
+
+@pytest.mark.django_db
 @override_settings(
     MESSENGER_APP_SECRET="test_secret",
     META_MESSENGER_N8N_WEBHOOK_URL="https://n8n.example/webhook/kliniassist-messenger",
@@ -975,6 +1038,53 @@ def test_webhook_forwards_ai_mode_messenger_event_to_n8n_with_callback_urls(mock
     assert payload["callback_urls"]["messenger_ai_turn_claim_url"] == "https://clinic-messenger.example.test/messenger/ai/turn/claim/"
     assert payload["callback_urls"]["messenger_ai_turn_send_reply_url"] == "https://clinic-messenger.example.test/messenger/ai/turn/send-reply/"
     assert payload["callback_urls"]["messenger_n8n_webhook_url"] == "https://clinic-messenger.example.test/messenger/n8n-webhook/"
+
+
+@pytest.mark.django_db
+@override_settings(
+    MESSENGER_APP_SECRET="meta-app-secret",
+    META_MESSENGER_N8N_WEBHOOK_URL="https://n8n.example/webhook/kliniassist-messenger",
+    N8N_WEBHOOK_SECRET="secret123",
+    ALLOWED_HOSTS=["clinic-messenger.example.test"],
+)
+@patch("messenger.views._send_facebook_reply")
+@patch("messenger.views.requests.post")
+def test_webhook_forwards_ai_mode_messenger_like_to_n8n_as_hi(mock_post, mock_send):
+    clinic, connection = _create_messenger_clinic("owner_ai_forward_like", "PAGE-AI-FORWARD-LIKE")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+    )
+    raw_body, signature = _signed_meta_like_payload(
+        connection.page_id,
+        "PSID-AI-FORWARD-LIKE",
+        "mid-ai-forward-like",
+    )
+    mock_post.return_value.raise_for_status.return_value = None
+
+    response = Client().post(
+        reverse("messenger:webhook"),
+        data=raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+        secure=True,
+        HTTP_HOST="clinic-messenger.example.test",
+    )
+
+    assert response.status_code == 200
+    mock_send.assert_not_called()
+    mock_post.assert_called_once()
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["channel"] == "messenger"
+    assert payload["page_id"] == connection.page_id
+    assert payload["psid"] == "PSID-AI-FORWARD-LIKE"
+    assert payload["message_id"] == "mid-ai-forward-like"
+    assert payload["message"] == "Hi"
+    assert payload["postback"] == ""
+    assert payload["raw_body"] == raw_body
+    assert payload["signature"] == signature
 
 
 @pytest.mark.django_db
@@ -5618,6 +5728,67 @@ def _signed_meta_payload(page_id, psid, message_id, message, postback=""):
     return raw_body, signature
 
 
+def _signed_meta_like_payload(page_id, psid, message_id, sticker_id=369239263222822):
+    raw_body = json.dumps({
+        "object": "page",
+        "entry": [{
+            "id": page_id,
+            "messaging": [{
+                "sender": {"id": psid},
+                "recipient": {"id": page_id},
+                "message": {
+                    "mid": message_id,
+                    "attachments": [{
+                        "type": "image",
+                        "payload": {"sticker_id": sticker_id},
+                    }],
+                },
+            }],
+        }],
+    })
+    signature = "sha256=" + hmac.new("meta-app-secret".encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+    return raw_body, signature
+
+
+def test_payload_message_for_identity_normalizes_messenger_like_sticker_to_hi():
+    from messenger.views import _payload_message_for_identity
+
+    raw_body, _signature = _signed_meta_like_payload(
+        "PAGE-LIKE-IDENTITY",
+        "PSID-LIKE",
+        "mid-like-identity",
+    )
+
+    result = _payload_message_for_identity(
+        json.loads(raw_body),
+        "PAGE-LIKE-IDENTITY",
+        "PSID-LIKE",
+        "mid-like-identity",
+    )
+
+    assert result == {"message": "Hi", "postback": ""}
+
+
+def test_payload_message_for_identity_ignores_unknown_attachment_without_text_or_postback():
+    from messenger.views import _payload_message_for_identity
+
+    raw_body, _signature = _signed_meta_like_payload(
+        "PAGE-UNKNOWN-ATTACHMENT",
+        "PSID-UNKNOWN-ATTACHMENT",
+        "mid-unknown-attachment",
+        sticker_id=123456,
+    )
+
+    result = _payload_message_for_identity(
+        json.loads(raw_body),
+        "PAGE-UNKNOWN-ATTACHMENT",
+        "PSID-UNKNOWN-ATTACHMENT",
+        "mid-unknown-attachment",
+    )
+
+    assert result is None
+
+
 def _post_ai_turn_register(client, page_id, psid, message_id, message, postback="", include_meta_signature=True):
     raw_body = ""
     signature = ""
@@ -5769,6 +5940,87 @@ def test_ai_turn_register_claims_first_messenger_message_for_processing():
     assert claim.json()["claimed"] is True
     assert claim.json()["input_sequence"] == 1
     assert claim.json()["messages"] == [{"sequence": 1, "text": "June 15", "postback": ""}]
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_register_accepts_signed_messenger_like_as_hi():
+    from messenger.models import MessengerConversation, MessengerInboundMessage
+
+    _clinic, connection = _create_messenger_clinic("owner_ai_turn_like", "PAGE-AI-TURN-LIKE")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body, signature = _signed_meta_like_payload(
+        connection.page_id,
+        "PSID-AI-TURN-LIKE",
+        "mid-ai-turn-like",
+    )
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_turn_register"),
+        data=json.dumps({
+            "page_id": connection.page_id,
+            "psid": "PSID-AI-TURN-LIKE",
+            "message_id": "mid-ai-turn-like",
+            "message": "Hi",
+            "postback": "",
+            "raw_body": raw_body,
+            "signature": signature,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+        secure=True,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["registered"] is True
+    assert data["messages"] == [{"sequence": 1, "text": "Hi", "postback": ""}]
+    conversation = MessengerConversation.objects.get(connection=connection, psid="PSID-AI-TURN-LIKE")
+    assert MessengerInboundMessage.objects.get(conversation=conversation).text == "Hi"
+
+
+@pytest.mark.django_db
+@override_settings(N8N_WEBHOOK_SECRET="secret123")
+def test_ai_turn_register_rejects_tampered_messenger_like_identity():
+    from messenger.models import MessengerConversation, MessengerInboundMessage
+
+    _clinic, connection = _create_messenger_clinic("owner_ai_turn_like_tampered", "PAGE-AI-TURN-LIKE-TAMPERED")
+    connection.app_secret = "meta-app-secret"
+    connection.save(update_fields=["app_secret"])
+    raw_body, signature = _signed_meta_like_payload(
+        connection.page_id,
+        "PSID-SIGNED-LIKE",
+        "mid-signed-like",
+    )
+    client = Client()
+
+    response = client.post(
+        reverse("messenger:ai_turn_register"),
+        data=json.dumps({
+            "page_id": connection.page_id,
+            "psid": "PSID-TAMPERED-LIKE",
+            "message_id": "mid-tampered-like",
+            "message": "Hi",
+            "postback": "",
+            "raw_body": raw_body,
+            "signature": signature,
+        }),
+        content_type="application/json",
+        HTTP_X_N8N_WEBHOOK_SECRET="secret123",
+        secure=True,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "registered": False,
+        "duplicate": False,
+        "process_now": False,
+        "superseded_previous": False,
+    }
+    assert not MessengerConversation.objects.filter(connection=connection, psid="PSID-TAMPERED-LIKE").exists()
+    assert not MessengerInboundMessage.objects.filter(conversation__connection=connection).exists()
 
 
 @pytest.mark.django_db

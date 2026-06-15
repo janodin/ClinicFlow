@@ -163,6 +163,37 @@ def _payload_contains_sender(data, page_id, psid):
     return False
 
 
+MESSENGER_LIKE_STICKER_IDS = {"369239263222822"}
+MESSENGER_LIKE_GREETING_TEXT = "Hi"
+
+
+def _messenger_like_greeting_text(message):
+    if not isinstance(message, dict):
+        return ""
+    attachments = message.get("attachments", [])
+    if not isinstance(attachments, list):
+        return ""
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        payload = attachment.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        sticker_id = str(payload.get("sticker_id") or "").strip()
+        if sticker_id in MESSENGER_LIKE_STICKER_IDS:
+            return MESSENGER_LIKE_GREETING_TEXT
+    return ""
+
+
+def _messenger_message_text_or_like_greeting(message):
+    if not isinstance(message, dict):
+        return ""
+    text = str(message.get("text") or "").strip()
+    if text:
+        return text
+    return _messenger_like_greeting_text(message)
+
+
 def _payload_message_for_identity(data, page_id, psid, message_id):
     if not isinstance(data, dict) or not page_id or not psid:
         return None
@@ -189,7 +220,7 @@ def _payload_message_for_identity(data, page_id, psid, message_id):
             postback = messaging.get("postback", {})
             if not isinstance(postback, dict):
                 postback = {}
-            text = str(message.get("text") or "").strip()
+            text = _messenger_message_text_or_like_greeting(message)
             payload = str(postback.get("payload") or "").strip()
             if text or payload:
                 return {"message": text, "postback": payload}
@@ -1632,9 +1663,7 @@ def webhook(request):
                 postback = messaging.get("postback", {})
                 if not isinstance(postback, dict):
                     postback = {}
-                text = message.get("text", "")
-                if not isinstance(text, str):
-                    text = str(text)
+                text = _messenger_message_text_or_like_greeting(message)
                 quick_reply = message.get("quick_reply", {})
                 if not isinstance(quick_reply, dict):
                     quick_reply = {}

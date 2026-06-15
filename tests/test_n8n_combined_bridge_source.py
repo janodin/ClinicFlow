@@ -62,6 +62,52 @@ def _run_prepare_channel_reply(agent_output, channel="messenger"):
     return _run_prepare_channel_reply_json(agent_output, channel)["reply_text"]
 
 
+def _extract_normalize_messenger_request_js(source):
+    normalize_start = source.index("name: 'Normalize Messenger Request'")
+    js_start = source.index("jsCode: `", normalize_start) + len("jsCode: `")
+    js_end = source.index("`,\n    },", js_start)
+    return source[js_start:js_end]
+
+
+def _n8n_test_callback_urls():
+    return {
+        "messenger_webhook_url": "https://callback.example.test/messenger/webhook/",
+        "meta_signature_verify_url": "https://callback.example.test/messenger/meta/verify-signature/",
+        "messenger_ai_context_url": "https://callback.example.test/messenger/ai/context/",
+        "ai_gateway_reply_url": "https://callback.example.test/messenger/ai/gateway/reply/",
+        "messenger_ai_turn_register_url": "https://callback.example.test/messenger/ai/turn/register/",
+        "messenger_ai_turn_claim_url": "https://callback.example.test/messenger/ai/turn/claim/",
+        "messenger_ai_turn_send_reply_url": "https://callback.example.test/messenger/ai/turn/send-reply/",
+        "messenger_n8n_webhook_url": "https://callback.example.test/messenger/n8n-webhook/",
+        "widget_ai_context_url": "https://callback.example.test/messenger/ai/widget/context/",
+    }
+
+
+def _run_normalize_messenger_request(body, headers=None):
+    source = SOURCE.read_text(encoding="utf-8")
+    js_code = _extract_normalize_messenger_request_js(source)
+    input_item = {
+        "json": {
+            "body": body,
+            "headers": headers or {"X-Hub-Signature-256": "sha256=test"},
+        }
+    }
+    wrapper = f"""
+const inputItem = {json.dumps(input_item)};
+const $input = {{ first: () => inputItem }};
+const code = {json.dumps(js_code)};
+const result = Function('$input', code)($input);
+process.stdout.write(JSON.stringify(result));
+"""
+    result = subprocess.run(
+        ["node", "-e", wrapper],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
 def _extract_django_ai_gateway_block(source):
     gateway_start = source.index("name: 'Call Django AI Gateway'")
     gateway_end = source.index("const attachDjangoAiGatewayInput")
@@ -906,6 +952,89 @@ def test_meta_messenger_ignored_events_are_acknowledged_without_context_lookup()
     assert "name: 'Acknowledge Ignored Meta Messenger Event'" not in source
     assert ".onCase(2, acknowledgeIgnoredMetaMessengerEvent)" not in source
     assert "acknowledgeIgnoredMetaMessengerEvent.to(getMessengerClinicContext" not in source
+
+
+def test_meta_messenger_normalizer_detects_like_sticker_as_hi():
+    source = SOURCE.read_text(encoding="utf-8")
+    normalize_start = source.index("name: 'Normalize Messenger Request'")
+    normalize_end = source.index("const verifyMetaSignature")
+    normalize_block = source[normalize_start:normalize_end]
+
+    assert "const MESSENGER_LIKE_STICKER_IDS = new Set(['369239263222822']);" in normalize_block
+    assert "const MESSENGER_LIKE_GREETING_TEXT = 'Hi';" in normalize_block
+    assert "function messengerLikeGreetingText(message)" in normalize_block
+    assert "payload?.sticker_id" in normalize_block
+    assert "MESSENGER_LIKE_GREETING_TEXT" in normalize_block
+    assert "if (MESSENGER_LIKE_STICKER_IDS.has(stickerId))" in normalize_block
+    assert "return MESSENGER_LIKE_GREETING_TEXT;" in normalize_block
+    assert "const message = rawMessage || messengerLikeGreetingText(messaging.message || {});" in normalize_block
+    assert "ignored_event: !pageId || !psid || (!message && !postback)" in normalize_block
+    output = _run_normalize_messenger_request({
+        "callback_urls": _n8n_test_callback_urls(),
+        "object": "page",
+        "entry": [{
+            "id": "PAGE123",
+            "messaging": [{
+                "sender": {"id": "PSID123"},
+                "recipient": {"id": "PAGE123"},
+                "message": {
+                    "mid": "mid.like",
+                    "attachments": [{"type": "image", "payload": {"sticker_id": 369239263222822}}],
+                },
+            }],
+        }],
+    })
+    item = output[0]["json"]
+
+    assert item["message"] == "Hi"
+    assert item["postback"] == ""
+    assert item["page_id"] == "PAGE123"
+    assert item["psid"] == "PSID123"
+    assert item["message_id"] == "mid.like"
+    assert item["ignored_event"] is False
+
+
+def test_meta_messenger_normalizer_keeps_unknown_attachments_ignored():
+    source = SOURCE.read_text(encoding="utf-8")
+    normalize_start = source.index("name: 'Normalize Messenger Request'")
+    normalize_end = source.index("const verifyMetaSignature")
+    normalize_block = source[normalize_start:normalize_end]
+    helper_start = normalize_block.index("function messengerLikeGreetingText(message)")
+    helper_end = normalize_block.index("if (body.channel === 'messenger'")
+    helper_block = normalize_block[helper_start:helper_end]
+
+    assert "if (MESSENGER_LIKE_STICKER_IDS.has(stickerId))" in helper_block
+    assert "return MESSENGER_LIKE_GREETING_TEXT;" in helper_block
+    assert "return '';" in helper_block
+    condition_index = helper_block.index("if (MESSENGER_LIKE_STICKER_IDS.has(stickerId))")
+    greeting_return_index = helper_block.index("return MESSENGER_LIKE_GREETING_TEXT;")
+    empty_return_index = helper_block.rindex("return '';")
+
+    assert condition_index < greeting_return_index < empty_return_index
+    assert "ignoredCandidates.push({ page_id: pageId, psid });" in normalize_block
+    assert "if (pageId && (!message && !postback))" in normalize_block
+    output = _run_normalize_messenger_request({
+        "callback_urls": _n8n_test_callback_urls(),
+        "object": "page",
+        "entry": [{
+            "id": "PAGE123",
+            "messaging": [{
+                "sender": {"id": "PSID123"},
+                "recipient": {"id": "PAGE123"},
+                "message": {
+                    "mid": "mid.unknown",
+                    "attachments": [{"type": "image", "payload": {"sticker_id": 123456}}],
+                },
+            }],
+        }],
+    })
+    item = output[0]["json"]
+
+    assert item["message"] == ""
+    assert item["postback"] == ""
+    assert item["page_id"] == "PAGE123"
+    assert item["psid"] == "PSID123"
+    assert item["ignored_event"] is True
 
 
 def test_meta_messenger_normalizer_parses_raw_string_body_for_routing():

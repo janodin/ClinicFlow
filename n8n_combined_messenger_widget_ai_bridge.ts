@@ -141,6 +141,19 @@ for (const key of requiredCallbackUrls) {
     throw new Error('callback_urls.' + key + ' must use https');
   }
 }
+const MESSENGER_LIKE_STICKER_IDS = new Set(['369239263222822']);
+const MESSENGER_LIKE_GREETING_TEXT = 'Hi';
+function messengerLikeGreetingText(message) {
+  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+  for (const attachment of attachments) {
+    const payload = attachment && typeof attachment === 'object' ? attachment.payload : {};
+    const stickerId = String(payload?.sticker_id || '').trim();
+    if (MESSENGER_LIKE_STICKER_IDS.has(stickerId)) {
+      return MESSENGER_LIKE_GREETING_TEXT;
+    }
+  }
+  return '';
+}
 if (body.channel === 'messenger' && Object.keys(callbackUrls).length) {
   const pageId = String(body.page_id || body.pageId || '').trim();
   const psid = String(body.psid || body.sender_id || '').trim();
@@ -179,7 +192,8 @@ for (const entry of entries) {
   for (const messaging of messagingItems) {
     const pageId = String(entry.id || messaging.recipient?.id || '').trim();
     const psid = String(messaging.sender?.id || '').trim();
-    const message = String(messaging.message?.text || '').trim();
+    const rawMessage = String(messaging.message?.text || '').trim();
+    const message = rawMessage || messengerLikeGreetingText(messaging.message || {});
     const postback = String(messaging.postback?.payload || messaging.message?.quick_reply?.payload || '').trim();
     const messageId = String(messaging.message?.mid || messaging.postback?.mid || '').trim();
     if (pageId && (!message && !postback)) {
