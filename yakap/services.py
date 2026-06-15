@@ -49,6 +49,7 @@ YAKAP_LEDGER_APPOINTMENT_LIFECYCLE_ALLOWED_STATUSES = {
     Appointment.STATUS_COMPLETED,
 }
 YAKAP_CANCEL_REQUIRES_REVERSAL_MESSAGE = "Reverse YAKAP usage before cancelling this appointment."
+YAKAP_APPOINTMENT_TIME_CHANGE_MESSAGE = "Cancel the YAKAP request or create a new appointment before changing appointment time."
 
 
 def yakap_verification_freshness(profile, *, settings=None, now=None):
@@ -321,6 +322,14 @@ def create_yakap_audit_event(*, clinic, actor, action, obj, summary):
 
 def appointment_has_yakap_ledger(appointment):
     return appointment.yakap_ledger_entries.exists()
+
+
+def appointment_has_yakap_records(appointment):
+    try:
+        snapshot = appointment.yakap_snapshot
+    except AppointmentYakapSnapshot.DoesNotExist:
+        snapshot = None
+    return bool(snapshot and snapshot.requested) or appointment.yakap_ledger_entries.exists()
 
 
 def patient_has_yakap_history(patient):

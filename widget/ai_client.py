@@ -12,7 +12,7 @@ def fallback_message_for(ai_settings):
     return ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE
 
 
-def call_assistant_webhook(clinic, message, history, session_id, conversation_id=""):
+def call_assistant_webhook(clinic, message, history, session_id, conversation_id="", callback_urls=None):
     webhook_url = getattr(settings, "ASSISTANT_N8N_WEBHOOK_URL", "")
     if not webhook_url:
         raise AssistantUnavailable("Assistant n8n webhook URL is not configured.")
@@ -22,17 +22,20 @@ def call_assistant_webhook(clinic, message, history, session_id, conversation_id
         raise AssistantUnavailable("Assistant n8n webhook secret is not configured.")
     headers = {"X-N8N-Webhook-Secret": secret}
 
+    payload = {
+        "channel": "widget",
+        "clinic_id": clinic.id,
+        "clinic_slug": clinic.slug,
+        "message": message,
+        "history": history[-10:],
+        "session_id": session_id,
+        "conversation_id": conversation_id,
+        "callback_urls": callback_urls or {},
+    }
+
     response = requests.post(
         webhook_url,
-        json={
-            "channel": "widget",
-            "clinic_id": clinic.id,
-            "clinic_slug": clinic.slug,
-            "message": message,
-            "history": history[-10:],
-            "session_id": session_id,
-            "conversation_id": conversation_id,
-        },
+        json=payload,
         headers=headers,
         timeout=getattr(settings, "ASSISTANT_N8N_TIMEOUT_SECONDS", 12),
         allow_redirects=False,

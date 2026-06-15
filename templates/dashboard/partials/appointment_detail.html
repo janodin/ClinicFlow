@@ -63,7 +63,7 @@
       <h3 class="cf-label mb-3">Update Status</h3>
       <form method="post" action="{% url 'dashboard:update_appointment' appointment.id %}" class="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end" hx-post="{% url 'dashboard:update_appointment' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
         {% csrf_token %}
-        {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+        {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
         <div class="cf-field">
           <label for="{{ status_form.status.id_for_label }}" class="cf-label">{{ status_form.status.label }}</label>
           {{ status_form.status }}
@@ -107,6 +107,8 @@
                 <p class="mt-2 text-sm text-[var(--cf-muted)]">YAKAP usage has been posted as a clinic-entered estimate.</p>
               {% endif %}
             </div>
+          {% elif snapshot %}
+            <p class="mt-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-muted)]">No active YAKAP request is recorded for this appointment. Last YAKAP status: {{ snapshot.get_coverage_status_display }}.</p>
           {% else %}
             <p class="mt-3 rounded-[var(--cf-radius-md)] border border-[var(--cf-line)] bg-white p-3 text-sm text-[var(--cf-muted)]">No YAKAP request was recorded for this appointment.</p>
           {% endif %}
@@ -278,7 +280,7 @@
       <h3 class="cf-label mb-3">Add Internal Note</h3>
       <form method="post" action="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-post="{% url 'dashboard:add_appointment_note' appointment.id %}" hx-target="#detail-modal-body" hx-swap="innerHTML">
         {% csrf_token %}
-        {% if source == 'calendar' %}<input type="hidden" name="modal_source" value="calendar">{% endif %}
+        {% if source %}<input type="hidden" name="modal_source" value="{{ source }}">{% endif %}
         <div class="cf-field">
           <label for="{{ note_form.body.id_for_label }}" class="cf-label">{{ note_form.body.label }}</label>
           {{ note_form.body }}

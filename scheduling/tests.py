@@ -88,14 +88,55 @@ def test_generate_slots_resumes_at_break_end_when_break_not_on_slot_grid(clinic_
 
 
 @pytest.mark.django_db
-def test_generate_slots_respects_clinic_appointments(clinic_setup):
+def test_generate_slots_respects_same_service_capacity(clinic_setup):
     clinic, service = clinic_setup
     target_date = timezone.localdate() + timedelta(days=1)
     slots = generate_slots(clinic, service, target_date)
     patient = Patient.objects.create(clinic=clinic, full_name="Patient", phone="123")
     Appointment.objects.create(clinic=clinic, patient=patient, service=service, starts_at=slots[0]["starts_at"], ends_at=slots[0]["ends_at"])
+
     remaining = generate_slots(clinic, service, target_date)
+
     assert slots[0]["starts_at"] not in [s["starts_at"] for s in remaining]
+
+
+@pytest.mark.django_db
+def test_generate_slots_keeps_different_service_same_time_available(clinic_setup):
+    clinic, cleaning = clinic_setup
+    filling = Service.objects.create(clinic=clinic, name="Tooth Filling", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    cleaning_slot = generate_slots(clinic, cleaning, target_date)[0]
+    patient = Patient.objects.create(clinic=clinic, full_name="Patient", phone="123")
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=cleaning,
+        starts_at=cleaning_slot["starts_at"],
+        ends_at=cleaning_slot["ends_at"],
+    )
+
+    filling_slots = generate_slots(clinic, filling, target_date)
+
+    assert cleaning_slot["starts_at"] in [slot["starts_at"] for slot in filling_slots]
+
+
+@pytest.mark.django_db
+def test_generate_slots_allows_same_service_until_capacity_is_full(clinic_setup):
+    clinic, service = clinic_setup
+    service.simultaneous_capacity = 2
+    service.save(update_fields=["simultaneous_capacity", "updated_at"])
+    target_date = timezone.localdate() + timedelta(days=1)
+    first_slot = generate_slots(clinic, service, target_date)[0]
+    patient_one = Patient.objects.create(clinic=clinic, full_name="Patient One", phone="111")
+    patient_two = Patient.objects.create(clinic=clinic, full_name="Patient Two", phone="222")
+    Appointment.objects.create(clinic=clinic, patient=patient_one, service=service, starts_at=first_slot["starts_at"], ends_at=first_slot["ends_at"])
+
+    still_available = generate_slots(clinic, service, target_date)
+    Appointment.objects.create(clinic=clinic, patient=patient_two, service=service, starts_at=first_slot["starts_at"], ends_at=first_slot["ends_at"])
+    full = generate_slots(clinic, service, target_date)
+
+    assert first_slot["starts_at"] in [slot["starts_at"] for slot in still_available]
+    assert first_slot["starts_at"] not in [slot["starts_at"] for slot in full]
 
 
 @pytest.mark.django_db
@@ -103,4 +144,4 @@ def test_slot_is_available_true_when_free(clinic_setup):
     clinic, service = clinic_setup
     target_date = timezone.localdate() + timedelta(days=1)
     slot = generate_slots(clinic, service, target_date)[0]
-    assert slot_is_available(clinic, slot["starts_at"], slot["ends_at"]) is True
+    assert slot_is_available(clinic, service, slot["starts_at"], slot["ends_at"]) is True

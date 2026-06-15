@@ -9,6 +9,7 @@ class Service(TimeStampedModel):
     name = models.CharField(max_length=160)
     description = models.TextField(blank=True)
     duration_minutes = models.PositiveIntegerField(blank=True, null=True)
+    simultaneous_capacity = models.PositiveIntegerField(default=1)
     is_active = models.BooleanField(default=True)
     is_archived = models.BooleanField(default=False)
     color = models.CharField(max_length=7, default="#06b6d4")
@@ -21,9 +22,14 @@ class Service(TimeStampedModel):
 
     def clean(self):
         super().clean()
+        errors = {}
         if self.duration_minutes is not None:
             if self.duration_minutes <= 0 or self.duration_minutes > 480:
-                raise ValidationError({"duration_minutes": "Duration must be between 1 and 480 minutes."})
+                errors["duration_minutes"] = "Duration must be between 1 and 480 minutes."
+        if self.simultaneous_capacity is None or self.simultaneous_capacity < 1 or self.simultaneous_capacity > 50:
+            errors["simultaneous_capacity"] = "Simultaneous capacity must be between 1 and 50."
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         self.full_clean()

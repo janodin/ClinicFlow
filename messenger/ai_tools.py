@@ -13,6 +13,8 @@ from scheduling.models import Weekday
 from scheduling.utils import generate_slots, validate_slot
 from widget.views import PAST_APPOINTMENT_TIME_MESSAGE, _process_guest_booking
 from yakap.services import (
+    YAKAP_APPOINTMENT_TIME_CHANGE_MESSAGE,
+    appointment_has_yakap_records,
     cancel_unposted_yakap_snapshot,
     is_public_yakap_request_allowed,
     public_yakap_badge_label,
@@ -594,18 +596,23 @@ def _reschedule_verified_appointment_for_clinic(clinic, reference_code, phone, s
 
     with transaction.atomic():
         locked_clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
-        appointment, error = _verified_appointment_for_clinic(locked_clinic, reference_code, phone)
+        appointment, error = _verified_appointment_for_clinic(locked_clinic, reference_code, phone, lock=True)
         if error:
             return {"rescheduled": False, "error": error}
+        if appointment_has_yakap_records(appointment):
+            return {"rescheduled": False, "error": YAKAP_APPOINTMENT_TIME_CHANGE_MESSAGE}
         duration = appointment.service.effective_duration()
         new_ends_at = new_starts_at + timedelta(minutes=duration)
         try:
-            validate_slot(locked_clinic, new_starts_at, new_ends_at, exclude_appointment=appointment)
+            validate_slot(locked_clinic, appointment.service, new_starts_at, new_ends_at, exclude_appointment=appointment)
         except ValidationError as exc:
             return {"rescheduled": False, "error": _validation_error_text(exc)}
         appointment.starts_at = new_starts_at
         appointment.ends_at = new_ends_at
-        appointment.save(update_fields=["starts_at", "ends_at", "updated_at"])
+        try:
+            appointment.save(update_fields=["starts_at", "ends_at", "updated_at"])
+        except ValidationError as exc:
+            return {"rescheduled": False, "error": _validation_error_text(exc)}
         return {"rescheduled": True, "appointment": _appointment_summary(locked_clinic, appointment)}
 
 

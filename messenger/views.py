@@ -14,6 +14,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from clinics.models import ClinicAISettings
+from messenger.callback_urls import build_n8n_callback_urls
 
 from .ai_gateway import build_gateway_reply
 from .ai_tools import (
@@ -223,6 +224,39 @@ def _messenger_ai_fallback_action(connection):
         "type": "text",
         "text": ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE,
     }
+
+
+def _forward_messenger_ai_event_to_n8n(request, connection, psid, message_id, message, postback, raw_body, signature):
+    webhook_url = getattr(settings, "META_MESSENGER_N8N_WEBHOOK_URL", "").strip()
+    secret = getattr(settings, "N8N_WEBHOOK_SECRET", "").strip()
+    if not webhook_url or not secret:
+        logger.error("Messenger AI n8n webhook is not configured")
+        return
+
+    payload = {
+        "channel": "messenger",
+        "clinic_id": connection.clinic_id,
+        "clinic_slug": connection.clinic.slug,
+        "page_id": connection.page_id,
+        "psid": str(psid or "").strip(),
+        "message_id": str(message_id or "").strip(),
+        "message": str(message or "").strip(),
+        "postback": str(postback or "").strip(),
+        "raw_body": raw_body,
+        "signature": signature,
+        "callback_urls": build_n8n_callback_urls(request, "messenger"),
+    }
+    try:
+        response = requests.post(
+            webhook_url,
+            json=payload,
+            headers={"X-N8N-Webhook-Secret": secret},
+            timeout=getattr(settings, "ASSISTANT_N8N_TIMEOUT_SECONDS", 12),
+            allow_redirects=False,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        logger.error("Failed to forward Messenger AI event to n8n")
 
 
 def _meta_app_secret_for_connection(connection):
@@ -1615,9 +1649,19 @@ def webhook(request):
                 connection = verified_connections.get(recipient_id)
                 if not connection:
                     continue
-                if _uses_messenger_ai_mode(connection):
-                    continue
                 message_id = _meta_message_id(messaging)
+                if _uses_messenger_ai_mode(connection):
+                    _forward_messenger_ai_event_to_n8n(
+                        request,
+                        connection,
+                        sender_id,
+                        message_id,
+                        text,
+                        payload_str,
+                        request.body.decode("utf-8"),
+                        request.headers.get("X-Hub-Signature-256", ""),
+                    )
+                    continue
                 if _mark_messenger_message_processed(connection, str(sender_id), message_id):
                     continue
 

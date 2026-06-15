@@ -56,6 +56,7 @@ class ServiceTests(TestCase):
                 "name": "Updated Consultation",
                 "description": "Updated desc",
                 "duration_minutes": 45,
+                "simultaneous_capacity": 1,
                 "color": "#ff0000",
                 "is_active": "on",
             },
@@ -75,6 +76,105 @@ class ServiceTests(TestCase):
         )
 
         self.assertEqual(service.color, "#06b6d4")
+
+    def test_service_default_simultaneous_capacity_is_one(self):
+        service = Service.objects.create(
+            clinic=self.clinic,
+            name="Capacity Default Service",
+            duration_minutes=20,
+        )
+
+        self.assertEqual(service.simultaneous_capacity, 1)
+
+    def test_service_form_includes_simultaneous_capacity(self):
+        from services.forms import ServiceForm
+
+        form = ServiceForm(self.clinic)
+
+        self.assertIn("simultaneous_capacity", form.fields)
+        self.assertEqual(form.fields["simultaneous_capacity"].label, "Simultaneous capacity")
+        self.assertEqual(
+            form.fields["simultaneous_capacity"].help_text,
+            "How many appointments for this service can run at the same time.",
+        )
+
+    def test_simultaneous_capacity_validation_rejects_zero(self):
+        from services.forms import ServiceForm
+
+        form = ServiceForm(
+            self.clinic,
+            {
+                "name": "Invalid Capacity",
+                "duration_minutes": 30,
+                "simultaneous_capacity": 0,
+                "color": "#06b6d4",
+                "is_active": "on",
+            },
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("simultaneous_capacity", form.errors)
+
+    def test_simultaneous_capacity_validation_rejects_over_50(self):
+        from services.forms import ServiceForm
+
+        form = ServiceForm(
+            self.clinic,
+            {
+                "name": "Invalid Capacity",
+                "duration_minutes": 30,
+                "simultaneous_capacity": 51,
+                "color": "#06b6d4",
+                "is_active": "on",
+            },
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("simultaneous_capacity", form.errors)
+
+    def test_create_service_saves_simultaneous_capacity(self):
+        url = reverse("dashboard:create_service")
+        response = self.client.post(
+            url,
+            {
+                "name": "Capacity Service",
+                "duration_minutes": 30,
+                "simultaneous_capacity": 3,
+                "color": "#ff0000",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        service = self.clinic.services.get(name="Capacity Service")
+        self.assertEqual(service.simultaneous_capacity, 3)
+
+    def test_edit_service_updates_simultaneous_capacity(self):
+        url = reverse("dashboard:edit_service", args=[self.service.id])
+        response = self.client.post(
+            url,
+            {
+                "name": self.service.name,
+                "description": self.service.description,
+                "duration_minutes": 30,
+                "simultaneous_capacity": 4,
+                "color": "#06b6d4",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.simultaneous_capacity, 4)
+
+    def test_services_page_shows_simultaneous_capacity(self):
+        self.service.simultaneous_capacity = 2
+        self.service.save(update_fields=["simultaneous_capacity", "updated_at"])
+
+        response = self.client.get(reverse("dashboard:services"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "2 at once")
 
     def test_services_page_places_status_tabs_before_primary_action(self):
         response = self.client.get(reverse("dashboard:services"))
@@ -150,6 +250,7 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "New Service",
             "duration_minutes": 30,
+            "simultaneous_capacity": 1,
             "color": "#ff0000",
             "is_active": "on",
         })
@@ -161,6 +262,7 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "HTMX Service",
             "duration_minutes": 30,
+            "simultaneous_capacity": 1,
             "color": "#ff0000",
             "is_active": "on",
         }, HTTP_HX_REQUEST="true")
@@ -183,6 +285,7 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "Updated via HTMX",
             "duration_minutes": 30,
+            "simultaneous_capacity": 1,
             "color": "#ff0000",
             "is_active": "on",
         }, HTTP_HX_REQUEST="true")
@@ -289,6 +392,7 @@ class ServiceTests(TestCase):
         response = self.client.post(url, {
             "name": "Consultation",
             "duration_minutes": 30,
+            "simultaneous_capacity": 1,
             "color": "#ff0000",
         }, HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 200)

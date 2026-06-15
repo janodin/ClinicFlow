@@ -10,7 +10,7 @@ from django.contrib.messages import get_messages
 from django.contrib.auth import get_user_model
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.http import HttpResponse
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 from django.urls import reverse
 from requests import RequestException
 from unittest.mock import patch
@@ -188,6 +188,59 @@ def test_viewer_cannot_merge_patients(clinic_setup, client):
     assert Patient.objects.filter(pk=duplicate.pk).exists()
     appointment.refresh_from_db()
     assert appointment.patient == duplicate
+
+
+@pytest.mark.django_db
+def test_patient_merge_rejects_overlapping_appointment_without_partial_move(clinic_setup, client):
+    clinic, service_a, user = clinic_setup
+    service_b = Service.objects.create(clinic=clinic, name="Tooth Filling", duration_minutes=30)
+    primary = Patient.objects.create(clinic=clinic, full_name="Primary Patient", phone="09170006666")
+    duplicate = Patient.objects.create(clinic=clinic, full_name="Duplicate Patient", phone="09170005555")
+    target_start = timezone.now() + timedelta(days=1)
+    earlier_start = target_start - timedelta(hours=1)
+    earlier_duplicate_appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=duplicate,
+        service=service_b,
+        starts_at=earlier_start,
+        ends_at=earlier_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    primary_appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=primary,
+        service=service_a,
+        starts_at=target_start,
+        ends_at=target_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    duplicate_appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=duplicate,
+        service=service_b,
+        starts_at=target_start,
+        ends_at=target_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    client.force_login(user)
+    client.raise_request_exception = False
+
+    response = client.post(
+        reverse("dashboard:patient_merge"),
+        {"primary_id": primary.id, "duplicate_id": duplicate.id},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code != 500
+    assert b"cf-error" in response.content
+    assert b"active appointment" in response.content
+    assert Patient.objects.filter(pk=duplicate.pk).exists()
+    primary_appointment.refresh_from_db()
+    duplicate_appointment.refresh_from_db()
+    earlier_duplicate_appointment.refresh_from_db()
+    assert primary_appointment.patient == primary
+    assert duplicate_appointment.patient == duplicate
+    assert earlier_duplicate_appointment.patient == duplicate
 
 
 @pytest.mark.django_db
@@ -1091,6 +1144,20 @@ def test_calendar_reschedule_valid(calendar_setup, client):
 
 
 @pytest.mark.django_db
+def test_calendar_reschedule_rejects_missing_start_time(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    client.force_login(user)
+    client.raise_request_exception = False
+
+    response = client.post(reverse("dashboard:calendar_reschedule"), {"appointment_id": appointment.id})
+
+    assert response.status_code in {200, 400}
+    payload = response.json()
+    assert payload["success"] is False
+    assert "invalid date/time" in payload["error"].lower() or "required" in payload["error"].lower()
+
+
+@pytest.mark.django_db
 def test_htmx_reschedule_refreshes_filtered_appointments_list(calendar_setup, client):
     clinic, _service, user, patient, appointment, target_date = calendar_setup
     new_date = target_date + timedelta(days=1)
@@ -1144,6 +1211,35 @@ def test_manual_appointment_reschedule_rejects_past_start(calendar_setup, client
 
 
 @pytest.mark.django_db
+def test_appointment_reschedule_rejects_same_patient_overlap(calendar_setup, client):
+    clinic, _service, user, patient, appointment, target_date = calendar_setup
+    other_service = Service.objects.create(clinic=clinic, name="Tooth Filling", duration_minutes=30)
+    target_start = timezone.make_aware(timezone.datetime.combine(target_date, time(11)))
+    Appointment.objects.bulk_create([
+        Appointment(
+            clinic=clinic,
+            patient=patient,
+            service=other_service,
+            starts_at=target_start,
+            ends_at=target_start + timedelta(minutes=30),
+            status=Appointment.STATUS_CONFIRMED,
+            reference_code="CF-PATOVER1",
+        )
+    ])
+    client.force_login(user)
+    client.raise_request_exception = False
+
+    response = client.post(
+        reverse("dashboard:appointment_reschedule", args=[appointment.id]),
+        {"new_date": target_date.isoformat(), "new_time": "11:00"},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    assert b"This patient already has an active appointment at that time." in response.content
+
+
+@pytest.mark.django_db
 def test_calendar_reschedule_outside_hours(calendar_setup, client):
     clinic, service, user, patient, appointment, target_date = calendar_setup
     client.force_login(user)
@@ -1172,7 +1268,32 @@ def test_calendar_reschedule_double_booking(calendar_setup, client):
     client.force_login(user)
     response = client.post(reverse("dashboard:calendar_reschedule"), {"appointment_id": appointment.id, "starts_at": other_start.isoformat()})
     assert response.json()["success"] is False
-    assert "already has an appointment" in response.json()["error"].lower()
+    assert "fully booked" in response.json()["error"].lower()
+
+
+@pytest.mark.django_db
+def test_calendar_reschedule_allows_overlap_with_different_service(calendar_setup, client):
+    clinic, service, user, patient, appointment, target_date = calendar_setup
+    other_service = Service.objects.create(clinic=clinic, name="Tooth Filling", duration_minutes=30)
+    other_patient = Patient.objects.create(clinic=clinic, full_name="Other Patient", phone="09170002222")
+    other_start = appointment.starts_at + timedelta(hours=4)
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=other_patient,
+        service=other_service,
+        starts_at=other_start,
+        ends_at=other_start + timedelta(minutes=30),
+    )
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:calendar_reschedule"),
+        {"appointment_id": appointment.id, "starts_at": other_start.isoformat()},
+    )
+
+    assert response.json()["success"] is True
+    appointment.refresh_from_db()
+    assert appointment.starts_at == other_start
 
 
 @pytest.mark.django_db
@@ -1337,6 +1458,41 @@ def test_htmx_status_update_shows_errors_without_success_toast(calendar_setup, c
     assert response.status_code == 200
     assert b"Cannot change status" in response.content
     assert "Appointment updated." not in response.headers.get("HX-Trigger", "")
+
+
+@pytest.mark.django_db
+def test_update_appointment_reactivating_cancelled_checks_capacity(clinic_setup, client):
+    clinic, service, user = clinic_setup
+    target_start = timezone.now() + timedelta(days=1)
+    cancelled_patient = Patient.objects.create(clinic=clinic, full_name="Cancelled Patient", phone="09170006666")
+    active_patient = Patient.objects.create(clinic=clinic, full_name="Active Patient", phone="09170005555")
+    cancelled_appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=cancelled_patient,
+        service=service,
+        starts_at=target_start,
+        ends_at=target_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CANCELLED,
+    )
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=active_patient,
+        service=service,
+        starts_at=target_start,
+        ends_at=target_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:update_appointment", args=[cancelled_appointment.id]),
+        {"status": Appointment.STATUS_PENDING, "payment_state": Appointment.PAYMENT_UNPAID},
+        HTTP_HX_REQUEST="true",
+    )
+
+    assert response.status_code == 200
+    cancelled_appointment.refresh_from_db()
+    assert cancelled_appointment.status == Appointment.STATUS_CANCELLED
 
 
 @pytest.mark.django_db
@@ -1830,16 +1986,24 @@ def test_messenger_settings_active_connection_shows_page_block_without_setup_hel
 
 
 @pytest.mark.django_db
-def test_messenger_settings_shows_exact_meta_n8n_callback_url(clinic_setup, client, settings):
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+def test_messenger_settings_shows_django_meta_callback_and_n8n_worker_url(clinic_setup, client, settings):
     clinic, service, user = clinic_setup
     settings.META_MESSENGER_N8N_WEBHOOK_URL = "https://157-90-164-203.nip.io/webhook/kliniassist-messenger"
     client.force_login(user)
 
-    response = client.get(reverse("dashboard:messenger_settings"))
+    response = client.get(reverse("dashboard:messenger_settings"), secure=True)
 
     assert response.status_code == 200
-    assert b"Meta Callback URL" in response.content
-    assert b"https://157-90-164-203.nip.io/webhook/kliniassist-messenger" in response.content
+    content = response.content.decode()
+    meta_label_index = content.index("Meta Callback URL")
+    n8n_label_index = content.index("n8n Worker Webhook URL")
+
+    assert "https://testserver/messenger/webhook/" in content[meta_label_index:n8n_label_index]
+    assert "https://157-90-164-203.nip.io/webhook/kliniassist-messenger" in content[n8n_label_index:]
 
 
 @pytest.mark.django_db

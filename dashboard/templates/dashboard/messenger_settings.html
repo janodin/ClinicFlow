@@ -154,20 +154,32 @@
       </div>
       <div>
         <h2 class="cf-section-title">n8n Webhooks</h2>
-        <p class="mt-1 text-sm text-[var(--cf-muted)]">Use the Meta callback for Facebook delivery, and the Django webhook inside n8n HTTP Request nodes.</p>
+        <p class="mt-1 text-sm text-[var(--cf-muted)]">Use the Meta callback for Facebook delivery; Django forwards AI mode messages to the n8n worker webhook.</p>
       </div>
     </div>
 
     <div class="cf-field">
       <p class="cf-label">Meta Callback URL</p>
       <div class="flex flex-wrap items-center gap-2 max-sm:flex-col max-sm:items-stretch">
-        <div class="cf-mono cf-mobile-break break-all rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0">{{ meta_n8n_webhook_url }}</div>
-        <button @click="navigator.clipboard.writeText('{{ meta_n8n_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm w-full sm:w-auto" type="button">
+        <div class="cf-mono cf-mobile-break break-all rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0">{{ meta_callback_url }}</div>
+        <button @click="navigator.clipboard.writeText('{{ meta_callback_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm w-full sm:w-auto" type="button">
           <i data-lucide="copy" class="h-4 w-4"></i>
           <span class="copy-label">Copy</span>
         </button>
       </div>
       <p class="mt-2 text-xs text-[var(--cf-muted)]">Paste this URL in Meta Messenger Webhooks for messages and messaging_postbacks.</p>
+    </div>
+
+    <div class="cf-field">
+      <p class="cf-label">n8n Worker Webhook URL</p>
+      <div class="flex flex-wrap items-center gap-2 max-sm:flex-col max-sm:items-stretch">
+        <div class="cf-mono cf-mobile-break break-all rounded-md bg-[var(--cf-surface-muted)] border border-[var(--cf-line)] px-3 py-2 text-sm text-[var(--cf-blue)] flex-1 min-w-0">{{ n8n_worker_webhook_url }}</div>
+        <button @click="navigator.clipboard.writeText('{{ n8n_worker_webhook_url|escapejs }}').then(() => { $el.querySelector('.copy-label').textContent = 'Copied!'; setTimeout(() => $el.querySelector('.copy-label').textContent = 'Copy', 2000) })" class="cf-btn cf-btn-secondary cf-btn-sm w-full sm:w-auto" type="button">
+          <i data-lucide="copy" class="h-4 w-4"></i>
+          <span class="copy-label">Copy</span>
+        </button>
+      </div>
+      <p class="mt-2 text-xs text-[var(--cf-muted)]">Django forwards Messenger AI mode events to this n8n webhook using the shared webhook secret.</p>
     </div>
 
     <div class="cf-field">

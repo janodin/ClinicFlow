@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from django import forms
 from django.utils import timezone
 
+from appointments.availability import patient_has_overlapping_active_appointment
 from appointments.models import Appointment, AppointmentNote
 from patients.utils import normalize_phone
 from scheduling.utils import validate_slot
@@ -86,7 +87,17 @@ class StaffAppointmentForm(forms.ModelForm):
             ends_at = starts_at + timedelta(minutes=duration)
 
             exclude = self.instance if self.instance and self.instance.pk else None
-            validate_slot(self.clinic, starts_at, ends_at, exclude_appointment=exclude)
+            validate_slot(self.clinic, service, starts_at, ends_at, exclude_appointment=exclude)
+            normalized_phone = normalize_phone(cleaned_data.get("patient_phone", ""))
+            patient = self.clinic.patients.filter(normalized_phone=normalized_phone).order_by("created_at").first()
+            if patient and patient_has_overlapping_active_appointment(
+                self.clinic,
+                patient,
+                starts_at,
+                ends_at,
+                exclude_appointment=exclude,
+            ):
+                raise forms.ValidationError("This patient already has an active appointment at that time.")
 
             cleaned_data["starts_at"] = starts_at
             cleaned_data["ends_at"] = ends_at

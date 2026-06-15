@@ -266,6 +266,81 @@ class WidgetTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTemplateUsed(resp, "widget/partials/slots.html")
 
+    def test_widget_slots_keep_different_service_same_time_available(self):
+        filling = Service.objects.create(clinic=self.clinic, name="Tooth Filling", duration_minutes=30)
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        cleaning_slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+        patient = Patient.objects.create(clinic=self.clinic, full_name="Existing Patient", phone="09170000000")
+        Appointment.objects.create(
+            clinic=self.clinic,
+            patient=patient,
+            service=self.service,
+            starts_at=cleaning_slot["starts_at"],
+            ends_at=cleaning_slot["ends_at"],
+        )
+
+        response = self.client.get(
+            reverse("widget:slots", args=[self.clinic.slug]),
+            {"service": filling.id, "date": tomorrow.isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, cleaning_slot["label"])
+
+    def test_widget_booking_rejects_stale_same_service_slot_when_capacity_full(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+        patient = Patient.objects.create(clinic=self.clinic, full_name="Existing Patient", phone="09170000000")
+        Appointment.objects.create(
+            clinic=self.clinic,
+            patient=patient,
+            service=self.service,
+            starts_at=slot["starts_at"],
+            ends_at=slot["ends_at"],
+        )
+
+        response = self.client.post(
+            reverse("widget:book", args=[self.clinic.slug]),
+            {
+                "service": self.service.id,
+                "starts_at": slot["starts_at"].isoformat(),
+                "full_name": "Stale Submit",
+                "phone": "09171111111",
+                "email": "stale@example.com",
+            },
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "That slot is no longer available", status_code=409)
+        self.assertEqual(
+            Appointment.objects.filter(clinic=self.clinic, service=self.service, starts_at=slot["starts_at"]).count(),
+            1,
+        )
+
+    def test_widget_booking_rejects_duplicate_same_patient_service_start_even_with_capacity(self):
+        self.service.simultaneous_capacity = 2
+        self.service.save(update_fields=["simultaneous_capacity", "updated_at"])
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+        payload = {
+            "service": self.service.id,
+            "starts_at": slot["starts_at"].isoformat(),
+            "full_name": "Duplicate Patient",
+            "phone": "09172222222",
+            "email": "duplicate@example.com",
+        }
+
+        first = self.client.post(reverse("widget:book", args=[self.clinic.slug]), payload, HTTP_HX_REQUEST="true")
+        second = self.client.post(reverse("widget:book", args=[self.clinic.slug]), payload, HTTP_HX_REQUEST="true")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(
+            Appointment.objects.filter(clinic=self.clinic, service=self.service, starts_at=slot["starts_at"]).count(),
+            1,
+        )
+
     def test_widget_date_options_use_clinic_timezone(self):
         Clinic.objects.filter(pk=self.clinic.pk).update(timezone="America/New_York")
         fixed_now = datetime(2026, 6, 2, 2, 0, tzinfo=dt_timezone.utc)
@@ -510,6 +585,29 @@ class WidgetTests(TestCase):
         self.assertEqual(payload["channel"], "widget")
         self.assertEqual(payload["clinic_slug"], self.clinic.slug)
         self.assertEqual(payload["message"], "I want to book an appointment")
+
+    @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret", ALLOWED_HOSTS=["clinic-widget.example.test"])
+    @patch("widget.ai_client.requests.post")
+    def test_chat_step_ai_payload_includes_dynamic_callback_urls(self, mock_post):
+        ClinicAISettings.objects.create(clinic=self.clinic, is_ai_enabled=True)
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {"reply": "Sure, what service would you like?"}
+
+        response = self.client.post(
+            reverse("widget:chat_step", args=[self.clinic.slug]),
+            {"action": "select_option", "value": "I want to book an appointment"},
+            secure=True,
+            HTTP_HOST="clinic-widget.example.test",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["channel"], "widget")
+        self.assertEqual(payload["callback_urls"], {
+            "widget_ai_context_url": "https://clinic-widget.example.test/messenger/ai/widget/context/",
+            "ai_gateway_reply_url": "https://clinic-widget.example.test/messenger/ai/gateway/reply/",
+            "messenger_n8n_webhook_url": "https://clinic-widget.example.test/messenger/n8n-webhook/",
+        })
 
     @override_settings(ASSISTANT_N8N_WEBHOOK_URL="https://n8n.example/webhook/widget", N8N_WEBHOOK_SECRET="secret")
     @patch("widget.ai_client.requests.post")

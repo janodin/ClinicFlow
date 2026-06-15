@@ -11,7 +11,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection, transaction
 from django.db.models import Q
 from django.core.paginator import Paginator
-from django.http import HttpResponse, JsonResponse, QueryDict
+from django.http import Http404, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -62,8 +62,10 @@ from yakap.models import (
     YakapLedgerEntry,
 )
 from yakap.services import (
+    YAKAP_APPOINTMENT_TIME_CHANGE_MESSAGE,
     YAKAP_LEDGER_SERVICE_RULE_ALLOWED_STATUSES,
     active_period_for_profile_category,
+    appointment_has_yakap_records,
     balance_state_for,
     cancel_unposted_yakap_snapshot,
     create_yakap_audit_event,
@@ -155,7 +157,7 @@ def _validation_error_message(exc):
 
 
 def _appointment_has_yakap_records(appointment):
-    return hasattr(appointment, "yakap_snapshot") or appointment.yakap_ledger_entries.exists()
+    return appointment_has_yakap_records(appointment)
 
 
 def _matched_patient_id_for_booking(clinic, phone):
@@ -418,6 +420,13 @@ def _appointment_detail_context(
             else AppointmentYakapStatusForm()
         )
     yakap_rule = getattr(appointment.service, "yakap_rule", None)
+    yakap_category = getattr(yakap_rule, "category", None)
+    allow_inactive_reversal_category = bool(
+        can_manage_yakap_settings
+        and yakap_ledger_blockers
+        and yakap_category
+        and not yakap_category.is_active
+    )
 
     return {
         "clinic": clinic,
@@ -435,8 +444,10 @@ def _appointment_detail_context(
         "yakap_ledger_form": yakap_ledger_form if yakap_ledger_form is not None else YakapLedgerEntryForm(
             clinic,
             patient=appointment.patient,
-            category=getattr(yakap_rule, "category", None),
+            appointment=appointment,
+            category=yakap_category,
             allow_privileged_entries=can_manage_yakap_settings,
+            allow_inactive_category=allow_inactive_reversal_category,
         ),
         "can_manage_daily_ops": can_manage_daily_ops,
     }
@@ -620,9 +631,11 @@ def calendar_reschedule(request):
         return JsonResponse({"success": False, "error": "Appointment ID required."}, status=400)
 
     new_start_str = request.POST.get("starts_at")
+    if not new_start_str:
+        return JsonResponse({"success": False, "error": "Start time is required."}, status=400)
 
     try:
-        appointment = clinic.appointments.select_related("service").get(pk=appointment_id)
+        clinic.appointments.get(pk=appointment_id)
     except (Appointment.DoesNotExist, ValueError):
         return JsonResponse({"success": False, "error": "Appointment not found."}, status=404)
 
@@ -630,10 +643,6 @@ def calendar_reschedule(request):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
-
-    # Prevent rescheduling completed or cancelled appointments
-    if appointment.status in {Appointment.STATUS_COMPLETED, Appointment.STATUS_CANCELLED}:
-        return JsonResponse({"success": False, "error": "Cannot reschedule a completed or cancelled appointment."})
 
     new_start = parse_datetime(new_start_str)
     if not new_start:
@@ -650,43 +659,49 @@ def calendar_reschedule(request):
     if new_start < timezone.now():
         return JsonResponse({"success": False, "error": "Cannot reschedule to the past."})
 
-    duration = appointment.service.effective_duration()
-    if duration is None:
-        return JsonResponse({"success": False, "error": "Service duration is not set."})
-    new_end = new_start + timedelta(minutes=duration)
-
-    date_value = new_start.date()
-
-    if _date_is_unavailable(clinic, date_value):
-        return JsonResponse({"success": False, "error": "Clinic is not available on this day."})
-
-    window = get_working_window(clinic, date_value)
-    if not window:
-        return JsonResponse({"success": False, "error": "Clinic is not open on this day."})
-
-    open_time, close_time, break_start, break_end = window
-    if new_start.time() < open_time or new_end.time() > close_time:
-        return JsonResponse({"success": False, "error": "Appointment is outside working hours."})
-
-    if _inside_break(new_start.time(), new_end.time(), break_start, break_end):
-        return JsonResponse({"success": False, "error": "Appointment overlaps with a break."})
-
     with transaction.atomic():
         Clinic.objects.select_for_update().get(pk=clinic.pk)
-        overlaps = Appointment.objects.filter(
-            clinic=clinic,
-            starts_at__lt=new_end,
-            ends_at__gt=new_start,
-        ).exclude(status=Appointment.STATUS_CANCELLED).exclude(pk=appointment.pk)
-        if overlaps.exists():
-            return JsonResponse({"success": False, "error": "This clinic already has an appointment at that time."})
+        appointment = get_object_or_404(
+            clinic.appointments.select_for_update().select_related("patient", "service"),
+            pk=appointment_id,
+        )
+        if appointment.status in {Appointment.STATUS_COMPLETED, Appointment.STATUS_CANCELLED}:
+            return JsonResponse({"success": False, "error": "Cannot reschedule a completed or cancelled appointment."})
+        if _appointment_has_yakap_records(appointment):
+            return JsonResponse({"success": False, "error": YAKAP_APPOINTMENT_TIME_CHANGE_MESSAGE})
+
+        duration = appointment.service.effective_duration()
+        if duration is None:
+            return JsonResponse({"success": False, "error": "Service duration is not set."})
+        new_end = new_start + timedelta(minutes=duration)
+
+        date_value = new_start.date()
+
+        if _date_is_unavailable(clinic, date_value):
+            return JsonResponse({"success": False, "error": "Clinic is not available on this day."})
+
+        window = get_working_window(clinic, date_value)
+        if not window:
+            return JsonResponse({"success": False, "error": "Clinic is not open on this day."})
+
+        open_time, close_time, break_start, break_end = window
+        if new_start.time() < open_time or new_end.time() > close_time:
+            return JsonResponse({"success": False, "error": "Appointment is outside working hours."})
+
+        if _inside_break(new_start.time(), new_end.time(), break_start, break_end):
+            return JsonResponse({"success": False, "error": "Appointment overlaps with a break."})
+
+        try:
+            validate_slot(clinic, appointment.service, new_start, new_end, exclude_appointment=appointment)
+        except ValidationError as exc:
+            return JsonResponse({"success": False, "error": _validation_error_message(exc)})
 
         appointment.starts_at = new_start
         appointment.ends_at = new_end
         try:
             appointment.save()
-        except ValidationError as e:
-            return JsonResponse({"success": False, "error": str(e)})
+        except ValidationError as exc:
+            return JsonResponse({"success": False, "error": _validation_error_message(exc)})
     return JsonResponse({"success": True})
 
 
@@ -774,14 +789,22 @@ def appointment_edit(request, pk):
                 existing_patient_id = appointment.patient_id
                 existing_service_id = appointment.service_id
                 existing_status = appointment.status
+                existing_starts_at = appointment.starts_at
+                existing_ends_at = appointment.ends_at
                 form = StaffAppointmentForm(clinic, request.POST, instance=appointment)
                 if form.is_valid():
                     edited_appointment = form.save(commit=False)
                     yakap_records_exist = _appointment_has_yakap_records(appointment)
                     service_changed = edited_appointment.service_id != existing_service_id
+                    time_changed = (
+                        edited_appointment.starts_at != existing_starts_at
+                        or edited_appointment.ends_at != existing_ends_at
+                    )
                     matched_patient_id = _matched_patient_id_for_booking(clinic, form.cleaned_data["patient_phone"])
                     patient_changed = matched_patient_id != existing_patient_id
-                    if yakap_records_exist and (patient_changed or service_changed):
+                    if yakap_records_exist and time_changed:
+                        form.add_error(None, YAKAP_APPOINTMENT_TIME_CHANGE_MESSAGE)
+                    elif yakap_records_exist and (patient_changed or service_changed):
                         form.add_error(None, "Cancel the YAKAP request or create a new appointment before changing patient or service.")
                     else:
                         cancelling = edited_appointment.status == Appointment.STATUS_CANCELLED and existing_status != Appointment.STATUS_CANCELLED
@@ -933,8 +956,6 @@ def appointment_reschedule(request, pk):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
-    if appointment.status in {Appointment.STATUS_COMPLETED, Appointment.STATUS_CANCELLED}:
-        return _redirect_with_appointment_error(request, "Cannot reschedule a completed or cancelled appointment.")
     new_date_str = request.POST.get("new_date")
     new_time_str = request.POST.get("new_time")
     if not new_date_str or not new_time_str:
@@ -948,7 +969,6 @@ def appointment_reschedule(request, pk):
         new_date = datetime.strptime(new_date_str, "%Y-%m-%d").date()
         new_time = datetime.strptime(new_time_str, "%H:%M").time()
         new_starts_at = timezone.make_aware(datetime.combine(new_date, new_time), tz)
-        new_ends_at = new_starts_at + timedelta(minutes=appointment.service.effective_duration())
     except ValueError:
         msg = "Invalid date or time format."
         if request.headers.get("HX-Request"):
@@ -957,17 +977,33 @@ def appointment_reschedule(request, pk):
         return redirect("dashboard:appointments")
     with transaction.atomic():
         Clinic.objects.select_for_update().get(pk=clinic.pk)
+        appointment = get_object_or_404(
+            clinic.appointments.select_for_update().select_related("patient", "service"),
+            pk=pk,
+        )
+        if appointment.status in {Appointment.STATUS_COMPLETED, Appointment.STATUS_CANCELLED}:
+            return _redirect_with_appointment_error(request, "Cannot reschedule a completed or cancelled appointment.")
+        if _appointment_has_yakap_records(appointment):
+            return _redirect_with_appointment_error(request, YAKAP_APPOINTMENT_TIME_CHANGE_MESSAGE)
+        new_ends_at = new_starts_at + timedelta(minutes=appointment.service.effective_duration())
         try:
-            validate_slot(clinic, new_starts_at, new_ends_at, exclude_appointment=appointment)
-        except ValidationError as e:
-            msg = str(e)
+            validate_slot(clinic, appointment.service, new_starts_at, new_ends_at, exclude_appointment=appointment)
+        except ValidationError as exc:
+            msg = _validation_error_message(exc)
             if request.headers.get("HX-Request"):
                 return HttpResponse(f'<p class="text-sm text-rose-600">{msg}</p>')
             messages.error(request, msg)
             return redirect("dashboard:appointments")
         appointment.starts_at = new_starts_at
         appointment.ends_at = new_ends_at
-        appointment.save()
+        try:
+            appointment.save()
+        except ValidationError as exc:
+            msg = _validation_error_message(exc)
+            if request.headers.get("HX-Request"):
+                return HttpResponse(f'<p class="text-sm text-rose-600">{msg}</p>')
+            messages.error(request, msg)
+            return redirect("dashboard:appointments")
     if request.headers.get("HX-Request"):
         return _appointment_htmx_response(request, clinic, appointment, "Appointment rescheduled.")
     messages.success(request, "Appointment rescheduled.")
@@ -1038,6 +1074,7 @@ def update_appointment(request, pk):
     appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
     try:
         with transaction.atomic():
+            clinic = Clinic.objects.select_for_update().get(pk=clinic.pk)
             appointment = get_object_or_404(
                 clinic.appointments.select_for_update().select_related("patient", "service"),
                 pk=pk,
@@ -1151,7 +1188,10 @@ def update_appointment_yakap_status(request, pk):
         snapshot = form.save(commit=False)
         snapshot.clinic = clinic
         snapshot.appointment = appointment
-        snapshot.requested = snapshot.coverage_status != AppointmentYakapSnapshot.STATUS_NOT_REQUESTED
+        snapshot.requested = snapshot.coverage_status not in {
+            AppointmentYakapSnapshot.STATUS_NOT_REQUESTED,
+            AppointmentYakapSnapshot.STATUS_CANCELLED,
+        }
         if snapshot.coverage_status == AppointmentYakapSnapshot.STATUS_VERIFIED_FOR_VISIT:
             snapshot.verified_at = timezone.now()
             snapshot.verified_by = request.user
@@ -1185,12 +1225,15 @@ def update_appointment_yakap_status(request, pk):
         )
         if not saved:
             return response
-        if request.POST.get("modal_source") == "calendar":
+        modal_source = request.POST.get("modal_source")
+        if modal_source == "calendar":
             response["HX-Trigger"] = _calendar_modal_trigger("YAKAP appointment status updated.", refetch=False)
         else:
             response["HX-Trigger"] = json.dumps({
                 "toast-message": {"message": "YAKAP appointment status updated.", "type": "success"}
             })
+            if modal_source == "yakap":
+                response["HX-Refresh"] = "true"
         return response
 
     return redirect("dashboard:appointments")
@@ -1207,21 +1250,42 @@ def appointment_yakap_ledger(request, pk):
 
     appointment = get_object_or_404(clinic.appointments.select_related("patient", "service"), pk=pk)
     privileged_entry_types = {YakapLedgerEntry.TYPE_ADJUSTMENT, YakapLedgerEntry.TYPE_REVERSAL}
-    if request.POST.get("entry_type") in privileged_entry_types and not can_manage_yakap_settings:
+    requested_entry_type = request.POST.get("entry_type")
+    if requested_entry_type in privileged_entry_types and not can_manage_yakap_settings:
         raise PermissionDenied
     if request.POST.get("reversal_of") and not can_manage_yakap_settings:
         raise PermissionDenied
     submitted_category = None
+    submitted_category_id = None
+    allow_inactive_reversal_category = False
     try:
-        submitted_category = clinic.yakap_categories.filter(is_active=True, pk=request.POST.get("category")).first()
+        submitted_category_id = int(request.POST.get("category"))
     except (TypeError, ValueError):
-        submitted_category = None
+        submitted_category_id = None
+    if submitted_category_id:
+        submitted_category = clinic.yakap_categories.filter(is_active=True, pk=submitted_category_id).first()
+    reversal_of_id = None
+    try:
+        reversal_of_id = int(request.POST.get("reversal_of"))
+    except (TypeError, ValueError):
+        reversal_of_id = None
+    if reversal_of_id and can_manage_yakap_settings and requested_entry_type == YakapLedgerEntry.TYPE_REVERSAL:
+        original_entry = clinic.yakap_ledger_entries.select_related("category").filter(
+            pk=reversal_of_id,
+            patient=appointment.patient,
+            appointment=appointment,
+        ).exclude(entry_type=YakapLedgerEntry.TYPE_REVERSAL).first()
+        if original_entry and submitted_category_id == original_entry.category_id:
+            submitted_category = original_entry.category
+            allow_inactive_reversal_category = not original_entry.category.is_active
     form = YakapLedgerEntryForm(
         clinic,
         request.POST,
         patient=appointment.patient,
+        appointment=appointment,
         category=submitted_category,
         allow_privileged_entries=can_manage_yakap_settings,
+        allow_inactive_category=allow_inactive_reversal_category,
     )
     saved = form.is_valid()
     if saved:
@@ -1338,6 +1402,7 @@ def appointment_yakap_ledger(request, pk):
                     YakapLedgerEntryForm(
                         clinic,
                         patient=appointment.patient,
+                        appointment=appointment,
                         category=getattr(getattr(appointment.service, "yakap_rule", None), "category", None),
                         allow_privileged_entries=can_manage_yakap_settings,
                     )
@@ -1350,12 +1415,15 @@ def appointment_yakap_ledger(request, pk):
         )
         if not saved:
             return response
-        if request.POST.get("modal_source") == "calendar":
+        modal_source = request.POST.get("modal_source")
+        if modal_source == "calendar":
             response["HX-Trigger"] = _calendar_modal_trigger("YAKAP usage added.", refetch=False)
         else:
             response["HX-Trigger"] = json.dumps({
                 "toast-message": {"message": "YAKAP usage added.", "type": "success"}
             })
+            if modal_source == "yakap":
+                response["HX-Refresh"] = "true"
         return response
 
     return redirect("dashboard:appointments")
@@ -1483,6 +1551,18 @@ def delete_patient(request, pk):
     membership = get_active_membership(request.user)
     if not user_can_manage_daily_ops(membership):
         raise PermissionDenied
+    if patient_has_yakap_history(patient):
+        message = "Patients with YAKAP history cannot be deleted. Resolve YAKAP records manually before deleting."
+        if request.headers.get("HX-Request"):
+            response = HttpResponse("")
+            response["HX-Reswap"] = "none"
+            response["HX-Trigger"] = json.dumps({
+                "patientDeleteBlocked": True,
+                "toast-message": {"message": message, "type": "error"}
+            })
+            return response
+        messages.error(request, message)
+        return redirect("dashboard:patient_detail", pk=patient.pk)
     if patient.appointments.exists():
         message = "Patients with appointment history cannot be deleted. Merge duplicates instead."
         if request.headers.get("HX-Request"):
@@ -1549,11 +1629,21 @@ def patient_merge(request):
             return HttpResponse("Select two different patients to merge.", status=400)
         if patient_has_yakap_history(primary) or patient_has_yakap_history(duplicate):
             return HttpResponse('<p class="cf-error">Cannot merge patients with YAKAP history. Resolve YAKAP records manually before merging.</p>')
-        appointment_count = duplicate.appointments.count()
-        for appointment in duplicate.appointments.all():
-            appointment.patient = primary
-            appointment.save(update_fields=["patient", "updated_at"])
-        duplicate.delete()
+        try:
+            with transaction.atomic():
+                primary = clinic.patients.select_for_update().get(pk=primary.pk)
+                duplicate = clinic.patients.select_for_update().get(pk=duplicate.pk)
+                appointment_count = duplicate.appointments.count()
+                for appointment in duplicate.appointments.select_for_update().all():
+                    appointment.patient = primary
+                    appointment.save(update_fields=["patient", "updated_at"])
+                duplicate.delete()
+        except ValidationError as exc:
+            message = _validation_error_message(exc)
+            if request.headers.get("HX-Request"):
+                return HttpResponse(f'<p class="cf-error">{message}</p>')
+            messages.error(request, message)
+            return redirect("dashboard:patients")
         messages.success(
             request,
             f"Merged {duplicate.full_name} into {primary.full_name}. {appointment_count} appointment(s) moved."
@@ -2070,10 +2160,10 @@ def yakap(request):
             settings_obj = clinic.yakap_settings
         except ClinicYakapSettings.DoesNotExist:
             settings_obj = ClinicYakapSettings(clinic=clinic)
-    clinic_tz = ZoneInfo(clinic.timezone)
-    today = timezone.localdate(timezone.now(), clinic_tz)
     settings_form = ClinicYakapSettingsForm(instance=settings_obj)
     category_form = YakapCoverageCategoryForm(clinic=clinic)
+    category_edit_form = None
+    category_edit_error_category_id = None
     post_form = request.POST.get("_form")
     unverified_appointments_qs = clinic.appointments.select_related("patient", "service", "yakap_snapshot").filter(
         yakap_snapshot__requested=True,
@@ -2102,16 +2192,6 @@ def yakap(request):
         "service",
         "appointment",
     ).order_by("-occurred_at", "-created_at")[:10]
-    services_missing_rules_qs = clinic.services.filter(
-        is_active=True,
-        is_archived=False,
-    ).filter(
-        Q(yakap_rule__isnull=True)
-        | Q(yakap_rule__category__isnull=True)
-        | Q(yakap_rule__category__is_active=False)
-    ).order_by("name")
-    services_missing_rules_count = services_missing_rules_qs.count()
-    services_missing_rules = services_missing_rules_qs[:10]
     low_balance_patients = []
     over_limit_patients = []
     low_balance_patients_count = 0
@@ -2146,10 +2226,17 @@ def yakap(request):
             return redirect("dashboard:yakap")
     elif request.method == "POST" and post_form == "category":
         category_id = request.POST.get("category_id")
-        category_instance = get_object_or_404(clinic.yakap_categories, pk=category_id) if category_id else None
-        category_form = YakapCoverageCategoryForm(request.POST, clinic=clinic, instance=category_instance)
-        if category_form.is_valid():
-            category = category_form.save(commit=False)
+        if category_id:
+            try:
+                category_pk = int(category_id)
+            except (TypeError, ValueError):
+                raise Http404
+            category_instance = get_object_or_404(clinic.yakap_categories, pk=category_pk)
+        else:
+            category_instance = None
+        submitted_category_form = YakapCoverageCategoryForm(request.POST, clinic=clinic, instance=category_instance)
+        if submitted_category_form.is_valid():
+            category = submitted_category_form.save(commit=False)
             category.clinic = clinic
             category.save()
             action_label = "updated" if category_instance else "added"
@@ -2162,6 +2249,11 @@ def yakap(request):
             )
             messages.success(request, f"YAKAP coverage category {action_label}.")
             return redirect("dashboard:yakap")
+        if category_instance:
+            category_edit_form = submitted_category_form
+            category_edit_error_category_id = category_instance.pk
+        else:
+            category_form = submitted_category_form
 
     return render(
         request,
@@ -2171,6 +2263,8 @@ def yakap(request):
             "yakap_settings": settings_obj,
             "settings_form": settings_form,
             "category_form": category_form,
+            "category_edit_form": category_edit_form,
+            "category_edit_error_category_id": category_edit_error_category_id,
             "categories": clinic.yakap_categories.all(),
             "category_type_choices": YakapCoverageCategory.TYPE_CHOICES,
             "can_manage_yakap_settings": can_manage_yakap_settings,
@@ -2179,13 +2273,10 @@ def yakap(request):
             "upcoming_yakap_appointments_count": upcoming_yakap_appointments_count,
             "upcoming_yakap_appointments": upcoming_yakap_appointments,
             "recent_ledger_entries": recent_ledger_entries,
-            "services_missing_rules_count": services_missing_rules_count,
-            "services_missing_rules": services_missing_rules,
             "low_balance_patients_count": low_balance_patients_count,
             "low_balance_patients": low_balance_patients,
             "over_limit_patients_count": over_limit_patients_count,
             "over_limit_patients": over_limit_patients,
-            "export_form": YakapExportForm(initial={"started_at": today.replace(month=1, day=1), "ended_at": today}),
         },
     )
 
@@ -2240,7 +2331,7 @@ def yakap_export(request):
             _safe_csv_cell(entry.service.name if entry.service else ""),
             _safe_csv_cell(entry.category.name),
             _safe_csv_cell(entry.entry_type),
-            f"{entry.amount:.2f}",
+            f"{entry.signed_amount:.2f}",
             _safe_csv_cell(entry.verification_status),
             _safe_csv_cell(entry.created_by.get_username() if entry.created_by else ""),
             _safe_csv_cell(entry.external_reference),
@@ -2565,15 +2656,17 @@ def messenger_settings(request):
         and connection.page_id
         and connection.page_access_token
     )
+    meta_callback_url = request.build_absolute_uri(reverse("messenger:webhook"))
     n8n_webhook_url = request.build_absolute_uri(reverse("messenger:n8n_webhook"))
-    meta_n8n_webhook_url = getattr(django_settings, "META_MESSENGER_N8N_WEBHOOK_URL", "")
+    n8n_worker_webhook_url = getattr(django_settings, "META_MESSENGER_N8N_WEBHOOK_URL", "")
     return render(request, "dashboard/messenger_settings.html", {
         "clinic": clinic,
         "connection": connection,
         "connection_is_configured": connection_is_configured,
         "form": form,
+        "meta_callback_url": meta_callback_url,
         "n8n_webhook_url": n8n_webhook_url,
-        "meta_n8n_webhook_url": meta_n8n_webhook_url,
+        "n8n_worker_webhook_url": n8n_worker_webhook_url,
     })
 
 @login_required

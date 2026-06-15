@@ -18,6 +18,7 @@ from django.views.decorators.http import require_POST
 
 from appointments.models import Appointment
 from clinics.models import Clinic, ClinicAISettings
+from messenger.callback_urls import build_n8n_callback_urls
 from patients.models import Patient, normalize_phone
 from scheduling.utils import generate_slots
 from widget.ai_client import AssistantUnavailable, call_assistant_webhook, fallback_message_for
@@ -501,7 +502,14 @@ def _handle_widget_ai_chat(request, clinic, action, value, conversation_id="defa
     assistant_session_id = f"{request.session.session_key}:{conversation_id}"
 
     try:
-        reply = call_assistant_webhook(clinic, message, history, assistant_session_id, conversation_id)
+        reply = call_assistant_webhook(
+            clinic,
+            message,
+            history,
+            assistant_session_id,
+            conversation_id,
+            build_n8n_callback_urls(request, "widget"),
+        )
     except AssistantUnavailable as error:
         reply = _widget_ai_unavailable_message(ai_settings, error)
     except (requests.RequestException, ValueError):

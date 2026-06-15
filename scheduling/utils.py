@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 
-from appointments.models import Appointment
+from appointments.availability import service_capacity_available
 from scheduling.models import ClinicBusinessHour, UnavailableDate
 
 
@@ -26,32 +26,27 @@ def get_working_window(clinic, date_value):
     return None
 
 
-def slot_is_available(clinic, starts_at, ends_at):
-    return not (
-        Appointment.objects.filter(
-            clinic=clinic,
-            starts_at__lt=ends_at,
-            ends_at__gt=starts_at,
-        )
-        .exclude(status=Appointment.STATUS_CANCELLED)
-        .exists()
+def slot_is_available(clinic, service, starts_at, ends_at, exclude_appointment=None):
+    return service_capacity_available(
+        clinic,
+        service,
+        starts_at,
+        ends_at,
+        exclude_appointment=exclude_appointment,
     )
 
 
-def slot_is_available_for_appointment(clinic, starts_at, ends_at, exclude_appointment=None):
-    qs = Appointment.objects.filter(
+def slot_is_available_for_appointment(clinic, service, starts_at, ends_at, exclude_appointment=None):
+    return slot_is_available(
         clinic=clinic,
-        starts_at__lt=ends_at,
-        ends_at__gt=starts_at,
-    ).exclude(status=Appointment.STATUS_CANCELLED)
-    if exclude_appointment:
-        qs = qs.exclude(pk=exclude_appointment.pk)
-    if qs.exists():
-        return False
-    return True
+        service=service,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        exclude_appointment=exclude_appointment,
+    )
 
 
-def validate_slot(clinic, starts_at, ends_at, exclude_appointment=None):
+def validate_slot(clinic, service, starts_at, ends_at, exclude_appointment=None):
     from django.core.exceptions import ValidationError
     if starts_at <= timezone.now():
         raise ValidationError("Selected time must be in the future.")
@@ -69,8 +64,8 @@ def validate_slot(clinic, starts_at, ends_at, exclude_appointment=None):
         raise ValidationError("Selected time is outside working hours.")
     if _inside_break(local_start.time(), local_end.time(), break_start, break_end):
         raise ValidationError("Selected time overlaps with a scheduled break.")
-    if not slot_is_available_for_appointment(clinic, starts_at, ends_at, exclude_appointment):
-        raise ValidationError("This slot is not available.")
+    if not slot_is_available_for_appointment(clinic, service, starts_at, ends_at, exclude_appointment):
+        raise ValidationError("This service is fully booked at that time.")
 
 
 def _date_is_unavailable(clinic, date_value):
@@ -98,7 +93,7 @@ def generate_slots(clinic, service, date_value):
         if cursor > now:
             utc_start = cursor.astimezone(ZoneInfo("UTC"))
             utc_end = end.astimezone(ZoneInfo("UTC"))
-            if slot_is_available(clinic, utc_start, utc_end):
+            if slot_is_available(clinic, service, utc_start, utc_end):
                 slots.append({"starts_at": utc_start, "ends_at": utc_end, "label": cursor.strftime("%I:%M %p").lstrip("0")})
         cursor = end
     return slots

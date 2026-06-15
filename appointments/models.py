@@ -88,17 +88,38 @@ class Appointment(TimeStampedModel):
             errors["ends_at"] = "Appointment end time must be after start time."
         if errors:
             raise ValidationError(errors)
-        if not self.clinic_id:
+        if not (self.clinic_id and self.service_id and self.patient_id and self.starts_at and self.ends_at):
             return
-        overlaps = Appointment.objects.filter(
-            clinic=self.clinic,
-            starts_at__lt=self.ends_at,
-            ends_at__gt=self.starts_at,
-        ).exclude(status=self.STATUS_CANCELLED)
-        if self.pk:
-            overlaps = overlaps.exclude(pk=self.pk)
-        if overlaps.exists():
-            raise ValidationError("This clinic already has an appointment at that time.")
+        from appointments.availability import (
+            duplicate_active_appointment_exists,
+            patient_has_overlapping_active_appointment,
+            service_capacity_available,
+        )
+
+        if duplicate_active_appointment_exists(
+            self.clinic,
+            self.patient,
+            self.service,
+            self.starts_at,
+            exclude_appointment=self,
+        ):
+            raise ValidationError("This patient already has an active appointment for this service at that time.")
+        if patient_has_overlapping_active_appointment(
+            self.clinic,
+            self.patient,
+            self.starts_at,
+            self.ends_at,
+            exclude_appointment=self,
+        ):
+            raise ValidationError("This patient already has an active appointment at that time.")
+        if not service_capacity_available(
+            self.clinic,
+            self.service,
+            self.starts_at,
+            self.ends_at,
+            exclude_appointment=self,
+        ):
+            raise ValidationError("This service is fully booked at that time.")
 
     def _generate_reference_code(self):
         while True:

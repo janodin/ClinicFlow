@@ -7,20 +7,18 @@ import {
   expr,
 } from '@n8n/workflow-sdk';
 
-const DJANGO_BASE_URL_EXPR = '(() => { const base = String($vars.DJANGO_BASE_URL || "").trim(); if (!base) { throw new Error("DJANGO_BASE_URL is required"); } const url = new URL(base); if (url.protocol !== "https:") { throw new Error("DJANGO_BASE_URL must use https"); } return url.toString().replace(/\\/$/, ""); })()';
 const N8N_WEBHOOK_CREDENTIAL_ID = 'PJHqVMwE3qU58s9E';
 const MESSENGER_FALLBACK = 'Thanks for your message. Please contact the clinic directly for help.';
 const WIDGET_FALLBACK = 'Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.';
-const DJANGO_MESSENGER_WEBHOOK_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/webhook/" }}');
-const DJANGO_META_SIGNATURE_VERIFY_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/meta/verify-signature/" }}');
-const DJANGO_MESSENGER_AI_CONTEXT_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/context/" }}');
-const DJANGO_AI_GATEWAY_REPLY_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/gateway/reply/" }}');
-const DJANGO_WIDGET_AI_CONTEXT_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/widget/context/" }}');
-const DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/register/" }}');
-const DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/claim/" }}');
-const DJANGO_MESSENGER_AI_TURN_SEND_REPLY_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/ai/turn/send-reply/" }}');
-const DJANGO_MESSENGER_N8N_WEBHOOK_URL_EXPR = expr('{{ ' + DJANGO_BASE_URL_EXPR + ' + "/messenger/n8n-webhook/" }}');
-
+const DJANGO_MESSENGER_WEBHOOK_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["messenger_webhook_url"] || "").trim(); if (!value) { throw new Error("callback_urls.messenger_webhook_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.messenger_webhook_url must use https"); } return url.toString(); })() }}');
+const DJANGO_META_SIGNATURE_VERIFY_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["meta_signature_verify_url"] || "").trim(); if (!value) { throw new Error("callback_urls.meta_signature_verify_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.meta_signature_verify_url must use https"); } return url.toString(); })() }}');
+const DJANGO_MESSENGER_AI_CONTEXT_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["messenger_ai_context_url"] || "").trim(); if (!value) { throw new Error("callback_urls.messenger_ai_context_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.messenger_ai_context_url must use https"); } return url.toString(); })() }}');
+const DJANGO_AI_GATEWAY_REPLY_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["ai_gateway_reply_url"] || "").trim(); if (!value) { throw new Error("callback_urls.ai_gateway_reply_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.ai_gateway_reply_url must use https"); } return url.toString(); })() }}');
+const DJANGO_WIDGET_AI_CONTEXT_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["widget_ai_context_url"] || "").trim(); if (!value) { throw new Error("callback_urls.widget_ai_context_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.widget_ai_context_url must use https"); } return url.toString(); })() }}');
+const DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["messenger_ai_turn_register_url"] || "").trim(); if (!value) { throw new Error("callback_urls.messenger_ai_turn_register_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.messenger_ai_turn_register_url must use https"); } return url.toString(); })() }}');
+const DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["messenger_ai_turn_claim_url"] || "").trim(); if (!value) { throw new Error("callback_urls.messenger_ai_turn_claim_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.messenger_ai_turn_claim_url must use https"); } return url.toString(); })() }}');
+const DJANGO_MESSENGER_AI_TURN_SEND_REPLY_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["messenger_ai_turn_send_reply_url"] || "").trim(); if (!value) { throw new Error("callback_urls.messenger_ai_turn_send_reply_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.messenger_ai_turn_send_reply_url must use https"); } return url.toString(); })() }}');
+const DJANGO_MESSENGER_N8N_WEBHOOK_URL_EXPR = expr('{{ (() => { const callbackUrls = $json.callback_urls || {}; const value = String(callbackUrls["messenger_n8n_webhook_url"] || "").trim(); if (!value) { throw new Error("callback_urls.messenger_n8n_webhook_url is required"); } const url = new URL(value); if (url.protocol !== "https:") { throw new Error("callback_urls.messenger_n8n_webhook_url must use https"); } return url.toString(); })() }}');
 const metaWebhookVerification = trigger({
   type: 'n8n-nodes-base.webhook',
   version: 2.1,
@@ -34,7 +32,7 @@ const metaWebhookVerification = trigger({
       options: {},
     },
   },
-  output: [{ query: { 'hub.mode': 'subscribe', 'hub.verify_token': 'configured-token', 'hub.challenge': '123456789' } }],
+  output: [{ query: { 'hub.mode': 'subscribe', 'hub.verify_token': 'configured-token', 'hub.challenge': '123456789' }, callback_urls: { messenger_webhook_url: 'https://callback.example.test/messenger/webhook/', meta_signature_verify_url: 'https://callback.example.test/messenger/meta/verify-signature/', messenger_ai_context_url: 'https://callback.example.test/messenger/ai/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_ai_turn_register_url: 'https://callback.example.test/messenger/ai/turn/register/', messenger_ai_turn_claim_url: 'https://callback.example.test/messenger/ai/turn/claim/', messenger_ai_turn_send_reply_url: 'https://callback.example.test/messenger/ai/turn/send-reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }],
 });
 
 const verifyMetaChallenge = node({
@@ -87,9 +85,11 @@ const metaMessengerEvents = trigger({
     parameters: {
       httpMethod: 'POST',
       path: 'kliniassist-messenger',
+      authentication: 'headerAuth',
       responseMode: 'responseNode',
       options: { rawBody: true },
     },
+    credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
   output: [{ headers: { 'X-Hub-Signature-256': 'sha256=abc123' }, body: { entry: [{ id: 'PAGE123', messaging: [{ sender: { id: 'PSID123' }, recipient: { id: 'PAGE123' }, message: { text: 'Can I book cleaning tomorrow?' } }] }] } }],
 });
@@ -118,6 +118,54 @@ if (typeof body === 'string') {
 }
 if (!rawBody && body && typeof body === 'object') {
   rawBody = JSON.stringify(body);
+}
+if (typeof body.raw_body === 'string' && body.raw_body.trim()) {
+  rawBody = body.raw_body;
+}
+const callbackUrls = body.callback_urls && typeof body.callback_urls === 'object' ? body.callback_urls : {};
+const requiredCallbackUrls = [
+  'meta_signature_verify_url',
+  'messenger_ai_turn_register_url',
+  'messenger_ai_turn_claim_url',
+  'messenger_ai_context_url',
+  'ai_gateway_reply_url',
+  'messenger_n8n_webhook_url',
+  'messenger_ai_turn_send_reply_url',
+];
+for (const key of requiredCallbackUrls) {
+  const value = String(callbackUrls[key] || '').trim();
+  if (!value) {
+    throw new Error('callback_urls.' + key + ' is required');
+  }
+  const url = new URL(value);
+  if (url.protocol !== 'https:') {
+    throw new Error('callback_urls.' + key + ' must use https');
+  }
+}
+if (body.channel === 'messenger' && Object.keys(callbackUrls).length) {
+  const pageId = String(body.page_id || body.pageId || '').trim();
+  const psid = String(body.psid || body.sender_id || '').trim();
+  const message = String(body.message || body.text || '').trim();
+  const postback = String(body.postback || '').trim();
+  const messageId = String(body.message_id || body.messageId || '').trim();
+  const signatureValue = String(body.signature || '').trim();
+  return [{ json: {
+    channel: 'messenger',
+    message,
+    postback,
+    page_id: pageId,
+    psid,
+    message_id: messageId,
+    clinic_slug: String(body.clinic_slug || body.clinicSlug || '').trim(),
+    clinic_id: body.clinic_id || body.clinicId || '',
+    session_id: '',
+    session_key: 'messenger:' + (pageId || 'unknown-page') + ':' + (psid || 'unknown-psid'),
+    output_mode: 'facebook',
+    ignored_event: !pageId || !psid || (!message && !postback),
+    raw_body: rawBody,
+    signature: signatureValue,
+    callback_urls: callbackUrls
+  } }];
 }
 const headers = input.headers || {};
 const signature = String(headers['X-Hub-Signature-256'] || headers['x-hub-signature-256'] || '').trim();
@@ -155,7 +203,8 @@ for (const entry of entries) {
       output_mode: 'facebook',
       ignored_event: false,
       raw_body: rawBody,
-      signature
+      signature,
+      callback_urls: callbackUrls
     } });
   }
 }
@@ -176,13 +225,14 @@ if (!items.length) {
     output_mode: 'facebook',
     ignored_event: true,
     raw_body: rawBody,
-    signature
+    signature,
+    callback_urls: callbackUrls
   } });
 }
 return items;`,
     },
   },
-  output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', postback: '', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', clinic_slug: '', session_id: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook', ignored_event: false, raw_body: '{"entry":[{"id":"PAGE123"}]}', signature: 'sha256=abc123' }],
+  output: [{ channel: 'messenger', message: 'Can I book cleaning tomorrow?', postback: '', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', clinic_slug: '', session_id: '', session_key: 'messenger:PAGE123:PSID123', output_mode: 'facebook', ignored_event: false, raw_body: '{"entry":[{"id":"PAGE123"}]}', signature: 'sha256=abc123', callback_urls: { messenger_webhook_url: 'https://callback.example.test/messenger/webhook/', meta_signature_verify_url: 'https://callback.example.test/messenger/meta/verify-signature/', messenger_ai_context_url: 'https://callback.example.test/messenger/ai/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_ai_turn_register_url: 'https://callback.example.test/messenger/ai/turn/register/', messenger_ai_turn_claim_url: 'https://callback.example.test/messenger/ai/turn/claim/', messenger_ai_turn_send_reply_url: 'https://callback.example.test/messenger/ai/turn/send-reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }],
 });
 
 const verifyMetaSignature = node({
@@ -286,7 +336,7 @@ const acknowledgeMetaMessengerEvent = node({
       },
     },
   },
-  output: [{ response_route: 'acknowledge', processable_events: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', message: 'Hello', postback: '', raw_body: '{}', signature: 'sha256=abc123', verified: true, duplicate: false, ignored_event: false }] }],
+  output: [{ response_route: 'acknowledge', processable_events: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', message: 'Hello', postback: '', raw_body: '{}', signature: 'sha256=abc123', verified: true, duplicate: false, ignored_event: false, callback_urls: { messenger_webhook_url: 'https://callback.example.test/messenger/webhook/', meta_signature_verify_url: 'https://callback.example.test/messenger/meta/verify-signature/', messenger_ai_context_url: 'https://callback.example.test/messenger/ai/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_ai_turn_register_url: 'https://callback.example.test/messenger/ai/turn/register/', messenger_ai_turn_claim_url: 'https://callback.example.test/messenger/ai/turn/claim/', messenger_ai_turn_send_reply_url: 'https://callback.example.test/messenger/ai/turn/send-reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }] }],
 });
 
 const returnInvalidMetaSignature = node({
@@ -320,7 +370,7 @@ const events = Array.isArray(input.processable_events) ? input.processable_event
 return events.map((event) => ({ json: event }));`,
     },
   },
-  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', message: 'Hello', postback: '', raw_body: '{}', signature: 'sha256=abc123', verified: true, duplicate: false, ignored_event: false }],
+  output: [{ channel: 'messenger', page_id: 'PAGE123', psid: 'PSID123', message_id: 'mid.123', message: 'Hello', postback: '', raw_body: '{}', signature: 'sha256=abc123', verified: true, duplicate: false, ignored_event: false, callback_urls: { messenger_webhook_url: 'https://callback.example.test/messenger/webhook/', meta_signature_verify_url: 'https://callback.example.test/messenger/meta/verify-signature/', messenger_ai_context_url: 'https://callback.example.test/messenger/ai/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_ai_turn_register_url: 'https://callback.example.test/messenger/ai/turn/register/', messenger_ai_turn_claim_url: 'https://callback.example.test/messenger/ai/turn/claim/', messenger_ai_turn_send_reply_url: 'https://callback.example.test/messenger/ai/turn/send-reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }],
 });
 
 const registerMessengerTurn = node({
@@ -501,7 +551,7 @@ const widgetAssistantWebhook = trigger({
     },
     credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) },
   },
-  output: [{ body: { channel: 'widget', clinic_id: 1, clinic_slug: 'demo-clinic', message: 'Can I book tomorrow?', history: [], session_id: 'SESSION123' } }],
+  output: [{ body: { channel: 'widget', clinic_id: 1, clinic_slug: 'demo-clinic', message: 'Can I book tomorrow?', history: [], session_id: 'SESSION123', callback_urls: { widget_ai_context_url: 'https://callback.example.test/messenger/ai/widget/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } } }],
 });
 
 const normalizeWidgetRequest = node({
@@ -514,6 +564,22 @@ const normalizeWidgetRequest = node({
       mode: 'runOnceForAllItems',
       jsCode: `const input = $input.first().json;
 const body = input.body || input;
+const callbackUrls = body.callback_urls && typeof body.callback_urls === 'object' ? body.callback_urls : {};
+const requiredCallbackUrls = [
+  'widget_ai_context_url',
+  'ai_gateway_reply_url',
+  'messenger_n8n_webhook_url',
+];
+for (const key of requiredCallbackUrls) {
+  const value = String(callbackUrls[key] || '').trim();
+  if (!value) {
+    throw new Error('callback_urls.' + key + ' is required');
+  }
+  const url = new URL(value);
+  if (url.protocol !== 'https:') {
+    throw new Error('callback_urls.' + key + ' must use https');
+  }
+}
 const clinicSlug = String(body.clinic_slug || body.clinicSlug || '').trim();
 const message = String(body.message || body.text || '').trim();
 const sessionId = String(body.session_id || body.sessionId || '').trim() || ('stateless:' + $execution.id);
@@ -527,11 +593,12 @@ return [{ json: {
   history: Array.isArray(body.history) ? body.history.slice(-10) : [],
   session_id: sessionId,
   session_key: 'widget:' + (clinicSlug || 'unknown-clinic') + ':' + sessionId,
-  output_mode: 'widget_json'
+  output_mode: 'widget_json',
+  callback_urls: callbackUrls,
 } }];`,
     },
   },
-  output: [{ channel: 'widget', message: 'Can I book tomorrow?', page_id: '', psid: '', clinic_slug: 'demo-clinic', clinic_id: 1, history: [], session_id: 'SESSION123', session_key: 'widget:demo-clinic:SESSION123', output_mode: 'widget_json' }],
+  output: [{ channel: 'widget', message: 'Can I book tomorrow?', page_id: '', psid: '', clinic_slug: 'demo-clinic', clinic_id: 1, history: [], session_id: 'SESSION123', session_key: 'widget:demo-clinic:SESSION123', output_mode: 'widget_json', callback_urls: { widget_ai_context_url: 'https://callback.example.test/messenger/ai/widget/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }],
 });
 
 const getMessengerClinicContext = node({
@@ -842,7 +909,7 @@ for (const inputItem of $input.all()) {
 return items;`,
     },
   },
-  output: [{ page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, reply_text: 'Choose an option:', facebook_bodies: [{ messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } }] }],
+  output: [{ page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, reply_text: 'Choose an option:', facebook_bodies: [{ messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } }], callback_urls: { messenger_webhook_url: 'https://callback.example.test/messenger/webhook/', meta_signature_verify_url: 'https://callback.example.test/messenger/meta/verify-signature/', messenger_ai_context_url: 'https://callback.example.test/messenger/ai/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_ai_turn_register_url: 'https://callback.example.test/messenger/ai/turn/register/', messenger_ai_turn_claim_url: 'https://callback.example.test/messenger/ai/turn/claim/', messenger_ai_turn_send_reply_url: 'https://callback.example.test/messenger/ai/turn/send-reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }],
 });
 
 const callDjangoAiGateway = node({
@@ -877,7 +944,8 @@ const handleDjangoAiGatewayError = node({
     position: [1968, 880],
     parameters: {
       mode: 'runOnceForAllItems',
-      jsCode: `const sourceItems = $items('Route Assistant Mode', 0);
+      jsCode: `// Sync marker for Django AI gateway route: /messenger/ai/gateway/reply/
+const sourceItems = $items('Route Assistant Mode', 0);
 return $input.all().map((inputItem, itemIndex) => {
   const source = sourceItems[itemIndex]?.json || {};
   const channel = source.channel || 'widget';
@@ -1051,7 +1119,7 @@ for (const inputItem of $input.all()) {
 return items;`,
     },
   },
-  output: [{ page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, reply_text: 'Choose an option:', facebook_bodies: [{ messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } }] }],
+  output: [{ page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, reply_text: 'Choose an option:', facebook_bodies: [{ messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Choose an option:', quick_replies: [{ content_type: 'text', title: 'Book an appointment', payload: 'start_booking' }] } }], callback_urls: { messenger_webhook_url: 'https://callback.example.test/messenger/webhook/', meta_signature_verify_url: 'https://callback.example.test/messenger/meta/verify-signature/', messenger_ai_context_url: 'https://callback.example.test/messenger/ai/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_ai_turn_register_url: 'https://callback.example.test/messenger/ai/turn/register/', messenger_ai_turn_claim_url: 'https://callback.example.test/messenger/ai/turn/claim/', messenger_ai_turn_send_reply_url: 'https://callback.example.test/messenger/ai/turn/send-reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }],
 });
 
 const prepareSharedFallback = node({
@@ -1188,7 +1256,7 @@ const prepareCurrentMessengerReply = node({
       jsCode: `return $input.all().map((input) => ({ json: input.json || {} }));`,
     },
   },
-  output: [{ send_reply: true, page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Assistant reply' } } }],
+  output: [{ send_reply: true, page_id: 'PAGE123', psid: 'PSID123', turn_token: 'turn-token', input_sequence: 2, facebook_body: { messaging_type: 'RESPONSE', recipient: { id: 'PSID123' }, message: { text: 'Assistant reply' } }, callback_urls: { messenger_webhook_url: 'https://callback.example.test/messenger/webhook/', meta_signature_verify_url: 'https://callback.example.test/messenger/meta/verify-signature/', messenger_ai_context_url: 'https://callback.example.test/messenger/ai/context/', ai_gateway_reply_url: 'https://callback.example.test/messenger/ai/gateway/reply/', messenger_ai_turn_register_url: 'https://callback.example.test/messenger/ai/turn/register/', messenger_ai_turn_claim_url: 'https://callback.example.test/messenger/ai/turn/claim/', messenger_ai_turn_send_reply_url: 'https://callback.example.test/messenger/ai/turn/send-reply/', messenger_n8n_webhook_url: 'https://callback.example.test/messenger/n8n-webhook/' } }],
 });
 
 const sendMessengerReplyViaDjango = node({

@@ -11,7 +11,7 @@
       {% endif %}
     </div>
     <h2 class="cf-mobile-break mt-3 cf-section-title">{{ service.name }}</h2>
-    <p class="mt-1.5 text-sm text-[var(--cf-muted)]">{{ service.effective_duration }} minutes</p>
+    <p class="mt-1.5 text-sm text-[var(--cf-muted)]">{{ service.effective_duration }} minutes - {{ service.simultaneous_capacity }} at once</p>
     {% with yakap_rule=service.yakap_rule %}
       {% if yakap_rule %}
         <div class="mt-2">

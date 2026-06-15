@@ -182,25 +182,108 @@ def test_combined_bridge_uses_flat_route_branch_constants_for_sdk_parser():
     assert ".add(widgetAssistantWebhook)" in workflow_block
 
 
-def test_combined_bridge_builds_django_urls_from_one_base_url_constant():
+def test_combined_bridge_reads_django_urls_from_callback_urls():
     source = SOURCE.read_text(encoding="utf-8")
 
     assert "process.env.DJANGO_BASE_URL" not in source
     assert "$env.DJANGO_BASE_URL" not in source
+    assert "$vars.DJANGO_BASE_URL" not in source
     assert "$env" not in source
     assert "process.env" not in source
-    assert "const DJANGO_BASE_URL_EXPR =" in source
-    assert "$vars.DJANGO_BASE_URL" in source
-    assert "new URL(base)" in source
-    assert "url.protocol !== \"https:\"" in source
-    assert "DJANGO_BASE_URL must use https" in source
-    assert "DJANGO_MESSENGER_WEBHOOK_URL_EXPR" in source
-    assert "DJANGO_AI_GATEWAY_REPLY_URL_EXPR" in source
-    assert "url: DJANGO_MESSENGER_WEBHOOK_URL_EXPR" in source
-    assert "url: DJANGO_AI_GATEWAY_REPLY_URL_EXPR" in source
-    assert "DJANGO_BASE_URL_FALLBACK" not in source
     assert "https://178-105-83-211.nip.io" not in source
     assert "https://157-90-164-203.nip.io" not in source
+    assert "const DJANGO_BASE_URL" not in source
+    assert "const DJANGO_BASE_URL_EXPR" not in source
+    assert "function callbackUrlExpr" not in source
+    assert "const callbackUrlExpr" not in source
+    assert "$json.callback_urls" in source
+    for callback_key in [
+        "messenger_webhook_url",
+        "meta_signature_verify_url",
+        "messenger_ai_context_url",
+        "ai_gateway_reply_url",
+        "widget_ai_context_url",
+        "messenger_ai_turn_register_url",
+        "messenger_ai_turn_claim_url",
+        "messenger_ai_turn_send_reply_url",
+        "messenger_n8n_webhook_url",
+    ]:
+        assert f'callbackUrls["{callback_key}"]' in source
+    for constant_name in [
+        "DJANGO_MESSENGER_WEBHOOK_URL_EXPR",
+        "DJANGO_META_SIGNATURE_VERIFY_URL_EXPR",
+        "DJANGO_MESSENGER_AI_CONTEXT_URL_EXPR",
+        "DJANGO_AI_GATEWAY_REPLY_URL_EXPR",
+        "DJANGO_WIDGET_AI_CONTEXT_URL_EXPR",
+        "DJANGO_MESSENGER_AI_TURN_REGISTER_URL_EXPR",
+        "DJANGO_MESSENGER_AI_TURN_CLAIM_URL_EXPR",
+        "DJANGO_MESSENGER_AI_TURN_SEND_REPLY_URL_EXPR",
+        "DJANGO_MESSENGER_N8N_WEBHOOK_URL_EXPR",
+    ]:
+        assert f"const {constant_name} = expr(" in source
+    assert "url: DJANGO_MESSENGER_AI_CONTEXT_URL_EXPR" in source
+    assert "url: DJANGO_WIDGET_AI_CONTEXT_URL_EXPR" in source
+    assert "url: DJANGO_AI_GATEWAY_REPLY_URL_EXPR" in source
+
+
+def test_normalize_messenger_request_accepts_django_forwarded_payload_with_callback_urls():
+    source = SOURCE.read_text(encoding="utf-8")
+    block = source[source.index("const normalizeMessengerRequest"):source.index("const verifyMetaSignature")]
+
+    assert "body.channel === 'messenger'" in block
+    assert "body.callback_urls" in block
+    assert "rawBody = body.raw_body;" in block
+    assert "const signatureValue = String(body.signature || '').trim();" in block
+    assert "callback_urls: callbackUrls" in block
+    assert "raw_body: rawBody" in block
+    assert "signature: signatureValue" in block
+
+
+def test_normalize_widget_request_preserves_callback_urls():
+    source = SOURCE.read_text(encoding="utf-8")
+    block = source[source.index("const normalizeWidgetRequest"):source.index("const getMessengerClinicContext")]
+
+    assert "const callbackUrls =" in block
+    assert "body.callback_urls" in block
+    assert "callback_urls: callbackUrls" in block
+
+
+def test_normalizers_validate_required_callback_urls_before_http_nodes():
+    source = SOURCE.read_text(encoding="utf-8")
+    messenger_block = source[source.index("const normalizeMessengerRequest"):source.index("const verifyMetaSignature")]
+    widget_block = source[source.index("const normalizeWidgetRequest"):source.index("const getMessengerClinicContext")]
+
+    for callback_key in [
+        "meta_signature_verify_url",
+        "messenger_ai_turn_register_url",
+        "messenger_ai_turn_claim_url",
+        "messenger_ai_context_url",
+        "ai_gateway_reply_url",
+        "messenger_n8n_webhook_url",
+        "messenger_ai_turn_send_reply_url",
+    ]:
+        assert f"'{callback_key}'" in messenger_block
+    assert "for (const key of requiredCallbackUrls)" in messenger_block
+    assert "new URL(value)" in messenger_block
+    assert "url.protocol !== 'https:'" in messenger_block
+
+    for callback_key in [
+        "widget_ai_context_url",
+        "ai_gateway_reply_url",
+        "messenger_n8n_webhook_url",
+    ]:
+        assert f"'{callback_key}'" in widget_block
+    assert "for (const key of requiredCallbackUrls)" in widget_block
+    assert "new URL(value)" in widget_block
+    assert "url.protocol !== 'https:'" in widget_block
+
+
+def test_messenger_post_webhook_requires_django_shared_secret():
+    source = SOURCE.read_text(encoding="utf-8")
+    block = source[source.index("const metaMessengerEvents"):source.index("const normalizeMessengerRequest")]
+
+    assert "authentication: 'headerAuth'" in block
+    assert "credentials: { httpHeaderAuth: newCredential('KliniAssist N8N Webhook Secret', N8N_WEBHOOK_CREDENTIAL_ID) }" in block
 
 
 def test_meta_webhook_verification_delegates_token_check_to_django():

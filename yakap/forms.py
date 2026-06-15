@@ -1,4 +1,5 @@
 from django import forms
+from django.db.models import Q
 
 from .models import (
     AppointmentYakapSnapshot,
@@ -13,6 +14,20 @@ _INPUT = "cf-input"
 _SELECT = "cf-select"
 _TEXTAREA = "cf-textarea"
 _CHECKBOX = "cf-checkbox"
+_MONTH_CHOICES = [
+    (1, "January"),
+    (2, "February"),
+    (3, "March"),
+    (4, "April"),
+    (5, "May"),
+    (6, "June"),
+    (7, "July"),
+    (8, "August"),
+    (9, "September"),
+    (10, "October"),
+    (11, "November"),
+    (12, "December"),
+]
 
 
 class ClinicYakapSettingsForm(forms.ModelForm):
@@ -20,15 +35,6 @@ class ClinicYakapSettingsForm(forms.ModelForm):
         model = ClinicYakapSettings
         fields = [
             "is_enabled",
-            "program_label",
-            "public_promo_headline",
-            "public_promo_body",
-            "public_disclaimer",
-            "internal_disclaimer",
-            "verification_instructions",
-            "default_annual_credit",
-            "medicine_annual_limit_default",
-            "default_non_medicine_limit",
             "low_balance_threshold_amount",
             "verification_stale_after_days",
             "reset_month",
@@ -37,20 +43,14 @@ class ClinicYakapSettingsForm(forms.ModelForm):
         ]
         widgets = {
             "is_enabled": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
-            "program_label": forms.TextInput(attrs={"class": _INPUT}),
-            "public_promo_headline": forms.TextInput(attrs={"class": _INPUT}),
-            "public_promo_body": forms.Textarea(attrs={"class": _TEXTAREA, "rows": 3}),
-            "public_disclaimer": forms.Textarea(attrs={"class": _TEXTAREA, "rows": 3}),
-            "internal_disclaimer": forms.Textarea(attrs={"class": _TEXTAREA, "rows": 3}),
-            "verification_instructions": forms.Textarea(attrs={"class": _TEXTAREA, "rows": 3}),
-            "default_annual_credit": forms.NumberInput(attrs={"class": _INPUT, "step": "0.01", "min": "0"}),
-            "medicine_annual_limit_default": forms.NumberInput(attrs={"class": _INPUT, "step": "0.01", "min": "0"}),
-            "default_non_medicine_limit": forms.NumberInput(attrs={"class": _INPUT, "step": "0.01", "min": "0"}),
             "low_balance_threshold_amount": forms.NumberInput(attrs={"class": _INPUT, "step": "0.01", "min": "0"}),
             "verification_stale_after_days": forms.NumberInput(attrs={"class": _INPUT, "step": "1", "min": "0"}),
-            "reset_month": forms.NumberInput(attrs={"class": _INPUT, "step": "1", "min": "1", "max": "12"}),
+            "reset_month": forms.Select(choices=_MONTH_CHOICES, attrs={"class": _SELECT}),
             "reset_day": forms.NumberInput(attrs={"class": _INPUT, "step": "1", "min": "1", "max": "31"}),
             "hard_block_exceeded": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
+        }
+        labels = {
+            "reset_day": "Reset date",
         }
 
 
@@ -193,9 +193,22 @@ class ServiceYakapRuleForm(forms.ModelForm):
 
 
 class YakapLedgerEntryForm(forms.ModelForm):
-    def __init__(self, clinic, *args, patient=None, category=None, allow_privileged_entries=False, **kwargs):
+    def __init__(
+        self,
+        clinic,
+        *args,
+        patient=None,
+        appointment=None,
+        category=None,
+        allow_privileged_entries=False,
+        allow_inactive_category=False,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
-        self.fields["category"].queryset = clinic.yakap_categories.filter(is_active=True)
+        category_queryset = clinic.yakap_categories.filter(is_active=True)
+        if allow_inactive_category and category and category.pk:
+            category_queryset = clinic.yakap_categories.filter(Q(is_active=True) | Q(pk=category.pk))
+        self.fields["category"].queryset = category_queryset
         self.fields["reversal_of"].queryset = YakapLedgerEntry.objects.none()
         self.fields["reversal_of"].required = False
         if category:
@@ -204,6 +217,8 @@ class YakapLedgerEntryForm(forms.ModelForm):
             reversal_choices = clinic.yakap_ledger_entries.filter(patient=patient).exclude(
                 entry_type=YakapLedgerEntry.TYPE_REVERSAL
             )
+            if appointment:
+                reversal_choices = reversal_choices.filter(appointment=appointment)
             if category:
                 reversal_choices = reversal_choices.filter(category=category)
             self.fields["reversal_of"].queryset = reversal_choices

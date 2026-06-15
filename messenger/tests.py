@@ -1,7 +1,7 @@
 import pytest
 from django.db import IntegrityError
 from accounts.models import User
-from clinics.models import Clinic, ClinicGroup
+from clinics.models import Clinic, ClinicAISettings, ClinicGroup
 from clinics.models import ClinicFAQ
 from messenger.faq_matcher import match_faq
 from messenger.models import MessengerConnection, MessengerConversation, MessengerProcessedMessage, MessengerSession
@@ -918,6 +918,63 @@ def test_direct_webhook_does_not_emit_quick_replies_when_messenger_mode_is_ai():
     assert response.status_code == 200
     assert not MessengerSession.objects.filter(connection=connection, psid="PSID1").exists()
     mock_send.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(
+    MESSENGER_APP_SECRET="test_secret",
+    META_MESSENGER_N8N_WEBHOOK_URL="https://n8n.example/webhook/kliniassist-messenger",
+    N8N_WEBHOOK_SECRET="secret123",
+    ALLOWED_HOSTS=["clinic-messenger.example.test"],
+)
+@patch("messenger.views._send_facebook_reply")
+@patch("messenger.views.requests.post")
+def test_webhook_forwards_ai_mode_messenger_event_to_n8n_with_callback_urls(mock_post, mock_send):
+    clinic, connection = _create_messenger_clinic("owner_ai_forward", "PAGE-AI-FORWARD")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+    )
+    raw_body, signature = _signed_meta_payload(
+        connection.page_id,
+        "PSID-AI-FORWARD",
+        "mid-ai-forward",
+        "Can I book tomorrow?",
+    )
+    mock_post.return_value.raise_for_status.return_value = None
+
+    response = Client().post(
+        reverse("messenger:webhook"),
+        data=raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=signature,
+        secure=True,
+        HTTP_HOST="clinic-messenger.example.test",
+    )
+
+    assert response.status_code == 200
+    mock_send.assert_not_called()
+    mock_post.assert_called_once()
+    assert mock_post.call_args.args[0] == "https://n8n.example/webhook/kliniassist-messenger"
+    assert mock_post.call_args.kwargs["headers"] == {"X-N8N-Webhook-Secret": "secret123"}
+    assert mock_post.call_args.kwargs["allow_redirects"] is False
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["channel"] == "messenger"
+    assert payload["clinic_id"] == clinic.id
+    assert payload["clinic_slug"] == clinic.slug
+    assert payload["page_id"] == connection.page_id
+    assert payload["psid"] == "PSID-AI-FORWARD"
+    assert payload["message_id"] == "mid-ai-forward"
+    assert payload["message"] == "Can I book tomorrow?"
+    assert payload["postback"] == ""
+    assert payload["raw_body"] == raw_body
+    assert payload["signature"] == signature
+    assert payload["callback_urls"]["messenger_ai_context_url"] == "https://clinic-messenger.example.test/messenger/ai/context/"
+    assert payload["callback_urls"]["ai_gateway_reply_url"] == "https://clinic-messenger.example.test/messenger/ai/gateway/reply/"
+    assert payload["callback_urls"]["messenger_ai_turn_register_url"] == "https://clinic-messenger.example.test/messenger/ai/turn/register/"
+    assert payload["callback_urls"]["messenger_ai_turn_claim_url"] == "https://clinic-messenger.example.test/messenger/ai/turn/claim/"
+    assert payload["callback_urls"]["messenger_ai_turn_send_reply_url"] == "https://clinic-messenger.example.test/messenger/ai/turn/send-reply/"
+    assert payload["callback_urls"]["messenger_n8n_webhook_url"] == "https://clinic-messenger.example.test/messenger/n8n-webhook/"
 
 
 @pytest.mark.django_db
@@ -2114,6 +2171,36 @@ def test_ai_contexts_expose_settings_timestamp_for_memory_versioning():
 
     assert messenger_context["ai"]["settings_updated_at"] == settings.updated_at.isoformat()
     assert widget_context["ai"]["settings_updated_at"] == settings.updated_at.isoformat()
+
+
+@pytest.mark.django_db
+@override_settings(ALLOWED_HOSTS=["clinic-one.example.test"])
+def test_build_n8n_callback_urls_uses_current_request_origin():
+    from django.test import RequestFactory
+    from messenger.callback_urls import build_n8n_callback_urls
+
+    request = RequestFactory().post(
+        "/messenger/webhook/",
+        secure=True,
+        HTTP_HOST="clinic-one.example.test",
+    )
+
+    messenger_urls = build_n8n_callback_urls(request, "messenger")
+    widget_urls = build_n8n_callback_urls(request, "widget")
+
+    assert messenger_urls["messenger_webhook_url"] == "https://clinic-one.example.test/messenger/webhook/"
+    assert messenger_urls["meta_signature_verify_url"] == "https://clinic-one.example.test/messenger/meta/verify-signature/"
+    assert messenger_urls["messenger_ai_context_url"] == "https://clinic-one.example.test/messenger/ai/context/"
+    assert messenger_urls["ai_gateway_reply_url"] == "https://clinic-one.example.test/messenger/ai/gateway/reply/"
+    assert messenger_urls["messenger_ai_turn_register_url"] == "https://clinic-one.example.test/messenger/ai/turn/register/"
+    assert messenger_urls["messenger_ai_turn_claim_url"] == "https://clinic-one.example.test/messenger/ai/turn/claim/"
+    assert messenger_urls["messenger_ai_turn_send_reply_url"] == "https://clinic-one.example.test/messenger/ai/turn/send-reply/"
+    assert messenger_urls["messenger_n8n_webhook_url"] == "https://clinic-one.example.test/messenger/n8n-webhook/"
+    assert widget_urls == {
+        "widget_ai_context_url": "https://clinic-one.example.test/messenger/ai/widget/context/",
+        "ai_gateway_reply_url": "https://clinic-one.example.test/messenger/ai/gateway/reply/",
+        "messenger_n8n_webhook_url": "https://clinic-one.example.test/messenger/n8n-webhook/",
+    }
 
 
 @pytest.mark.django_db
@@ -3582,6 +3669,33 @@ def test_check_availability_marks_nearest_time_when_requested_slot_is_taken():
 
 
 @pytest.mark.django_db
+def test_check_availability_keeps_different_service_same_time_available():
+    from messenger.ai_tools import check_availability
+
+    clinic, _ = _create_messenger_clinic("owner_ai_different_service_capacity", "PAGEAI-DIFFERENT-SERVICE")
+    cleaning = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    filling = Service.objects.create(clinic=clinic, name="Tooth Filling", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))
+    open_result = check_availability("PAGEAI-DIFFERENT-SERVICE", cleaning.id, preferred_date=target_date.isoformat())
+    requested_slot = open_result["alternatives"][0]["starts_at"]
+    patient = Patient.objects.create(clinic=clinic, full_name="Existing Patient", phone="09999999999")
+    Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=cleaning,
+        starts_at=timezone.datetime.fromisoformat(requested_slot),
+        ends_at=timezone.datetime.fromisoformat(requested_slot) + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+
+    result = check_availability("PAGEAI-DIFFERENT-SERVICE", filling.id, preferred_starts_at=requested_slot)
+
+    assert result["available"] is True
+    assert result["selected_slot"]["starts_at"] == requested_slot
+
+
+@pytest.mark.django_db
 def test_check_availability_suggests_first_future_date_when_requested_date_has_no_slots():
     from messenger.ai_tools import check_availability
 
@@ -4362,6 +4476,53 @@ def test_reschedule_verified_appointment_moves_same_service_and_preserves_identi
 
 
 @pytest.mark.django_db
+def test_reschedule_verified_appointment_blocks_yakap_snapshot_history():
+    from zoneinfo import ZoneInfo
+
+    from messenger.ai_tools import reschedule_verified_appointment
+    from yakap.models import AppointmentYakapSnapshot
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_reschedule_yakap", "PAGE-APPT-RESCHEDULE-YAKAP")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    new_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    AppointmentYakapSnapshot.objects.create(
+        clinic=clinic,
+        appointment=appointment,
+        requested=True,
+        coverage_status=AppointmentYakapSnapshot.STATUS_REQUESTED,
+    )
+
+    result = reschedule_verified_appointment(
+        "PAGE-APPT-RESCHEDULE-YAKAP",
+        appointment.reference_code,
+        "09175551234",
+        new_start.isoformat(),
+        confirmed=True,
+    )
+
+    appointment.refresh_from_db()
+    assert result == {
+        "rescheduled": False,
+        "error": "Cancel the YAKAP request or create a new appointment before changing appointment time.",
+    }
+    assert appointment.starts_at == original_start
+    assert appointment.ends_at == original_start + timedelta(minutes=30)
+
+
+@pytest.mark.django_db
 def test_reschedule_verified_appointment_rejects_overlap_and_past_time():
     from zoneinfo import ZoneInfo
     from messenger.ai_tools import reschedule_verified_appointment
@@ -4408,12 +4569,57 @@ def test_reschedule_verified_appointment_rejects_overlap_and_past_time():
     )
 
     appointment.refresh_from_db()
-    assert overlap == {"rescheduled": False, "error": "This slot is not available."}
+    assert overlap == {"rescheduled": False, "error": "This service is fully booked at that time."}
     assert past == {
         "rescheduled": False,
         "error": "Please choose today or a future appointment date/time. Previous dates and past times are not available.",
     }
     assert appointment.starts_at == original_start
+
+
+@pytest.mark.django_db
+def test_reschedule_verified_appointment_rejects_same_patient_overlap():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_tools import reschedule_verified_appointment
+
+    clinic, _connection = _create_messenger_clinic("owner_appt_reschedule_patient_overlap", "PAGE-APPT-RESCHEDULE-PATIENT-OVERLAP")
+    service = Service.objects.create(clinic=clinic, name="Consultation", duration_minutes=30)
+    other_service = Service.objects.create(clinic=clinic, name="Tooth Filling", duration_minutes=30)
+    patient = Patient.objects.create(clinic=clinic, full_name="Maria Santos", phone="09175551234")
+    clinic_tz = ZoneInfo(clinic.timezone)
+    target_date = timezone.now().astimezone(clinic_tz).date() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(12))
+    original_start = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz)
+    occupied_start = timezone.make_aware(timezone.datetime.combine(target_date, time(10)), clinic_tz)
+    appointment = Appointment.objects.create(
+        clinic=clinic,
+        patient=patient,
+        service=service,
+        starts_at=original_start,
+        ends_at=original_start + timedelta(minutes=30),
+        status=Appointment.STATUS_CONFIRMED,
+    )
+    Appointment.objects.bulk_create([
+        Appointment(
+            clinic=clinic,
+            patient=patient,
+            service=other_service,
+            starts_at=occupied_start,
+            ends_at=occupied_start + timedelta(minutes=30),
+            status=Appointment.STATUS_CONFIRMED,
+            reference_code="CF-MSGPAT01",
+        )
+    ])
+
+    result = reschedule_verified_appointment(
+        "PAGE-APPT-RESCHEDULE-PATIENT-OVERLAP",
+        appointment.reference_code,
+        "09175551234",
+        occupied_start.isoformat(),
+        confirmed=True,
+    )
+
+    assert result == {"rescheduled": False, "error": "This patient already has an active appointment at that time."}
 
 
 @pytest.mark.django_db

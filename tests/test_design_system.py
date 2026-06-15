@@ -424,12 +424,8 @@ def test_mobile_responsive_page_specific_contracts():
     patient_identity_link = tag_block_containing(patient_row, "a", "{{ patient.full_name }}")
     patient_identity_name = tag_block_containing(patient_identity_link, "span", "max-w-[14rem]")
     patient_header_identity = div_block_containing(patient_detail, '<span class="grid h-14')
-    yakap_export_form = tag_block_containing(yakap, "form", "Export CSV")
-    yakap_export_button = tag_block_containing(yakap_export_form, "button", "Export CSV")
-    yakap_upcoming_section = tag_block_containing(yakap, "section", "Appointments where patients asked the clinic to check if YAKAP can apply.")
-    yakap_services_missing_section = tag_block_containing(yakap, "section", "Classify active services so staff and booking flows show consistent estimates.")
-    yakap_ledger_section = tag_block_containing(yakap, "section", "Latest manual estimated usage and reversals for this clinic.")
-    yakap_services_missing_table = opening_tag_containing(yakap_services_missing_section, "table", "cf-table-compact")
+    yakap_verification_section = tag_block_containing(yakap, "section", "Start here: verify before service so the clinic does not absorb uncovered YAKAP usage.")
+    yakap_ledger_section = tag_block_containing(yakap, "section", "Latest manual estimated usage, adjustments, and reversals for this clinic.")
     yakap_ledger_table = opening_tag_containing(yakap_ledger_section, "table", "cf-table-wide")
 
     assert 'class="min-w-0"' in home_header_copy
@@ -447,11 +443,11 @@ def test_mobile_responsive_page_specific_contracts():
         "gap-3",
         "sm:flex-row",
     )
-    for table in re.findall(r"<table\b[^>]*>", yakap_upcoming_section):
+    for table in re.findall(r"<table\b[^>]*>", yakap_verification_section):
         assert_not_class_token_group(class_tokens_from_markup(table), "cf-table", "cf-table-compact")
-    assert_class_tokens(class_tokens_from_markup(yakap_services_missing_table), "cf-table", "cf-table-compact")
     assert_class_tokens(class_tokens_from_markup(yakap_ledger_table), "cf-table", "cf-table-wide")
-    assert_class_tokens(class_tokens_from_markup(yakap_export_button), "w-full", "sm:w-auto")
+    assert '<th class="p-4">Type</th>' in yakap_ledger_section
+    assert "{{ entry.get_entry_type_display }}" in yakap_ledger_section
     assert calendar_card is not None
     assert "height: auto;" in calendar_card.group("body")
     assert "overflow: visible;" in calendar_card.group("body")
@@ -459,6 +455,76 @@ def test_mobile_responsive_page_specific_contracts():
     pointer_coarse_css = css_media_block("pointer: coarse")
     assert "#calendar .fc-event" in pointer_coarse_css
     assert "min-height: 2.5rem;" in pointer_coarse_css
+
+
+def test_yakap_dashboard_prioritizes_daily_work_before_admin_tools():
+    template = source_text("templates/dashboard/yakap.html")
+
+    verification_index = template.index("YAKAP review queue")
+    risk_index = template.index("Patient-category estimates with positive remaining coverage at or below the clinic threshold.")
+    ledger_index = template.index("Recent YAKAP ledger entries")
+    settings_index = template.index("YAKAP Policy Settings")
+    categories_index = template.index("YAKAP Categories")
+
+    assert verification_index < risk_index < ledger_index
+    assert ledger_index < settings_index < categories_index
+    assert "Manual ledger export" not in template
+    assert "Export CSV" not in template
+    assert "Services needing YAKAP setup" not in template
+    assert "Classify active services so staff and booking flows show consistent estimates." not in template
+    assert "Review status" in template
+    assert "Ask a settings manager" in template
+
+
+def test_yakap_modal_refocuses_after_htmx_content_swap():
+    template = source_text("templates/dashboard/yakap.html")
+    modal_start = template.rindex('<div x-show="detailOpen"')
+    modal = template[modal_start:]
+
+    assert "focusModal(root)" in template
+    assert "@htmx:after-swap.window" in modal
+    assert "$event.target.id === 'detail-modal-body'" in modal
+
+
+def test_yakap_categories_table_uses_modal_edit_actions():
+    template = source_text("templates/dashboard/yakap.html")
+    section_start = template.index("YAKAP Categories")
+    modal_start = template.index('<div x-show="detailOpen"')
+    section = template[section_start:modal_start]
+
+    assert "Edit Category Limits" not in section
+    assert '<th class="p-4">Action</th>' in section
+    assert "editingCategoryId" in template
+    assert "categoryEditOpen" in template
+    assert "editingCategoryId = {{ category.id }}; categoryEditOpen = true" in section
+    assert "categoryEditOpen" in section
+    assert "cf-modal-backdrop" in section
+    assert "Edit YAKAP category" in section
+    assert 'name="category_id" value="{{ category.id }}"' in section
+    assert '<tr x-show="editingCategoryId === {{ category.id }}"' not in section
+
+
+def test_yakap_categories_table_uses_modal_add_action():
+    template = source_text("templates/dashboard/yakap.html")
+    section_start = template.index("YAKAP Categories")
+    modal_start = template.index('<div x-show="detailOpen"')
+    section = template[section_start:modal_start]
+
+    assert '<h2 class="cf-section-title">Coverage Categories</h2>' not in template
+    assert '<h2 class="cf-section-title">YAKAP Categories</h2>' in template
+    assert '<h2 class="cf-section-title">Current YAKAP Categories</h2>' not in template
+    assert "categoryCreateOpen" in template
+    assert "categoryCreateOpen = true" in section
+    assert "Manage the benefit categories used for YAKAP estimates. Staff can review limits here; settings managers can add or edit categories." in section
+    assert "Add category" in section
+    assert section.index("Add category") < section.index("{{ categories|length }} categories")
+    assert "Add YAKAP category" in section
+    assert 'name="_form" value="category"' in section
+    create_title = section.index("Add YAKAP category")
+    create_form_start = section.rfind("<form", 0, create_title)
+    create_form_end = section.index("</form>", create_title)
+    create_form = section[create_form_start:create_form_end]
+    assert 'name="category_id"' not in create_form
 
 
 def test_calendar_mobile_viewport_contracts():
@@ -658,10 +724,13 @@ def test_settings_public_widget_mobile_hardening_contracts():
     messenger_app_secret_toggle = opening_tag_containing(messenger_settings, "button", 'data-secret-field="app_secret"')
     messenger_page_token_toggle = opening_tag_containing(messenger_settings, "button", 'data-secret-field="page_access_token"')
     messenger_meta_callback_label = '<p class="cf-label">Meta Callback URL</p>'
+    messenger_n8n_worker_label = '<p class="cf-label">n8n Worker Webhook URL</p>'
     messenger_django_webhook_label = '<p class="cf-label">Django Webhook URL</p>'
     messenger_meta_callback_field = div_block_containing(messenger_settings, messenger_meta_callback_label)
+    messenger_n8n_worker_field = div_block_containing(messenger_settings, messenger_n8n_worker_label)
     messenger_django_webhook_field = div_block_containing(messenger_settings, messenger_django_webhook_label)
     messenger_meta_callback_row = tag_block_after(messenger_meta_callback_field, "div", messenger_meta_callback_label)
+    messenger_n8n_worker_row = tag_block_after(messenger_n8n_worker_field, "div", messenger_n8n_worker_label)
     messenger_django_webhook_row = tag_block_after(messenger_django_webhook_field, "div", messenger_django_webhook_label)
     widget_script_pre = opening_tag_containing(widget_embed, "pre", 'id="script-code"')
     widget_iframe_pre = opening_tag_containing(widget_embed, "pre", 'id="iframe-code"')
@@ -692,7 +761,7 @@ def test_settings_public_widget_mobile_hardening_contracts():
         secret_toggle_tokens = class_tokens_from_markup(secret_toggle)
         assert_class_tokens(secret_toggle_tokens, "h-10", "w-10")
         assert_not_class_token_group(secret_toggle_tokens, "h-8", "w-8")
-    for webhook_row in [messenger_meta_callback_row, messenger_django_webhook_row]:
+    for webhook_row in [messenger_meta_callback_row, messenger_n8n_worker_row, messenger_django_webhook_row]:
         copy_button = tag_block_containing(webhook_row, "button", "copy-label")
         webhook_row_opening = opening_tag_containing(webhook_row, "div", "max-sm:flex-col")
         assert_class_tokens(class_tokens_from_markup(webhook_row_opening), "max-sm:flex-col", "max-sm:items-stretch")
@@ -2674,7 +2743,7 @@ def test_task_5_appointment_modals_use_neon_aqua_anatomy_and_singular_titles():
     assert "mode === 'cancel' ? 'Cancel appointment'" in detail
     assert "mode === 'reschedule' ? 'Reschedule appointment'" in detail
     assert "mode === 'delete' ? 'Delete appointment'" in detail
-    assert "name=\"modal_source\" value=\"calendar\"" in detail
+    assert "name=\"modal_source\" value=\"{{ source }}\"" in detail
     assert "source == 'calendar'" in detail
     assert "appointment_edit' appointment.id" not in detail
     assert "@click=\"mode = 'reschedule'\"" in detail

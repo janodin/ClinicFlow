@@ -16,6 +16,7 @@ class ServiceForm(forms.ModelForm):
             "name",
             "description",
             "duration_minutes",
+            "simultaneous_capacity",
             "color",
             "is_active",
         ]
@@ -23,8 +24,15 @@ class ServiceForm(forms.ModelForm):
             "name": forms.TextInput(attrs={"class": _INPUT, "placeholder": "Service name"}),
             "description": forms.Textarea(attrs={"class": _TEXTAREA, "placeholder": "Service description", "rows": 3}),
             "duration_minutes": forms.NumberInput(attrs={"class": _INPUT, "placeholder": "30"}),
+            "simultaneous_capacity": forms.NumberInput(attrs={"class": _INPUT, "min": 1, "max": 50}),
             "color": forms.TextInput(attrs={"type": "color", "class": _COLOR}),
             "is_active": forms.CheckboxInput(attrs={"class": _CHECKBOX}),
+        }
+        labels = {
+            "simultaneous_capacity": "Simultaneous capacity",
+        }
+        help_texts = {
+            "simultaneous_capacity": "How many appointments for this service can run at the same time.",
         }
 
     def __init__(self, clinic, *args, **kwargs):
@@ -36,3 +44,9 @@ class ServiceForm(forms.ModelForm):
             if duration <= 0 or duration > 480:
                 raise forms.ValidationError("Duration must be between 1 and 480 minutes.")
         return duration
+
+    def clean_simultaneous_capacity(self):
+        capacity = self.cleaned_data.get("simultaneous_capacity")
+        if capacity is None or capacity < 1 or capacity > 50:
+            raise forms.ValidationError("Simultaneous capacity must be between 1 and 50.")
+        return capacity
