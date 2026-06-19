@@ -2951,6 +2951,55 @@ def test_ai_gateway_uses_service_lookup_result_when_provider_fails_after_complet
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_formats_service_lookup_matches_as_numbered_booking_list(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_services_list", "PAGE-GATEWAY-SERVICES-LIST")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-services-list")
+    for name in [
+        "Dental Cleaning",
+        "Dental Consultation",
+        "Dental Crown",
+        "Dental Filling",
+        "Dental Implant Consultation",
+        "Dental X-Ray",
+    ]:
+        Service.objects.create(clinic=clinic, name=name, duration_minutes=30)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "match_services", "arguments": json.dumps({"query": "dental"})},
+            }],
+        },
+        AIProviderError("primary failed"),
+        AIProviderError("fallback failed"),
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-SERVICES-LIST",
+        "message": "Can I book an appointment?",
+        "history": [],
+    })
+
+    assert result["fallback"] is False
+    assert result["reply"].startswith("SERVICES AVAILABLE\n\nPlease choose one service:\n\n")
+    assert "1. Dental Cleaning" in result["reply"]
+    assert "6. Dental X-Ray" in result["reply"]
+    assert result["reply"].endswith("Reply with the service name or number to continue booking.")
+    assert "Dental Cleaning, Dental Consultation" not in result["reply"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_booking_tool_preserves_confirmation_and_messenger_identity(mock_call):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply
@@ -3662,7 +3711,7 @@ def test_ai_gateway_returns_safe_reply_when_unrelated_turn_reuses_stale_availabi
     })
 
     assert result == {
-        "reply": "I can help with clinic services, FAQs, or appointments. What would you like to do next?",
+        "reply": "I got your message.\n\nTo continue booking your appointment, please reply YES to confirm the details, or send the service/date/time you want to change.",
         "fallback": False,
         "error": "",
     }

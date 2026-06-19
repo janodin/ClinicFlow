@@ -58,27 +58,23 @@
           <span class="cf-badge cf-badge-info self-start">Website widget</span>
         </div>
         <div class="mt-4 grid gap-3 md:grid-cols-2">
-          <label class="cf-choice-card cf-choice-card-switch items-center justify-between" for="{{ voice_form.is_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-choice-card-input" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
-            <span class="min-w-0 pr-3">
+          <label class="cf-switch-row" for="{{ voice_form.is_enabled.id_for_label }}">
+            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-switch-input sr-only peer" role="switch" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
+            <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Show voice as an option in the public booking widget.</span>
               {% if voice_form.is_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-control" aria-hidden="true">
-              <span class="cf-switch-track"><span class="cf-switch-thumb"></span></span>
-            </span>
+            <span class="cf-switch-control cf-switch-track relative inline-flex h-[1.75rem] w-[3.25rem] shrink-0 rounded-full border border-[var(--cf-line)] bg-[var(--cf-status-no-show-bg)] p-[0.1875rem] transition peer-checked:border-[var(--cf-brand)] peer-checked:bg-[var(--cf-brand)] peer-focus-visible:ring-4 peer-focus-visible:ring-[var(--cf-focus)] after:content-[''] after:block after:h-5 after:w-5 after:rounded-full after:bg-[var(--cf-surface)] after:shadow-[var(--cf-shadow-subtle)] after:transition-transform peer-checked:after:translate-x-6" aria-hidden="true"></span>
           </label>
-          <label class="cf-choice-card cf-choice-card-switch items-center justify-between" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-choice-card-input" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
-            <span class="min-w-0 pr-3">
+          <label class="cf-switch-row" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
+            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-switch-input sr-only peer" role="switch" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
+            <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_test_mode_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Allow owners to run live dashboard voice tests before enabling the widget.</span>
               {% if voice_form.is_test_mode_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_test_mode_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-control" aria-hidden="true">
-              <span class="cf-switch-track"><span class="cf-switch-thumb"></span></span>
-            </span>
+            <span class="cf-switch-control cf-switch-track relative inline-flex h-[1.75rem] w-[3.25rem] shrink-0 rounded-full border border-[var(--cf-line)] bg-[var(--cf-status-no-show-bg)] p-[0.1875rem] transition peer-checked:border-[var(--cf-brand)] peer-checked:bg-[var(--cf-brand)] peer-focus-visible:ring-4 peer-focus-visible:ring-[var(--cf-focus)] after:content-[''] after:block after:h-5 after:w-5 after:rounded-full after:bg-[var(--cf-surface)] after:shadow-[var(--cf-shadow-subtle)] after:transition-transform peer-checked:after:translate-x-6" aria-hidden="true"></span>
           </label>
         </div>
       </div>
@@ -134,9 +130,9 @@
       </div>
 
       <div class="grid min-h-[280px] place-items-center py-8 text-center">
-        <button type="button" @click="toggleListening()" class="cf-btn cf-btn-primary h-28 w-28 rounded-full p-0 shadow-[var(--cf-shadow-raised)] sm:h-32 sm:w-32" :aria-label="isListening ? 'Stop voice test' : 'Start voice test'">
-          <i data-lucide="mic" x-show="!isListening" class="h-12 w-12" aria-hidden="true"></i>
-          <i data-lucide="square" x-show="isListening" class="h-12 w-12" aria-hidden="true"></i>
+        <button type="button" @click="toggleListening()" class="voice-orb grid h-32 w-32 place-items-center rounded-full bg-[var(--cf-brand)] text-white shadow-[0_0_42px_rgba(6,182,212,.32)]" :class="{'voice-orb-listening': isListening, 'voice-orb-speaking': isSpeaking, 'voice-orb-thinking': isProcessing}" :aria-label="isSpeaking ? 'Interrupt voice test' : (isListening ? 'Stop voice test' : 'Start voice test')">
+          <i data-lucide="mic" x-show="!isSpeaking" class="h-12 w-12" aria-hidden="true"></i>
+          <span x-show="isSpeaking" class="voice-orb-bars" aria-hidden="true"><span class="voice-orb-bar"></span><span class="voice-orb-bar"></span><span class="voice-orb-bar"></span><span class="voice-orb-bar"></span></span>
         </button>
         <div>
           <p class="mt-5 font-semibold text-[var(--cf-ink)]" x-text="statusLabel">Ready to test</p>
@@ -339,7 +335,7 @@
         recognition.onend = () => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
           this.isListening = false;
-          if (!heardSpeech && auto && this.autoListen && !this.isProcessing && !this.isSpeaking) {
+          if (!this.isProcessing && !heardSpeech && this.autoListen) {
             window.setTimeout(() => {
               this.continueTestLoop(requestVersion, sessionId);
             }, 300);

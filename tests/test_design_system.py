@@ -2265,9 +2265,7 @@ def test_voice_agent_page_uses_dashboard_design_system_patterns():
     transcript_panel = tag_block_containing(template, "div", 'aria-label="Voice test conversation transcript"')
     switch_row = css_rule_block(".cf-switch-row")
     switch_track = css_rule_block(".cf-switch-track")
-    switch_thumb = css_rule_block(".cf-switch-thumb")
     switch_checked_track = css_rule_block(".cf-switch-row:has(.cf-switch-input:checked) .cf-switch-track")
-    switch_checked_thumb = css_rule_block(".cf-switch-row:has(.cf-switch-input:checked) .cf-switch-thumb")
     tab_buttons = re.findall(r"<button\b[^>]*>", tabs)
     switch_labels = re.findall(r"<label\b[^>]*>", channel_controls)
     switch_inputs = re.findall(r"<input\b[^>]*>", channel_controls)
@@ -2283,16 +2281,37 @@ def test_voice_agent_page_uses_dashboard_design_system_patterns():
 
     assert sum("cf-switch-row" in class_tokens_from_markup(label) for label in switch_labels) == 2
     assert sum("cf-switch-input" in class_tokens_from_markup(input_tag) for input_tag in switch_inputs) == 2
+    assert sum({"sr-only", "peer"} <= set(class_tokens_from_markup(input_tag)) for input_tag in switch_inputs) == 2
     assert "cf-choice-card" not in channel_controls
     assert "cf-choice-card-input" not in channel_controls
     assert "cf-choice-card-mark" not in channel_controls
-    assert sum("cf-switch-state" in class_tokens_from_markup(span) for span in switch_spans) == 2
-    assert sum("cf-switch-state-on" in class_tokens_from_markup(span) for span in switch_spans) == 2
-    assert sum("cf-switch-state-off" in class_tokens_from_markup(span) for span in switch_spans) == 2
+    assert "cf-switch-state" not in channel_controls
+    assert "cf-switch-state-on" not in channel_controls
+    assert "cf-switch-state-off" not in channel_controls
     assert sum("cf-switch-track" in class_tokens_from_markup(span) for span in switch_spans) == 2
-    assert sum("cf-switch-thumb" in class_tokens_from_markup(span) for span in switch_spans) == 2
-    assert ">On<" in channel_controls
-    assert ">Off<" in channel_controls
+    assert "cf-switch-thumb" not in channel_controls
+    assert ">On<" not in channel_controls
+    assert ">Off<" not in channel_controls
+    for span in switch_spans:
+        tokens = class_tokens_from_markup(span)
+        if "cf-switch-track" not in tokens:
+            continue
+        assert_class_tokens(
+            tokens,
+            "cf-switch-control",
+            "relative",
+            "inline-flex",
+            "h-[1.75rem]",
+            "w-[3.25rem]",
+            "rounded-full",
+            "peer-checked:bg-[var(--cf-brand)]",
+            "after:content-['']",
+            "after:block",
+            "after:h-5",
+            "after:w-5",
+            "after:rounded-full",
+            "peer-checked:after:translate-x-6",
+        )
     assert 'name="{{ voice_form.is_enabled.html_name }}"' in channel_controls
     assert 'name="{{ voice_form.is_test_mode_enabled.html_name }}"' in channel_controls
     assert "{{ voice_form.is_enabled.label }}" in channel_controls
@@ -2301,9 +2320,7 @@ def test_voice_agent_page_uses_dashboard_design_system_patterns():
     assert "justify-content: space-between;" in switch_row
     assert "border-radius: var(--cf-radius-pill);" in switch_track
     assert "background: var(--cf-status-no-show-bg);" in switch_track
-    assert "background: var(--cf-surface);" in switch_thumb
     assert "background: var(--cf-brand);" in switch_checked_track
-    assert "transform: translateX(1.5rem);" in switch_checked_thumb
 
     assert "cf-table-wrap" in template
     assert "cf-table-header" in template

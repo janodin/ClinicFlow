@@ -87,7 +87,11 @@ BLOCKED_AVAILABILITY_TOOL_MESSAGE = (
     "booking availability, dates, times, or chooses a specific slot. Answer the current "
     "patient message from clinic context instead of repeating previous slots."
 )
-BLOCKED_AVAILABILITY_SAFE_REPLY = "I can help with clinic services, FAQs, or appointments. What would you like to do next?"
+BLOCKED_AVAILABILITY_SAFE_REPLY = (
+    "I got your message.\n\n"
+    "To continue booking your appointment, please reply YES to confirm the details, "
+    "or send the service/date/time you want to change."
+)
 BLOCKED_EXACT_SLOT_TOOL_MESSAGE = (
     "exact_slot_tool_blocked: check_availability with preferred_starts_at requires the "
     "current patient message to include a specific time or clearly select a listed option. "
@@ -822,6 +826,13 @@ def _detail_card(title, rows, footer=""):
     return "\n".join(lines)
 
 
+def _services_list_card(names):
+    lines = ["SERVICES AVAILABLE", "", "Please choose one service:", ""]
+    lines.extend(f"{index}. {name}" for index, name in enumerate(names[:10], start=1))
+    lines.extend(["", "Reply with the service name or number to continue booking."])
+    return "\n".join(lines)
+
+
 def _service_name_from_tool_args(clinic, args):
     if not clinic or not isinstance(args, dict):
         return ""
@@ -962,7 +973,7 @@ def _reply_from_tool_result(result, *, clinic=None, data=None, args=None):
         if len(names) == 1:
             return f"I found {names[0]}. Please confirm the appointment date/time, full name, phone, and email so I can check availability and summarize before booking."
         if names:
-            return f"I found these services: {', '.join(names[:5])}. Which service would you like to book?"
+            return _services_list_card(names)
         return "I could not find that service in the clinic's active services. Please choose another service."
     if result.get("available") is True:
         selected = result.get("selected_slot")
