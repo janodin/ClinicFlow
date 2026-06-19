@@ -250,11 +250,24 @@ def _current_turn_mentions_tool_time(channel, data, args):
     return any(marker in text for marker in _time_markers_for_summary(local_start))
 
 
+def _current_turn_mentions_past_date(data):
+    text = "\n".join(_current_turn_texts(data)).lower()
+    return bool(re.search(r"\b(?:yesterday|past|previous|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|month|year))\b", text))
+
+
+def _availability_tool_args_are_explicit_past_request(channel, data, args):
+    local_start = _local_start_from_availability_args(channel, data, args)
+    if not local_start:
+        return False
+    return local_start < timezone.now().astimezone(local_start.tzinfo) and _current_turn_mentions_past_date(data)
+
+
 def _availability_tool_args_match_current_turn(channel, data, args):
     if not isinstance(args, dict):
         return _blocked_exact_slot_tool_result()
     if args.get("preferred_starts_at") and not (
         _current_turn_mentions_tool_time(channel, data, args) or _current_turn_selects_listed_option(data)
+        or _availability_tool_args_are_explicit_past_request(channel, data, args)
     ):
         return _blocked_exact_slot_tool_result()
     return None
@@ -788,7 +801,7 @@ def _reply_from_tool_result(result):
     if result.get("available") is True:
         selected = result.get("selected_slot")
         if selected:
-            return f"That slot is available: {_slot_summary(selected)}. Please provide the remaining booking details so I can summarize before confirmation."
+            return f"That slot is available: {_slot_summary(selected)}. To continue, I need: service, date/time, full name, phone, and email. I will summarize before booking."
         alternatives = result.get("alternatives") if isinstance(result.get("alternatives"), list) else []
         if alternatives:
             options = ", ".join(_slot_summary(slot) for slot in alternatives[:5])

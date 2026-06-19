@@ -2258,6 +2258,30 @@ def test_assistant_page_messenger_mode_uses_custom_aqua_radio_cards():
     assert "transform: scale(1);" in selected_mark
 
 
+def test_voice_agent_page_uses_dashboard_design_system_patterns():
+    template = source_text("templates/dashboard/voice_agent.html")
+    channel_controls = tag_block_containing(template, "div", 'data-section="voice-agent-channel-controls"')
+    transcript_panel = tag_block_containing(template, "div", 'aria-label="Voice test conversation transcript"')
+
+    assert '<div class="cf-tabs" role="tablist" aria-label="Voice agent sections">' in template
+    assert template.count('class="cf-tab"') == 2
+    assert "tab==='configure' ? 'cf-tab-active' : ''" in template
+    assert "tab==='test' ? 'cf-tab-active' : ''" in template
+    assert "inline-flex rounded-2xl" not in template
+
+    assert channel_controls.count('class="cf-choice-card"') == 2
+    assert channel_controls.count('class="cf-choice-card-input"') == 2
+    assert channel_controls.count('class="cf-choice-card-mark"') == 2
+    assert "{{ voice_form.is_enabled.label }}" in channel_controls
+    assert "{{ voice_form.is_test_mode_enabled.label }}" in channel_controls
+
+    assert "cf-table-wrap" in template
+    assert "cf-table-header" in template
+    assert 'class="cf-table cf-table-compact"' in template
+    assert "cf-empty-state" in transcript_panel
+    assert "No conversation yet" in transcript_panel
+
+
 def test_assistant_ai_provider_card_uses_compact_design_system_layout():
     template = source_text("templates/dashboard/assistant_settings.html")
     forms = source_text("clinics/forms.py")
