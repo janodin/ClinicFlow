@@ -663,6 +663,7 @@
         }
       },
       interruptVoice() {
+        this.voiceSpeaking = false;
         if (window.speechSynthesis) {
           try {
             window.speechSynthesis.cancel();
@@ -670,7 +671,6 @@
             // Speech cancellation is best-effort.
           }
         }
-        this.voiceSpeaking = false;
         this.voiceAutoListen = true;
         this.startVoiceListening({ auto: false });
       },

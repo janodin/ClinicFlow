@@ -340,6 +340,8 @@ def test_dashboard_voice_test_page_auto_loop_and_interrupt_javascript(voice_clin
     listen_block = content[content.index("startTestListening({ auto = false } = {})"):content.index("async sendTurn(text)")]
     send_block = content[content.index("async sendTurn(text)"):content.index("speakTestReply(text")]
     speak_block = content[content.index("speakTestReply(text"):content.index("async endTest()")]
+    finish_block = speak_block[speak_block.index("const finishSpeaking = () => {"):speak_block.index("utterance.onend", speak_block.index("const finishSpeaking = () => {"))]
+    interrupt_block = content[content.index("interruptTest() {"):content.index("continueTestLoop", content.index("interruptTest() {"))]
     end_block = content[content.index("async endTest()"):content.index("clearTranscript()")]
 
     assert "isSpeaking: false," in content
@@ -357,10 +359,41 @@ def test_dashboard_voice_test_page_auto_loop_and_interrupt_javascript(voice_clin
     assert "const utterance = new window.SpeechSynthesisUtterance(text);" in speak_block
     assert "utterance.onend = finishSpeaking;" in speak_block
     assert "utterance.onerror = finishSpeaking;" in speak_block
+    assert finish_block.index("if (!this.isSpeaking) return;") < finish_block.index("if (afterSpeak) afterSpeak();")
     assert "interruptTest()" in content
+    assert interrupt_block.index("this.isSpeaking = false;") < interrupt_block.index("window.speechSynthesis.cancel();")
     assert "continueTestLoop" in content
     assert "this.autoListen = false;" in end_block
     assert "this.isSpeaking = false;" in end_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_clear_transcript_stops_audio_and_recognition(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    clear_start = content.index("clearTranscript()")
+    clear_block = content[clear_start:content.index("</script>", clear_start)]
+
+    assert "this.requestVersion += 1;" in clear_block
+    assert "this.autoListen = false;" in clear_block
+    assert "const recognition = this.recognition;" in clear_block
+    assert "this.recognition = null;" in clear_block
+    assert "recognition.onstart = null;" in clear_block
+    assert "recognition.onerror = null;" in clear_block
+    assert "recognition.onend = null;" in clear_block
+    assert "recognition.onresult = null;" in clear_block
+    assert "recognition.stop();" in clear_block
+    assert "this.isSpeaking = false;" in clear_block
+    assert "window.speechSynthesis.cancel();" in clear_block
+    assert clear_block.index("this.isSpeaking = false;") < clear_block.index("window.speechSynthesis.cancel();")
+    assert "this.isListening = false;" in clear_block
+    assert "this.isProcessing = false;" in clear_block
 
 
 @pytest.mark.django_db

@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% block title %}Voice Agent{% endblock %}
 {% block content %}
-<div class="cf-page" x-data="voiceAgentPage()">
+<div class="cf-page" x-data="voiceAgentPage()" x-init="loadMicrophones()">
   <div class="cf-page-header">
     <div>
       <h1 class="cf-page-title ui-page-title">Voice Agent</h1>
@@ -59,22 +59,24 @@
         </div>
         <div class="mt-4 grid gap-3 md:grid-cols-2">
           <label class="cf-switch-row" for="{{ voice_form.is_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-switch-input sr-only peer" role="switch" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
+            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-switch-input" role="switch" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Show voice as an option in the public booking widget.</span>
               {% if voice_form.is_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-control cf-switch-track relative inline-flex h-[1.75rem] w-[3.25rem] shrink-0 rounded-full border border-[var(--cf-line)] bg-[var(--cf-status-no-show-bg)] p-[0.1875rem] transition peer-checked:border-[var(--cf-brand)] peer-checked:bg-[var(--cf-brand)] peer-focus-visible:ring-4 peer-focus-visible:ring-[var(--cf-focus)] after:content-[''] after:block after:h-5 after:w-5 after:rounded-full after:bg-[var(--cf-surface)] after:shadow-[var(--cf-shadow-subtle)] after:transition-transform peer-checked:after:translate-x-6" aria-hidden="true"></span>
+            <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
+            <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
           </label>
           <label class="cf-switch-row" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-switch-input sr-only peer" role="switch" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
+            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-switch-input" role="switch" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_test_mode_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Allow owners to run live dashboard voice tests before enabling the widget.</span>
               {% if voice_form.is_test_mode_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_test_mode_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-control cf-switch-track relative inline-flex h-[1.75rem] w-[3.25rem] shrink-0 rounded-full border border-[var(--cf-line)] bg-[var(--cf-status-no-show-bg)] p-[0.1875rem] transition peer-checked:border-[var(--cf-brand)] peer-checked:bg-[var(--cf-brand)] peer-focus-visible:ring-4 peer-focus-visible:ring-[var(--cf-focus)] after:content-[''] after:block after:h-5 after:w-5 after:rounded-full after:bg-[var(--cf-surface)] after:shadow-[var(--cf-shadow-subtle)] after:transition-transform peer-checked:after:translate-x-6" aria-hidden="true"></span>
+            <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
+            <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
           </label>
         </div>
       </div>
@@ -126,6 +128,24 @@
             </div>
           </div>
           {% if voice_settings.is_enabled %}<span class="cf-badge cf-badge-active">Active</span>{% else %}<span class="cf-badge cf-badge-inactive">Inactive</span>{% endif %}
+        </div>
+      </div>
+
+      <div class="cf-card mt-4 border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none" data-section="voice-agent-mic-source">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div class="cf-field min-w-0 flex-1">
+            <label class="cf-label" for="voice-mic-source">Microphone source</label>
+            <select id="voice-mic-source" class="cf-select" x-model="selectedMicDeviceId" @focus="loadMicrophones({ requestPermission: true })" @change="activateSelectedMicrophone()">
+              <option value="default">Default microphone</option>
+              <template x-for="device in micDevices" :key="device.deviceId">
+                <option :value="device.deviceId" x-text="device.label"></option>
+              </template>
+            </select>
+            <p class="mt-1 text-xs text-[var(--cf-muted)]" x-text="micSourceHelp">Default microphone will be used until device access is allowed.</p>
+          </div>
+          <button type="button" class="cf-btn cf-btn-secondary cf-btn-sm" @click="loadMicrophones({ requestPermission: true })">
+            <i data-lucide="refresh-cw" class="h-4 w-4" aria-hidden="true"></i> Refresh
+          </button>
         </div>
       </div>
 
@@ -200,6 +220,10 @@
       timerId: null,
       error: '',
       recognition: null,
+      micDevices: [],
+      selectedMicDeviceId: 'default',
+      micSourceHelp: 'Default microphone will be used until device access is allowed.',
+      isLoadingMicrophones: false,
       requestVersion: 0,
       statusLabel: 'Ready to test',
       csrfToken() {
@@ -222,6 +246,85 @@
       },
       speechRecognitionConstructor() {
         return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+      },
+      mediaDevices() {
+        return navigator.mediaDevices || null;
+      },
+      stopMediaStream(stream) {
+        if (!stream) return;
+        stream.getTracks().forEach((track) => track.stop());
+      },
+      async loadMicrophones({ requestPermission = false } = {}) {
+        const mediaDevices = this.mediaDevices();
+        if (!mediaDevices || !mediaDevices.enumerateDevices) {
+          this.micDevices = [];
+          this.selectedMicDeviceId = 'default';
+          this.micSourceHelp = 'This browser does not expose microphone sources. Default microphone will be used.';
+          return;
+        }
+
+        this.isLoadingMicrophones = true;
+        let stream = null;
+        try {
+          if (requestPermission && mediaDevices.getUserMedia) {
+            stream = await mediaDevices.getUserMedia({ audio: true });
+          }
+          const devices = await mediaDevices.enumerateDevices();
+          const microphones = devices
+            .filter((device) => device.kind === 'audioinput' && device.deviceId && device.deviceId !== 'default')
+            .map((device, index) => ({
+              deviceId: device.deviceId,
+              label: device.label || `Microphone ${index + 1}`,
+            }));
+
+          this.micDevices = microphones;
+          if (!this.micDevices.some((device) => device.deviceId === this.selectedMicDeviceId)) {
+            this.selectedMicDeviceId = 'default';
+          }
+          if (this.micDevices.length === 0) {
+            this.micSourceHelp = 'Default microphone will be used until device access is allowed.';
+          } else if (this.micDevices.some((device) => device.label.startsWith('Microphone '))) {
+            this.micSourceHelp = 'Allow microphone access to show microphone names.';
+          } else {
+            this.micSourceHelp = 'Choose which microphone to validate before the live test.';
+          }
+        } catch (error) {
+          this.micDevices = [];
+          this.selectedMicDeviceId = 'default';
+          this.micSourceHelp = 'Allow microphone access to show devices.';
+        } finally {
+          this.stopMediaStream(stream);
+          this.isLoadingMicrophones = false;
+        }
+      },
+      selectedMicrophoneAudioConstraint() {
+        if (!this.selectedMicDeviceId || this.selectedMicDeviceId === 'default') return true;
+        return { deviceId: { exact: this.selectedMicDeviceId } };
+      },
+      async activateSelectedMicrophone() {
+        const mediaDevices = this.mediaDevices();
+        if (!mediaDevices || !mediaDevices.getUserMedia) {
+          this.micSourceHelp = 'This browser does not expose microphone sources. Default microphone will be used.';
+          return true;
+        }
+
+        let stream = null;
+        try {
+          stream = await mediaDevices.getUserMedia({ audio: this.selectedMicrophoneAudioConstraint() });
+          this.micSourceHelp = this.selectedMicDeviceId === 'default'
+            ? 'Default microphone is ready for the live test.'
+            : 'Selected microphone is ready for the live test.';
+          await this.loadMicrophones();
+          return true;
+        } catch (error) {
+          const blocked = error && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
+          this.statusLabel = blocked ? 'Microphone blocked' : 'Voice error';
+          this.error = blocked ? 'Microphone access was blocked.' : 'Selected microphone is unavailable. Choose another source or allow access.';
+          this.micSourceHelp = this.error;
+          return false;
+        } finally {
+          this.stopMediaStream(stream);
+        }
       },
       async responseJson(response) {
         try {
@@ -290,12 +393,14 @@
           return;
         }
         this.autoListen = true;
-        this.startTestListening({ auto: false });
+        await this.startTestListening({ auto: false });
       },
-      startTestListening({ auto = false } = {}) {
+      async startTestListening({ auto = false } = {}) {
         const requestVersion = this.requestVersion;
         const sessionId = this.sessionId;
         if (!sessionId || this.isProcessing || this.isSpeaking) return;
+        const micReady = await this.activateSelectedMicrophone();
+        if (!micReady || !this.isCurrentRequest(requestVersion, sessionId)) return;
         const Recognition = this.speechRecognitionConstructor();
         if (!Recognition) {
           this.error = 'Voice recognition is not available in this browser.';
@@ -422,6 +527,7 @@
         window.speechSynthesis.speak(utterance);
       },
       interruptTest() {
+        this.isSpeaking = false;
         if (window.speechSynthesis) {
           try {
             window.speechSynthesis.cancel();
@@ -429,7 +535,6 @@
             // Speech cancellation is best-effort.
           }
         }
-        this.isSpeaking = false;
         this.autoListen = true;
         this.startTestListening({ auto: false });
       },
@@ -471,7 +576,29 @@
       clearTranscript() {
         this.requestVersion += 1;
         this.autoListen = false;
+        const recognition = this.recognition;
+        this.recognition = null;
+        if (recognition) {
+          recognition.onstart = null;
+          recognition.onerror = null;
+          recognition.onend = null;
+          recognition.onresult = null;
+          try {
+            recognition.stop();
+          } catch (error) {
+            // Recognition may already be stopped by the browser.
+          }
+        }
+        this.isSpeaking = false;
+        if (window.speechSynthesis) {
+          try {
+            window.speechSynthesis.cancel();
+          } catch (error) {
+            // Speech cancellation is best-effort.
+          }
+        }
         this.transcript = [];
+        this.isListening = false;
         this.isProcessing = false;
         this.statusLabel = 'Ready to test';
       }

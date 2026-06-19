@@ -319,6 +319,7 @@ class WidgetTests(TestCase):
         self.assertIn("this.interruptVoice();", toggle_block)
         self.assertIn("window.speechSynthesis.cancel();", interrupt_block)
         self.assertIn("this.voiceSpeaking = false;", interrupt_block)
+        self.assertLess(interrupt_block.index("this.voiceSpeaking = false;"), interrupt_block.index("window.speechSynthesis.cancel();"))
         self.assertIn("this.startVoiceListening({ auto: false });", interrupt_block)
 
     def test_widget_voice_auto_listen_stops_on_end_and_uses_synthesis_callbacks(self):
@@ -331,6 +332,8 @@ class WidgetTests(TestCase):
         speak_start = content.index("speakVoiceReply(text")
         speak_end = content.index("async endVoice()", speak_start)
         speak_block = content[speak_start:speak_end]
+        finish_start = speak_block.index("const finishSpeaking = () => {")
+        finish_block = speak_block[finish_start:speak_block.index("utterance.onend", finish_start)]
         end_start = content.index("async endVoice()")
         end_end = content.index("get filteredFaqs()", end_start)
         end_block = content[end_start:end_end]
@@ -340,6 +343,7 @@ class WidgetTests(TestCase):
         self.assertIn("utterance.onerror = finishSpeaking;", speak_block)
         self.assertIn("this.voiceSpeaking = true;", speak_block)
         self.assertIn("this.voiceStatusLabel = 'Speaking';", speak_block)
+        self.assertLess(finish_block.index("if (!this.voiceSpeaking) return;"), finish_block.index("if (afterSpeak) afterSpeak();"))
         self.assertIn("this.voiceAutoListen = false;", end_block)
         self.assertIn("this.voiceSpeaking = false;", end_block)
 
