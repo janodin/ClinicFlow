@@ -58,28 +58,26 @@
           <span class="cf-badge cf-badge-info self-start">Website widget</span>
         </div>
         <div class="mt-4 grid gap-3 md:grid-cols-2">
-          <label class="cf-switch-row" for="{{ voice_form.is_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-switch-input" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
-            <span class="min-w-0">
+          <label class="cf-choice-card cf-choice-card-switch items-center justify-between" for="{{ voice_form.is_enabled.id_for_label }}">
+            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-choice-card-input" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
+            <span class="min-w-0 pr-3">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Show voice as an option in the public booking widget.</span>
               {% if voice_form.is_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-control">
-              <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
-              <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
+            <span class="cf-switch-control" aria-hidden="true">
+              <span class="cf-switch-track"><span class="cf-switch-thumb"></span></span>
             </span>
           </label>
-          <label class="cf-switch-row" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-switch-input" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
-            <span class="min-w-0">
+          <label class="cf-choice-card cf-choice-card-switch items-center justify-between" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
+            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-choice-card-input" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
+            <span class="min-w-0 pr-3">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_test_mode_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Allow owners to run live dashboard voice tests before enabling the widget.</span>
               {% if voice_form.is_test_mode_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_test_mode_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-control">
-              <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
-              <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
+            <span class="cf-switch-control" aria-hidden="true">
+              <span class="cf-switch-track"><span class="cf-switch-thumb"></span></span>
             </span>
           </label>
         </div>
@@ -165,7 +163,7 @@
           <h2 class="cf-section-title">Conversation Transcript</h2>
           <p class="cf-muted">Transcript appears here during the call.</p>
         </div>
-        <button type="button" class="cf-btn cf-btn-secondary cf-btn-sm" @click="clearTranscript()"><i data-lucide="rotate-ccw" class="h-4 w-4" aria-hidden="true"></i> Clear</button>
+        <button type="button" class="cf-btn cf-btn-secondary cf-btn-sm" @click="clearTranscript"><i data-lucide="rotate-ccw" class="h-4 w-4" aria-hidden="true"></i> Clear</button>
       </div>
       <div class="cf-table-scroll" tabindex="0" aria-label="Voice test conversation transcript">
         <template x-if="transcript.length === 0">
@@ -200,6 +198,8 @@
       transcript: [],
       isListening: false,
       isProcessing: false,
+      isSpeaking: false,
+      autoListen: false,
       elapsedSeconds: 0,
       timerId: null,
       error: '',
@@ -255,9 +255,17 @@
           }
           this.sessionId = data.session_id;
           this.transcript = [];
+          this.autoListen = true;
           if (data.message) this.transcript.push({id: Date.now(), role: 'assistant', text: data.message});
           this.statusLabel = 'Ready to test';
           this.startTimer();
+          if (data.message) {
+            this.speakTestReply(data.message, requestVersion, data.session_id, () => {
+              this.continueTestLoop(requestVersion, data.session_id);
+            });
+          } else {
+            this.continueTestLoop(requestVersion, data.session_id);
+          }
         } catch (error) {
           if (this.requestVersion === requestVersion) this.error = 'Could not start voice test.';
         } finally {
@@ -265,51 +273,104 @@
         }
       },
       async toggleListening() {
-        if (!this.sessionId) await this.startTestSession();
+        if (!this.sessionId) {
+          await this.startTestSession();
+          return;
+        }
         if (!this.sessionId) return;
+        if (this.isProcessing) {
+          this.statusLabel = 'Thinking';
+          return;
+        }
+        if (this.isSpeaking) {
+          this.interruptTest();
+          return;
+        }
         if (this.isListening) {
+          this.autoListen = false;
           if (this.recognition) this.recognition.stop();
           this.isListening = false;
           this.statusLabel = 'Ready to test';
           return;
         }
+        this.autoListen = true;
+        this.startTestListening({ auto: false });
+      },
+      startTestListening({ auto = false } = {}) {
+        const requestVersion = this.requestVersion;
+        const sessionId = this.sessionId;
+        if (!sessionId || this.isProcessing || this.isSpeaking) return;
         const Recognition = this.speechRecognitionConstructor();
         if (!Recognition) {
           this.error = 'Voice recognition is not available in this browser.';
           return;
         }
+        const previousRecognition = this.recognition;
+        if (previousRecognition) {
+          previousRecognition.onstart = null;
+          previousRecognition.onerror = null;
+          previousRecognition.onend = null;
+          previousRecognition.onresult = null;
+          try {
+            previousRecognition.stop();
+          } catch (error) {
+            // Recognition may already be stopped by the browser.
+          }
+        }
+        let heardSpeech = false;
         const recognition = new Recognition();
         recognition.lang = 'en-US';
         recognition.interimResults = false;
         recognition.maxAlternatives = 1;
         recognition.onstart = () => {
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
           this.isListening = true;
-          this.statusLabel = 'Listening';
+          this.statusLabel = auto ? 'Listening again' : 'Listening';
+          this.error = '';
         };
-        recognition.onerror = () => {
+        recognition.onerror = (event) => {
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+          const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
           this.isListening = false;
-          this.statusLabel = 'Microphone blocked';
-          this.error = 'Microphone access was blocked.';
+          if (blocked) this.autoListen = false;
+          this.statusLabel = blocked ? 'Microphone blocked' : 'Voice error';
+          this.error = blocked ? 'Microphone access was blocked.' : 'Voice recognition had trouble hearing you. Please try again.';
         };
         recognition.onend = () => {
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
           this.isListening = false;
+          if (!heardSpeech && auto && this.autoListen && !this.isProcessing && !this.isSpeaking) {
+            window.setTimeout(() => {
+              this.continueTestLoop(requestVersion, sessionId);
+            }, 300);
+            return;
+          }
           if (!this.isProcessing) this.statusLabel = 'Ready to test';
         };
         recognition.onresult = async (event) => {
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
           const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          heardSpeech = Boolean(text);
           if (text) await this.sendTurn(text);
         };
         this.recognition = recognition;
-        recognition.start();
+        try {
+          recognition.start();
+        } catch (error) {
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+          this.isListening = false;
+          this.statusLabel = 'Voice error';
+          this.error = 'Voice recognition had trouble starting. Please try again.';
+        }
       },
       async sendTurn(text) {
         const sessionId = this.sessionId;
         const requestVersion = this.requestVersion;
-        if (!sessionId) return;
+        if (!sessionId || this.isProcessing) return;
 
         this.error = '';
         this.isProcessing = true;
-        this.statusLabel = 'Processing';
+        this.statusLabel = 'Thinking';
         this.transcript.push({id: Date.now(), role: 'user', text});
         const formData = new FormData();
         formData.append('message', text);
@@ -323,7 +384,9 @@
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
           if (response.ok && data.message) {
             this.transcript.push({id: Date.now() + 1, role: 'assistant', text: data.message});
-            if (window.speechSynthesis && window.SpeechSynthesisUtterance && data.message) window.speechSynthesis.speak(new window.SpeechSynthesisUtterance(data.message));
+            this.speakTestReply(data.message, requestVersion, sessionId, () => {
+              this.continueTestLoop(requestVersion, sessionId);
+            });
           } else {
             this.error = data.message || 'Voice test failed.';
           }
@@ -332,12 +395,57 @@
         } finally {
           if (this.isCurrentRequest(requestVersion, sessionId)) {
             this.isProcessing = false;
-            this.statusLabel = 'Ready to test';
+            if (!this.isSpeaking) this.statusLabel = 'Ready to test';
           }
         }
       },
+      speakTestReply(text, requestVersion, sessionId, afterSpeak) {
+        if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) {
+          window.setTimeout(() => {
+            if (afterSpeak) afterSpeak();
+          }, 0);
+          return;
+        }
+        try {
+          window.speechSynthesis.cancel();
+        } catch (error) {
+          // Speech cancellation is best-effort.
+        }
+        this.isSpeaking = true;
+        this.statusLabel = 'Speaking';
+        const utterance = new window.SpeechSynthesisUtterance(text);
+        const finishSpeaking = () => {
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+          if (!this.isSpeaking) return;
+          this.isSpeaking = false;
+          if (!this.isProcessing) this.statusLabel = 'Ready to test';
+          if (afterSpeak) afterSpeak();
+        };
+        utterance.onend = finishSpeaking;
+        utterance.onerror = finishSpeaking;
+        window.speechSynthesis.speak(utterance);
+      },
+      interruptTest() {
+        if (window.speechSynthesis) {
+          try {
+            window.speechSynthesis.cancel();
+          } catch (error) {
+            // Speech cancellation is best-effort.
+          }
+        }
+        this.isSpeaking = false;
+        this.autoListen = true;
+        this.startTestListening({ auto: false });
+      },
+      continueTestLoop(requestVersion, sessionId) {
+        if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+        if (!this.autoListen || this.isListening || this.isProcessing || this.isSpeaking) return;
+        this.startTestListening({ auto: true });
+      },
       async endTest() {
         this.requestVersion += 1;
+        this.autoListen = false;
+        this.isSpeaking = false;
         const requestVersion = this.requestVersion;
         if (this.recognition) this.recognition.stop();
         if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -366,6 +474,7 @@
       },
       clearTranscript() {
         this.requestVersion += 1;
+        this.autoListen = false;
         this.transcript = [];
         this.isProcessing = false;
         this.statusLabel = 'Ready to test';

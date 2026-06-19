@@ -280,8 +280,8 @@ def test_dashboard_voice_test_page_contains_endpoint_urls(voice_clinic, client):
     assert "dashboard/test/session/VOICE_SESSION_ID/turn/" in content
     assert "dashboard/test/session/VOICE_SESSION_ID/end/" in content
     assert ':data-lucide="isListening ? \'square\' : \'mic\'"' not in content
-    assert 'data-lucide="mic" x-show="!isListening"' in content
-    assert 'data-lucide="square" x-show="isListening"' in content
+    assert 'data-lucide="mic" x-show="!isSpeaking"' in content
+    assert 'x-show="isSpeaking"' in content
 
 
 @pytest.mark.django_db
@@ -321,8 +321,70 @@ def test_dashboard_voice_test_page_hardens_live_test_javascript(voice_clinic, cl
     assert "if (!response.ok && this.requestVersion === requestVersion) this.error = data.message || 'Could not end voice test.';" in end_test_block
     assert "if (this.requestVersion === requestVersion) this.error = 'Could not end voice test.';" in end_test_block
     assert "if (this.requestVersion === requestVersion) {" in end_test_block
-    assert "window.speechSynthesis && window.SpeechSynthesisUtterance && data.message" in content
-    assert "new window.SpeechSynthesisUtterance(data.message)" in content
+    assert "!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text" in content
+    assert "new window.SpeechSynthesisUtterance(text)" in content
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_page_auto_loop_and_interrupt_javascript(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    start_block = content[content.index("async startTestSession()"):content.index("async toggleListening()")]
+    toggle_block = content[content.index("async toggleListening()"):content.index("startTestListening", content.index("async toggleListening()"))]
+    listen_block = content[content.index("startTestListening({ auto = false } = {})"):content.index("async sendTurn(text)")]
+    send_block = content[content.index("async sendTurn(text)"):content.index("speakTestReply(text")]
+    speak_block = content[content.index("speakTestReply(text"):content.index("async endTest()")]
+    end_block = content[content.index("async endTest()"):content.index("clearTranscript()")]
+
+    assert "isSpeaking: false," in content
+    assert "autoListen: false," in content
+    assert "this.autoListen = true;" in start_block
+    assert "this.speakTestReply(data.message, requestVersion, data.session_id, () => {" in start_block
+    assert "this.continueTestLoop(requestVersion, data.session_id);" in start_block
+    assert "if (this.isProcessing) {" in toggle_block
+    assert "if (this.isSpeaking) {" in toggle_block
+    assert "this.interruptTest();" in toggle_block
+    assert "if (!this.isProcessing && !heardSpeech && this.autoListen) {" in listen_block
+    assert "auto && this.autoListen" not in listen_block
+    assert "this.speakTestReply(data.message, requestVersion, sessionId, () => {" in send_block
+    assert "this.continueTestLoop(requestVersion, sessionId);" in send_block
+    assert "const utterance = new window.SpeechSynthesisUtterance(text);" in speak_block
+    assert "utterance.onend = finishSpeaking;" in speak_block
+    assert "utterance.onerror = finishSpeaking;" in speak_block
+    assert "interruptTest()" in content
+    assert "continueTestLoop" in content
+    assert "this.autoListen = false;" in end_block
+    assert "this.isSpeaking = false;" in end_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_page_uses_animated_voice_orb(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    orb_start = content.index("voice-orb")
+    orb_end = content.index("</button>", orb_start)
+    orb_block = content[orb_start:orb_end]
+
+    assert "voice-orb" in orb_block
+    assert "voice-orb-listening" in orb_block
+    assert "voice-orb-speaking" in orb_block
+    assert "voice-orb-thinking" in orb_block
+    assert "voice-orb-bars" in orb_block
+    assert 'data-lucide="mic" x-show="!isSpeaking"' in orb_block
+    assert 'x-show="isSpeaking"' in orb_block
+    assert ":data-lucide" not in orb_block
 
 
 @pytest.mark.django_db

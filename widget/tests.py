@@ -125,8 +125,31 @@ class WidgetTests(TestCase):
         self.assertIn("Microphone access was blocked. You can still type or book manually.", content)
         self.assertIn(reverse("voice:widget_session", args=[self.clinic.slug]), content)
         self.assertNotIn(":data-lucide=\"voiceListening ? 'square' : 'mic'\"", voice_panel)
-        self.assertIn('data-lucide="mic" x-show="!voiceListening"', voice_panel)
-        self.assertIn('data-lucide="square" x-show="voiceListening"', voice_panel)
+        self.assertIn('data-lucide="mic" x-show="!voiceSpeaking"', voice_panel)
+        self.assertIn('x-show="voiceSpeaking"', voice_panel)
+
+    def test_widget_voice_panel_uses_animated_voice_orb(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        voice_panel_start = content.index("<div x-show=\"mode==='voice'\"")
+        voice_panel_end = content.index("function widgetApp()", voice_panel_start)
+        voice_panel = content[voice_panel_start:voice_panel_end]
+        orb_start = voice_panel.index("voice-orb")
+        orb_end = voice_panel.index("</button>", orb_start)
+        orb_block = voice_panel[orb_start:orb_end]
+
+        self.assertIn("voice-orb", orb_block)
+        self.assertIn("voice-orb-listening", orb_block)
+        self.assertIn("voice-orb-speaking", orb_block)
+        self.assertIn("voice-orb-thinking", orb_block)
+        self.assertIn("voice-orb-bars", orb_block)
+        self.assertIn('data-lucide="mic" x-show="!voiceSpeaking"', orb_block)
+        self.assertIn('x-show="voiceSpeaking"', orb_block)
+        self.assertNotIn(":data-lucide", orb_block)
 
     def test_widget_voice_panel_does_not_show_blocked_message_before_error(self):
         from voice.models import VoiceAgentSettings

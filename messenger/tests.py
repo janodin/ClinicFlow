@@ -2988,7 +2988,9 @@ def test_ai_gateway_booking_tool_preserves_confirmation_and_messenger_identity(m
         }],
     })
 
-    assert result["reply"].startswith("Your Consultation is booked")
+    assert result["reply"].startswith("APPOINTMENT BOOKED\n\n")
+    assert "Service: Consultation" in result["reply"]
+    assert "Date/time:" in result["reply"]
     assert "Reference code:" in result["reply"]
     appointment = Appointment.objects.get(clinic=clinic)
     assert appointment.source == Appointment.SOURCE_MESSENGER
@@ -3050,7 +3052,9 @@ def test_ai_gateway_returns_successful_booking_tool_result_without_provider_foll
     })
 
     assert result["fallback"] is False
-    assert result["reply"].startswith("Your Dental Consultation is booked")
+    assert result["reply"].startswith("APPOINTMENT BOOKED\n\n")
+    assert "Service: Dental Consultation" in result["reply"]
+    assert "Date/time:" in result["reply"]
     assert "Reference code:" in result["reply"]
     assert Appointment.objects.filter(clinic=clinic, patient__full_name="Conversation Review Test").exists()
     assert mock_call.call_count == 1
@@ -3283,7 +3287,9 @@ def test_ai_gateway_accepts_taglish_confirmation_after_complete_summary(mock_cal
         }],
     })
 
-    assert result["reply"].startswith("Your Dental Cleaning is booked")
+    assert result["reply"].startswith("APPOINTMENT BOOKED\n\n")
+    assert "Service: Dental Cleaning" in result["reply"]
+    assert "Date/time:" in result["reply"]
     assert Appointment.objects.filter(clinic=clinic, patient__full_name="Maria Santos").exists()
 
 
@@ -3610,6 +3616,61 @@ def test_ai_gateway_blocks_stale_availability_tool_for_unrelated_messenger_turn(
     assert "check_availability can only be used when the current patient message asks about booking availability" in tool_message["content"]
     assert "Slots are available" not in tool_message["content"]
     assert "9:00 AM" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_returns_safe_reply_when_unrelated_turn_reuses_stale_availability_and_provider_repeats_slots(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_unrelated_no_fallback", "PAGE-GATEWAY-UNRELATED-NO-FALLBACK")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.",
+    )
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-unrelated-no-fallback")
+    service = Service.objects.create(clinic=clinic, name="Dental Filling", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_date": target_date.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "The requested slot is not available. Nearest available options are: 9:00 AM, 9:30 AM, 10:00 AM."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-UNRELATED-NO-FALLBACK",
+        "turn_token": "turn-token",
+        "input_sequence": 7,
+        "message": "huy",
+        "history": [
+            {"role": "assistant", "content": "BOOKING CONFIRMATION\n\nService: Dental Filling\nDate/time: July 2, 2026 at 9:00 AM\nPatient: Janodin Patundog\nPhone: 09348347394\nEmail: janopatundog@gmail.com\n\nReply YES to book this appointment."},
+        ],
+    })
+
+    assert result == {
+        "reply": "I can help with clinic services, FAQs, or appointments. What would you like to do next?",
+        "fallback": False,
+        "error": "",
+    }
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "availability_tool_blocked" in tool_message["content"]
+    assert "assistant is unavailable" not in result["reply"]
+    assert "Nearest available options" not in result["reply"]
 
 
 @pytest.mark.django_db
@@ -3988,10 +4049,11 @@ def test_ai_gateway_selected_slot_tool_reply_names_required_booking_fields(mock_
     })
 
     assert result["fallback"] is False
-    assert "That slot is available: 1:30 PM." in result["reply"]
+    assert result["reply"].startswith("AVAILABLE SLOT\n\n")
+    assert "Time: 1:30 PM" in result["reply"]
     assert "remaining booking details" not in result["reply"]
-    assert "service" not in result["reply"].split("I still need:", 1)[-1]
-    assert "date/time" not in result["reply"].split("I still need:", 1)[-1]
+    assert "service" not in result["reply"].split("Missing:", 1)[-1]
+    assert "date/time" not in result["reply"].split("Missing:", 1)[-1]
     for required_field in ["full name", "phone", "email"]:
         assert required_field in result["reply"]
 
@@ -4047,12 +4109,14 @@ def test_ai_gateway_selected_slot_tool_reply_summarizes_when_current_message_has
     })
 
     assert result["fallback"] is False
-    assert "Please confirm" in result["reply"]
-    assert "Dental Filling" in result["reply"]
+    assert result["reply"].startswith("BOOKING CONFIRMATION\n\n")
+    assert "Service: Dental Filling" in result["reply"]
+    assert "Date/time:" in result["reply"]
     assert "9:00 AM" in result["reply"]
-    assert "Janodin Patundog" in result["reply"]
-    assert "09348347394" in result["reply"]
-    assert "janopatundog@gmail.com" in result["reply"]
+    assert "Patient: Janodin Patundog" in result["reply"]
+    assert "Phone: 09348347394" in result["reply"]
+    assert "Email: janopatundog@gmail.com" in result["reply"]
+    assert result["reply"].endswith("Reply YES to book this appointment.")
     assert "I need:" not in result["reply"]
 
 
@@ -4281,7 +4345,9 @@ def test_ai_gateway_returns_after_first_successful_mutation_across_tool_iteratio
         }],
     })
 
-    assert result["reply"].startswith("Your Consultation is booked")
+    assert result["reply"].startswith("APPOINTMENT BOOKED\n\n")
+    assert "Service: Consultation" in result["reply"]
+    assert "Date/time:" in result["reply"]
     assert result["fallback"] is False
     assert result["error"] == ""
     assert Appointment.objects.filter(clinic=clinic).count() == 1

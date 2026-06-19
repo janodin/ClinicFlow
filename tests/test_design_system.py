@@ -2260,20 +2260,50 @@ def test_assistant_page_messenger_mode_uses_custom_aqua_radio_cards():
 
 def test_voice_agent_page_uses_dashboard_design_system_patterns():
     template = source_text("templates/dashboard/voice_agent.html")
+    tabs = tag_block_containing(template, "div", 'class="cf-tabs"')
     channel_controls = tag_block_containing(template, "div", 'data-section="voice-agent-channel-controls"')
     transcript_panel = tag_block_containing(template, "div", 'aria-label="Voice test conversation transcript"')
+    switch_row = css_rule_block(".cf-switch-row")
+    switch_track = css_rule_block(".cf-switch-track")
+    switch_thumb = css_rule_block(".cf-switch-thumb")
+    switch_checked_track = css_rule_block(".cf-switch-row:has(.cf-switch-input:checked) .cf-switch-track")
+    switch_checked_thumb = css_rule_block(".cf-switch-row:has(.cf-switch-input:checked) .cf-switch-thumb")
+    tab_buttons = re.findall(r"<button\b[^>]*>", tabs)
+    switch_labels = re.findall(r"<label\b[^>]*>", channel_controls)
+    switch_inputs = re.findall(r"<input\b[^>]*>", channel_controls)
+    switch_spans = re.findall(r"<span\b[^>]*\bclass=\"[^\"]*\"[^>]*>", channel_controls)
 
-    assert '<div class="cf-tabs" role="tablist" aria-label="Voice agent sections">' in template
-    assert template.count('class="cf-tab"') == 2
+    assert len(tab_buttons) == 2
+    for tab_button in tab_buttons:
+        assert_class_tokens(class_tokens_from_markup(tab_button), "cf-tab")
     assert "tab==='configure' ? 'cf-tab-active' : ''" in template
     assert "tab==='test' ? 'cf-tab-active' : ''" in template
     assert "inline-flex rounded-2xl" not in template
+    assert "role=\"tab\"" not in tabs
 
-    assert channel_controls.count('class="cf-choice-card"') == 2
-    assert channel_controls.count('class="cf-choice-card-input"') == 2
-    assert channel_controls.count('class="cf-choice-card-mark"') == 2
+    assert sum("cf-switch-row" in class_tokens_from_markup(label) for label in switch_labels) == 2
+    assert sum("cf-switch-input" in class_tokens_from_markup(input_tag) for input_tag in switch_inputs) == 2
+    assert "cf-choice-card" not in channel_controls
+    assert "cf-choice-card-input" not in channel_controls
+    assert "cf-choice-card-mark" not in channel_controls
+    assert sum("cf-switch-state" in class_tokens_from_markup(span) for span in switch_spans) == 2
+    assert sum("cf-switch-state-on" in class_tokens_from_markup(span) for span in switch_spans) == 2
+    assert sum("cf-switch-state-off" in class_tokens_from_markup(span) for span in switch_spans) == 2
+    assert sum("cf-switch-track" in class_tokens_from_markup(span) for span in switch_spans) == 2
+    assert sum("cf-switch-thumb" in class_tokens_from_markup(span) for span in switch_spans) == 2
+    assert ">On<" in channel_controls
+    assert ">Off<" in channel_controls
+    assert 'name="{{ voice_form.is_enabled.html_name }}"' in channel_controls
+    assert 'name="{{ voice_form.is_test_mode_enabled.html_name }}"' in channel_controls
     assert "{{ voice_form.is_enabled.label }}" in channel_controls
     assert "{{ voice_form.is_test_mode_enabled.label }}" in channel_controls
+    assert "align-items: center;" in switch_row
+    assert "justify-content: space-between;" in switch_row
+    assert "border-radius: var(--cf-radius-pill);" in switch_track
+    assert "background: var(--cf-status-no-show-bg);" in switch_track
+    assert "background: var(--cf-surface);" in switch_thumb
+    assert "background: var(--cf-brand);" in switch_checked_track
+    assert "transform: translateX(1.5rem);" in switch_checked_thumb
 
     assert "cf-table-wrap" in template
     assert "cf-table-header" in template

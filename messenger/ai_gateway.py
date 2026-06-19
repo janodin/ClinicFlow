@@ -87,6 +87,7 @@ BLOCKED_AVAILABILITY_TOOL_MESSAGE = (
     "booking availability, dates, times, or chooses a specific slot. Answer the current "
     "patient message from clinic context instead of repeating previous slots."
 )
+BLOCKED_AVAILABILITY_SAFE_REPLY = "I can help with clinic services, FAQs, or appointments. What would you like to do next?"
 BLOCKED_EXACT_SLOT_TOOL_MESSAGE = (
     "exact_slot_tool_blocked: check_availability with preferred_starts_at requires the "
     "current patient message to include a specific time or clearly select a listed option. "
@@ -813,6 +814,14 @@ def _slot_summary(slot):
     return str(slot.get("label") or slot.get("local_starts_at") or slot.get("starts_at") or "available time")
 
 
+def _detail_card(title, rows, footer=""):
+    lines = [title, ""]
+    lines.extend(f"{label}: {value}" for label, value in rows if str(value or "").strip())
+    if footer:
+        lines.extend(["", footer])
+    return "\n".join(lines)
+
+
 def _service_name_from_tool_args(clinic, args):
     if not clinic or not isinstance(args, dict):
         return ""
@@ -828,18 +837,43 @@ def _service_name_from_tool_args(clinic, args):
     )
 
 
+def _format_local_date_time(value, fallback_date="", fallback_time=""):
+    try:
+        local_start = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return f"{fallback_date} {fallback_time}".strip()
+    time_label = fallback_time or local_start.strftime("%I:%M %p").lstrip("0")
+    return f"{local_start.strftime('%A, %B')} {local_start.day}, {local_start.year} at {time_label}"
+
+
 def _slot_date_time_summary(slot):
     label = _slot_summary(slot)
     if not isinstance(slot, dict):
         return label
-    value = str(slot.get("local_starts_at") or "")
-    if not value:
-        return label
-    try:
-        local_start = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return label
-    return f"{local_start.strftime('%B')} {local_start.day}, {local_start.year} at {label}"
+    return _format_local_date_time(slot.get("local_starts_at"), fallback_time=label) or label
+
+
+def _appointment_date_time_summary(appointment):
+    if not isinstance(appointment, dict):
+        return ""
+    return _format_local_date_time(
+        appointment.get("local_starts_at"),
+        fallback_date=appointment.get("local_date_label", ""),
+        fallback_time=appointment.get("local_time_label", ""),
+    )
+
+
+def _spoken_booked_reply(appointment):
+    service = appointment.get("service", "appointment")
+    date_label = appointment.get("local_date_label", "")
+    time_label = appointment.get("local_time_label", "")
+    reference = appointment.get("reference_code", "")
+    reply = f"Your {service} is booked"
+    if date_label or time_label:
+        reply += f" for {date_label} {time_label}".rstrip()
+    if reference:
+        reply += f". Reference code: {reference}"
+    return reply + "."
 
 
 def _display_patient_name(value):
@@ -866,11 +900,21 @@ def _selected_slot_booking_reply(selected, clinic=None, data=None, args=None):
     if not email:
         missing.append("email")
     if missing:
-        return f"That slot is available: {_slot_summary(selected)}. I still need: {', '.join(missing)}. I will summarize before booking."
-    return (
-        f"That slot is available: {_slot_summary(selected)}. Please confirm this booking: "
-        f"service {service_name}, date/time {date_time}, full name {full_name}, "
-        f"phone {phone}, email {email}. Reply yes to book it."
+        return _detail_card(
+            "AVAILABLE SLOT",
+            [("Time", _slot_summary(selected)), ("Missing", ", ".join(missing))],
+            "Please send the missing details so I can summarize before booking.",
+        )
+    return _detail_card(
+        "BOOKING CONFIRMATION",
+        [
+            ("Service", service_name),
+            ("Date/time", date_time),
+            ("Patient", full_name),
+            ("Phone", phone),
+            ("Email", email),
+        ],
+        "Reply YES to book this appointment.",
     )
 
 
@@ -880,18 +924,19 @@ def _reply_from_tool_result(result, *, clinic=None, data=None, args=None):
     error = str(result.get("error") or "").strip()
     if error:
         return error
+    if result.get("availability_tool_blocked") is True:
+        return BLOCKED_AVAILABILITY_SAFE_REPLY
     if result.get("created") is True and isinstance(result.get("appointment"), dict):
         appointment = result["appointment"]
+        if str((data or {}).get("channel", "")).strip().lower() == "voice":
+            return _spoken_booked_reply(appointment)
         service = appointment.get("service", "appointment")
-        date_label = appointment.get("local_date_label", "")
-        time_label = appointment.get("local_time_label", "")
+        date_time = _appointment_date_time_summary(appointment)
         reference = appointment.get("reference_code", "")
-        reply = f"Your {service} is booked"
-        if date_label or time_label:
-            reply += f" for {date_label} {time_label}".rstrip()
-        if reference:
-            reply += f". Reference code: {reference}"
-        return reply + "."
+        return _detail_card(
+            "APPOINTMENT BOOKED",
+            [("Service", service), ("Date/time", date_time), ("Reference code", reference)],
+        )
     if result.get("cancelled") is True and isinstance(result.get("appointment"), dict):
         appointment = result["appointment"]
         service = appointment.get("service", "appointment")
