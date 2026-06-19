@@ -3689,6 +3689,57 @@ def test_ai_gateway_blocks_reused_exact_slot_when_current_turn_has_no_time(mock_
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_blocks_reused_exact_slot_when_current_turn_time_differs(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_stale_time", "PAGE-GATEWAY-STALE-TIME")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-stale-time")
+    service = Service.objects.create(clinic=clinic, name="Dental Filling", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    stale_start = timezone.make_aware(timezone.datetime.combine(target_date, time(14)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": stale_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Let me check 9:00 AM instead."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-STALE-TIME",
+        "turn_token": "turn-token",
+        "input_sequence": 4,
+        "message": "9am",
+        "history": [
+            {"role": "assistant", "content": "The requested slot is not available. Nearest available options are: 9:00 AM, 9:30 AM, 10:00 AM."},
+        ],
+    })
+
+    assert result == {"reply": "Let me check 9:00 AM instead.", "fallback": False, "error": ""}
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 @pytest.mark.parametrize("message", ["21", "09175551234", "123456"])
 def test_ai_gateway_blocks_reused_exact_slot_for_numeric_non_option_messages(mock_call, message):
     from datetime import timezone as dt_timezone

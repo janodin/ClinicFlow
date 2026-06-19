@@ -318,7 +318,7 @@ def test_dashboard_voice_test_page_hardens_live_test_javascript(voice_clinic, cl
     assert start_test_block.index("const requestVersion = this.requestVersion;") < start_test_block.index("await fetch")
     assert start_test_block.index("if (this.requestVersion !== requestVersion) return;") < start_test_block.index("this.sessionId = data.session_id;")
     assert "const requestVersion = this.requestVersion;" in end_test_block
-    assert "if (this.requestVersion === requestVersion) this.error = data.message || 'Could not end voice test.';" in end_test_block
+    assert "if (!response.ok && this.requestVersion === requestVersion) this.error = data.message || 'Could not end voice test.';" in end_test_block
     assert "if (this.requestVersion === requestVersion) this.error = 'Could not end voice test.';" in end_test_block
     assert "if (this.requestVersion === requestVersion) {" in end_test_block
     assert "window.speechSynthesis && window.SpeechSynthesisUtterance && data.message" in content
