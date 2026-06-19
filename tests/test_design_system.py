@@ -2260,24 +2260,34 @@ def test_assistant_page_messenger_mode_uses_custom_aqua_radio_cards():
 
 def test_voice_agent_page_uses_dashboard_design_system_patterns():
     template = source_text("templates/dashboard/voice_agent.html")
+    tabs = tag_block_containing(template, "div", 'class="cf-tabs"')
     channel_controls = tag_block_containing(template, "div", 'data-section="voice-agent-channel-controls"')
     transcript_panel = tag_block_containing(template, "div", 'aria-label="Voice test conversation transcript"')
+    tab_buttons = re.findall(r"<button\b[^>]*>", tabs)
+    choice_labels = re.findall(r"<label\b[^>]*>", channel_controls)
+    choice_inputs = re.findall(r"<input\b[^>]*>", channel_controls)
+    choice_marks = re.findall(r"<span\b[^>]*\bclass=\"[^\"]*\"[^>]*>", channel_controls)
+    transcript_table = opening_tag_containing(transcript_panel, "table", "cf-table-compact")
 
-    assert '<div class="cf-tabs" role="tablist" aria-label="Voice agent sections">' in template
-    assert template.count('class="cf-tab"') == 2
+    assert len(tab_buttons) == 2
+    for tab_button in tab_buttons:
+        assert_class_tokens(class_tokens_from_markup(tab_button), "cf-tab")
     assert "tab==='configure' ? 'cf-tab-active' : ''" in template
     assert "tab==='test' ? 'cf-tab-active' : ''" in template
     assert "inline-flex rounded-2xl" not in template
+    assert "role=\"tab\"" not in tabs
 
-    assert channel_controls.count('class="cf-choice-card"') == 2
-    assert channel_controls.count('class="cf-choice-card-input"') == 2
-    assert channel_controls.count('class="cf-choice-card-mark"') == 2
+    assert sum("cf-choice-card" in class_tokens_from_markup(label) for label in choice_labels) == 2
+    assert sum("cf-choice-card-input" in class_tokens_from_markup(input_tag) for input_tag in choice_inputs) == 2
+    assert sum("cf-choice-card-mark" in class_tokens_from_markup(mark) for mark in choice_marks) == 2
+    assert 'name="{{ voice_form.is_enabled.html_name }}"' in channel_controls
+    assert 'name="{{ voice_form.is_test_mode_enabled.html_name }}"' in channel_controls
     assert "{{ voice_form.is_enabled.label }}" in channel_controls
     assert "{{ voice_form.is_test_mode_enabled.label }}" in channel_controls
 
     assert "cf-table-wrap" in template
     assert "cf-table-header" in template
-    assert 'class="cf-table cf-table-compact"' in template
+    assert_class_tokens(class_tokens_from_markup(transcript_table), "cf-table", "cf-table-compact")
     assert "cf-empty-state" in transcript_panel
     assert "No conversation yet" in transcript_panel
 

@@ -316,6 +316,8 @@
       voiceTranscript: [],
       voiceListening: false,
       voiceProcessing: false,
+      voiceSpeaking: false,
+      voiceAutoListen: false,
       voiceError: '',
       voiceRecognition: null,
       voiceStatusLabel: 'Ready to talk',
@@ -626,6 +628,8 @@
         this.mode = 'voice';
         this.voiceError = '';
         this.voiceTranscript = [];
+        this.voiceSpeaking = false;
+        this.voiceAutoListen = false;
         this.voiceStatusLabel = 'Preparing voice session';
         this.voiceHelpText = 'Allow microphone access when prompted.';
         try {
@@ -637,9 +641,17 @@
           if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;
           if (!resp.ok) throw new Error(data.message || 'Voice assistant is unavailable.');
           this.voiceSessionId = data.session_id;
+          this.voiceAutoListen = true;
           this.voiceStatusLabel = 'Ready to talk';
           this.voiceHelpText = 'Tap the mic and speak clearly.';
-          if (data.message) this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
+          if (data.message) {
+            this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
+            this.speakVoiceReply(data.message, stateResetVersion, data.session_id, () => {
+              this.continueVoiceLoop(stateResetVersion, data.session_id);
+            });
+          } else {
+            this.continueVoiceLoop(stateResetVersion, this.voiceSessionId);
+          }
           if (!this.voiceSupported()) {
             this.voiceError = 'Voice recognition is not available in this browser. You can still type or book manually.';
           }
@@ -650,24 +662,66 @@
           this.voiceError = error.message || 'Voice assistant is unavailable.';
         }
       },
+      interruptVoice() {
+        if (window.speechSynthesis) {
+          try {
+            window.speechSynthesis.cancel();
+          } catch (error) {
+            // Speech cancellation is best-effort.
+          }
+        }
+        this.voiceSpeaking = false;
+        this.voiceAutoListen = true;
+        this.startVoiceListening({ auto: false });
+      },
+      continueVoiceLoop(stateResetVersion, sessionId) {
+        if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+        if (!this.voiceAutoListen || this.voiceListening || this.voiceProcessing || this.voiceSpeaking) return;
+        this.startVoiceListening({ auto: true });
+      },
       toggleVoiceListening() {
+        if (this.voiceProcessing) {
+          this.voiceStatusLabel = 'Thinking';
+          this.voiceHelpText = 'The assistant is preparing a reply.';
+          return;
+        }
+        if (this.voiceSpeaking) {
+          this.interruptVoice();
+          return;
+        }
         if (this.voiceListening) {
+          this.voiceAutoListen = false;
           if (this.voiceRecognition) this.voiceRecognition.stop();
           this.voiceListening = false;
           this.voiceStatusLabel = 'Ready to talk';
+          this.voiceHelpText = 'Tap the mic to continue.';
           return;
         }
-        this.startVoiceListening();
+        this.voiceAutoListen = true;
+        this.startVoiceListening({ auto: false });
       },
-      startVoiceListening() {
+      startVoiceListening({ auto = false } = {}) {
         const stateResetVersion = this.stateResetVersion;
         const sessionId = this.voiceSessionId;
-        if (!sessionId || this.mode !== 'voice') return;
+        if (!sessionId || this.mode !== 'voice' || this.voiceProcessing || this.voiceSpeaking) return;
         const Recognition = this.speechRecognitionConstructor();
         if (!Recognition) {
           this.voiceError = 'Voice recognition is not available in this browser. You can still type or book manually.';
           return;
         }
+        const previousRecognition = this.voiceRecognition;
+        if (previousRecognition) {
+          previousRecognition.onstart = null;
+          previousRecognition.onerror = null;
+          previousRecognition.onend = null;
+          previousRecognition.onresult = null;
+          try {
+            previousRecognition.stop();
+          } catch (error) {
+            // Recognition may already be stopped by the browser.
+          }
+        }
+        let heardSpeech = false;
         const recognition = new Recognition();
         recognition.lang = 'en-US';
         recognition.interimResults = false;
@@ -676,13 +730,14 @@
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           this.voiceListening = true;
           this.voiceStatusLabel = 'Listening';
-          this.voiceHelpText = 'Speak now. The assistant is hearing you.';
+          this.voiceHelpText = auto ? 'Listening again. Speak when ready.' : 'Speak now. The assistant is hearing you.';
           this.voiceError = '';
         };
         recognition.onerror = (event) => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
           this.voiceListening = false;
+          if (blocked) this.voiceAutoListen = false;
           this.voiceStatusLabel = blocked ? 'Microphone blocked' : 'Voice error';
           this.voiceHelpText = blocked ? 'You can still type or book manually.' : 'Tap the mic and try again.';
           this.voiceError = blocked ? 'Microphone access was blocked. You can still type or book manually.' : 'Voice recognition had trouble hearing you. Please try again.';
@@ -690,20 +745,34 @@
         recognition.onend = () => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           this.voiceListening = false;
+          if (!heardSpeech && auto && this.voiceAutoListen && !this.voiceProcessing && !this.voiceSpeaking) {
+            window.setTimeout(() => {
+              this.continueVoiceLoop(stateResetVersion, sessionId);
+            }, 300);
+            return;
+          }
           if (!this.voiceProcessing) this.voiceStatusLabel = 'Ready to talk';
         };
         recognition.onresult = async (event) => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          heardSpeech = Boolean(text);
           if (text) await this.sendVoiceTurn(text);
         };
         this.voiceRecognition = recognition;
-        recognition.start();
+        try {
+          recognition.start();
+        } catch (error) {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          this.voiceListening = false;
+          this.voiceStatusLabel = 'Voice error';
+          this.voiceError = 'Voice recognition had trouble starting. Please try again.';
+        }
       },
       async sendVoiceTurn(text) {
         const stateResetVersion = this.stateResetVersion;
         const sessionId = this.voiceSessionId;
-        if (!sessionId || this.mode !== 'voice') return;
+        if (!sessionId || this.mode !== 'voice' || this.voiceProcessing) return;
         this.voiceProcessing = true;
         this.voiceStatusLabel = 'Thinking';
         this.voiceHelpText = 'The assistant is preparing a reply.';
@@ -720,15 +789,19 @@
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           if (!resp.ok) throw new Error(data.message || 'Voice assistant could not reply.');
           this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
-          this.speakVoiceReply(data.message);
+          this.speakVoiceReply(data.message, stateResetVersion, sessionId, () => {
+            this.continueVoiceLoop(stateResetVersion, sessionId);
+          });
         } catch (error) {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           this.voiceError = error.message || 'Voice assistant could not reply.';
         } finally {
           if (stateResetVersion === this.stateResetVersion && sessionId === this.voiceSessionId && this.mode === 'voice') {
             this.voiceProcessing = false;
-            this.voiceStatusLabel = 'Ready to talk';
-            this.voiceHelpText = 'Tap the mic to continue.';
+            if (!this.voiceSpeaking) {
+              this.voiceStatusLabel = 'Ready to talk';
+              this.voiceHelpText = 'Tap the mic to continue.';
+            }
             this.$nextTick(() => {
               const panel = this.$refs.voiceTranscript;
               if (panel) panel.scrollTop = panel.scrollHeight;
@@ -736,13 +809,34 @@
           }
         }
       },
-      speakVoiceReply(text) {
-        if (!window.speechSynthesis || !text) return;
+      speakVoiceReply(text, stateResetVersion, sessionId, afterSpeak) {
+        if (!window.speechSynthesis || !text) {
+          if (afterSpeak) afterSpeak();
+          return;
+        }
         window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+        this.voiceSpeaking = true;
+        this.voiceStatusLabel = 'Speaking';
+        this.voiceHelpText = 'The assistant is speaking. Tap the mic to interrupt.';
+        const utterance = new window.SpeechSynthesisUtterance(text);
+        const finishSpeaking = () => {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          if (!this.voiceSpeaking) return;
+          this.voiceSpeaking = false;
+          if (!this.voiceProcessing) {
+            this.voiceStatusLabel = 'Ready to talk';
+            this.voiceHelpText = 'Tap the mic to continue.';
+          }
+          if (afterSpeak) afterSpeak();
+        };
+        utterance.onend = finishSpeaking;
+        utterance.onerror = finishSpeaking;
+        window.speechSynthesis.speak(utterance);
       },
       async endVoice() {
         this.stateResetVersion += 1;
+        this.voiceAutoListen = false;
+        this.voiceSpeaking = false;
         const recognition = this.voiceRecognition;
         this.voiceRecognition = null;
         if (recognition) {

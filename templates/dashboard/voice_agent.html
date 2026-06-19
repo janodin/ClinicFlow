@@ -16,16 +16,16 @@
     </div>
   </div>
 
-  <div class="cf-tabs" role="tablist" aria-label="Voice agent sections">
-    <button type="button" class="cf-tab" :class="tab==='configure' ? 'cf-tab-active' : ''" @click="tab = 'configure'" role="tab" :aria-selected="(tab === 'configure').toString()" aria-controls="voice-config-panel">
+  <div class="cf-tabs">
+    <button type="button" class="cf-tab" :class="tab==='configure' ? 'cf-tab-active' : ''" @click="tab = 'configure'">
       <i data-lucide="sliders-horizontal" class="h-4 w-4" aria-hidden="true"></i> Configure
     </button>
-    <button type="button" class="cf-tab" :class="tab==='test' ? 'cf-tab-active' : ''" @click="tab = 'test'" role="tab" :aria-selected="(tab === 'test').toString()" aria-controls="voice-test-panel">
+    <button type="button" class="cf-tab" :class="tab==='test' ? 'cf-tab-active' : ''" @click="tab = 'test'">
       <i data-lucide="play" class="h-4 w-4" aria-hidden="true"></i> Test Live
     </button>
   </div>
 
-  <section id="voice-config-panel" x-show="tab === 'configure'" class="cf-card p-6" aria-labelledby="voice-config-title" role="tabpanel">
+  <section x-show="tab === 'configure'" class="cf-card p-6" aria-labelledby="voice-config-title">
     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="flex min-w-0 items-start gap-3">
         <div class="cf-icon-box shrink-0 p-3"><i data-lucide="mic-2" class="h-5 w-5" aria-hidden="true"></i></div>
@@ -110,7 +110,7 @@
     </form>
   </section>
 
-  <section id="voice-test-panel" x-show="tab === 'test'" class="grid gap-5 lg:grid-cols-[minmax(280px,.75fr)_minmax(0,1.25fr)]" aria-labelledby="voice-test-title" role="tabpanel">
+  <section x-show="tab === 'test'" class="grid gap-5 lg:grid-cols-[minmax(280px,.75fr)_minmax(0,1.25fr)]" aria-labelledby="voice-test-title">
     <div class="cf-card p-6">
       <p class="cf-eyebrow">Live Test</p>
       <h2 id="voice-test-title" class="cf-section-title mt-2">Talk to your agent in real time</h2>
@@ -169,7 +169,7 @@
             <p class="mt-1 text-sm text-[var(--cf-muted)]">Start a call to see the transcript in real time.</p>
           </div>
         </template>
-        <table x-show="transcript.length > 0" class="cf-table cf-table-compact">
+        <table class="cf-table cf-table-compact" x-show="transcript.length > 0">
           <thead>
             <tr><th class="p-4">Speaker</th><th class="p-4">Message</th></tr>
           </thead>

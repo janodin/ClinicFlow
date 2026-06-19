@@ -3783,6 +3783,62 @@ def test_ai_gateway_blocks_reused_exact_slot_when_current_turn_time_differs(mock
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_blocks_stale_slot_when_later_current_message_selects_new_time(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_later_time", "PAGE-GATEWAY-LATER-TIME")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-later-time")
+    service = Service.objects.create(clinic=clinic, name="Dental Filling", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(11))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    stale_start = timezone.make_aware(timezone.datetime.combine(target_date, time(8)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": stale_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "I'll use 9:00 AM instead."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-LATER-TIME",
+        "turn_token": "turn-token",
+        "input_sequence": 5,
+        "message": (
+            "New Messenger messages in order:\n"
+            f"- I want to book an appointment for dental filling, {target_date.strftime('%B')} {target_date.day} 8am janodin patundog janopatundog@gmail.com 09348347394\n"
+            "- proceed with 9am\n\n"
+            "Treat the new messages as one user turn. If later messages correct or complete earlier messages, use the latest complete intent."
+        ),
+        "history": [
+            {"role": "assistant", "content": "The requested slot is not available. Nearest available options are: 9:00 AM, 9:30 AM, 10:00 AM."},
+        ],
+    })
+
+    assert result == {"reply": "I'll use 9:00 AM instead.", "fallback": False, "error": ""}
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "Nearest available options" not in result["reply"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 @pytest.mark.parametrize("message", ["21", "09175551234", "123456"])
 def test_ai_gateway_blocks_reused_exact_slot_for_numeric_non_option_messages(mock_call, message):
     from datetime import timezone as dt_timezone
@@ -3936,6 +3992,66 @@ def test_ai_gateway_selected_slot_tool_reply_names_required_booking_fields(mock_
     assert "remaining booking details" not in result["reply"]
     for required_field in ["service", "date/time", "full name", "phone", "email"]:
         assert required_field in result["reply"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_selected_slot_tool_reply_summarizes_when_current_message_has_all_booking_details(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_selected_slot_summary", "PAGE-GATEWAY-SELECTED-SLOT-SUMMARY")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-selected-slot-summary")
+    service = Service.objects.create(clinic=clinic, name="Dental Filling", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(9), close_time=time(10))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime.combine(target_date, time(9)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": starts_at.isoformat()}),
+                },
+            }],
+        },
+        AIProviderError("primary failed"),
+        AIProviderError("fallback failed"),
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-SELECTED-SLOT-SUMMARY",
+        "turn_token": "turn-token",
+        "input_sequence": 6,
+        "message": (
+            "New Messenger messages in order:\n"
+            f"- just use this: dental filling, {target_date.strftime('%B')} {target_date.day} 9am janodin patundog janopatundog@gmail.com 09348347394\n\n"
+            "Treat the new messages as one user turn. If later messages correct or complete earlier messages, use the latest complete intent."
+        ),
+        "history": [
+            {"role": "assistant", "content": "That slot is available: 9:00 AM. To continue, I need: service, date/time, full name, phone, and email. I will summarize before booking."},
+        ],
+    })
+
+    assert result["fallback"] is False
+    assert "Please confirm" in result["reply"]
+    assert "Dental Filling" in result["reply"]
+    assert "9:00 AM" in result["reply"]
+    assert "Janodin Patundog" in result["reply"]
+    assert "09348347394" in result["reply"]
+    assert "janopatundog@gmail.com" in result["reply"]
+    assert "I need:" not in result["reply"]
 
 
 @pytest.mark.django_db
