@@ -208,11 +208,22 @@ def _text_has_contact_detail(text):
     )
 
 
+SPECIFIC_TIME_RE = re.compile(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b", re.IGNORECASE)
+
+
+def _text_mentions_specific_time(text):
+    return bool(SPECIFIC_TIME_RE.search(str(text or "")))
+
+
 def _current_turn_mentions_specific_time(data):
-    text = "\n".join(_current_turn_texts(data)).lower()
-    if not text:
-        return False
-    return bool(re.search(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b", text))
+    return any(_text_mentions_specific_time(text) for text in _current_turn_texts(data))
+
+
+def _latest_current_turn_time_text(data):
+    for text in reversed(_current_turn_texts(data)):
+        if _text_mentions_specific_time(text):
+            return str(text or "").lower()
+    return ""
 
 
 def _current_turn_selects_listed_option(data):
@@ -246,7 +257,9 @@ def _current_turn_mentions_tool_time(channel, data, args):
     local_start = _local_start_from_availability_args(channel, data, args)
     if not local_start:
         return _current_turn_mentions_specific_time(data)
-    text = "\n".join(_current_turn_texts(data)).lower()
+    text = _latest_current_turn_time_text(data)
+    if not text:
+        return False
     return any(marker in text for marker in _time_markers_for_summary(local_start))
 
 
@@ -513,6 +526,27 @@ def _extract_explicit_name_from_text(text, phone_text=""):
     return ""
 
 
+def _extract_booking_name_before_contact(text, phone_text=""):
+    value = str(text or "")
+    contact_starts = []
+    email_match = EMAIL_RE.search(value)
+    if email_match:
+        contact_starts.append(email_match.start())
+    phone_matches = list(PHONE_RE.finditer(value))
+    if phone_matches:
+        contact_starts.append(phone_matches[0].start())
+    if not contact_starts:
+        return ""
+    prefix = value[:min(contact_starts)]
+    time_matches = list(SPECIFIC_TIME_RE.finditer(prefix))
+    if not time_matches:
+        return ""
+    candidate = prefix[time_matches[-1].end():].strip(" ,:;.-")
+    if not candidate or _text_has_booking_or_date_cue(candidate):
+        return ""
+    return _extract_name_from_contact_text(candidate, phone_text)
+
+
 def _extract_contact_details(text):
     details = {}
     email_match = EMAIL_RE.search(str(text or ""))
@@ -528,6 +562,8 @@ def _extract_contact_details(text):
     explicit_name = _extract_explicit_name_from_text(text, phone_text)
     if explicit_name:
         name = explicit_name
+    elif (details.get("phone") or details.get("email")) and _text_has_booking_or_date_cue(text):
+        name = _extract_booking_name_before_contact(text, phone_text)
     elif (details.get("phone") or details.get("email")) and not _text_has_booking_or_date_cue(text):
         name = _extract_name_from_contact_text(text, phone_text)
         if _candidate_looks_like_non_name(name):
@@ -537,6 +573,17 @@ def _extract_contact_details(text):
     if name:
         details["full_name"] = name
     return details
+
+
+def _payload_history_user_texts(data):
+    history = data.get("history", []) if isinstance(data, dict) else []
+    if not isinstance(history, list):
+        return []
+    return [
+        str(entry.get("content", ""))
+        for entry in history[-16:]
+        if isinstance(entry, dict) and str(entry.get("role", "")).strip().lower() == "user"
+    ]
 
 
 def _messenger_history_texts_from_db(data):
@@ -565,16 +612,29 @@ def _messenger_history_texts_from_db(data):
     ]
 
 
-def _known_patient_details_prompt(data):
-    channel = str(data.get("channel", "")).strip().lower()
-    if channel != "messenger":
-        return ""
+def _user_texts_for_booking_details(data):
+    texts = [*_payload_history_user_texts(data)]
+    if str(data.get("channel", "")).strip().lower() == "messenger":
+        texts.extend(_messenger_history_texts_from_db(data))
+    texts.extend(_current_turn_texts(data))
+    return texts
+
+
+def _known_booking_details(data):
     details = {}
-    for text in [*_messenger_history_texts_from_db(data), *_messenger_new_turn_texts(data.get("message", ""))]:
+    for text in _user_texts_for_booking_details(data):
         extracted = _extract_contact_details(text)
         for key in ("full_name", "phone", "email"):
             if extracted.get(key):
                 details[key] = extracted[key]
+    return details
+
+
+def _known_patient_details_prompt(data):
+    channel = str(data.get("channel", "")).strip().lower()
+    if channel != "messenger":
+        return ""
+    details = _known_booking_details(data)
     if not details:
         return ""
 
@@ -753,7 +813,68 @@ def _slot_summary(slot):
     return str(slot.get("label") or slot.get("local_starts_at") or slot.get("starts_at") or "available time")
 
 
-def _reply_from_tool_result(result):
+def _service_name_from_tool_args(clinic, args):
+    if not clinic or not isinstance(args, dict):
+        return ""
+    try:
+        service_id = int(args.get("service_id"))
+    except (TypeError, ValueError):
+        return ""
+    return (
+        clinic.services.filter(id=service_id, is_active=True, is_archived=False)
+        .values_list("name", flat=True)
+        .first()
+        or ""
+    )
+
+
+def _slot_date_time_summary(slot):
+    label = _slot_summary(slot)
+    if not isinstance(slot, dict):
+        return label
+    value = str(slot.get("local_starts_at") or "")
+    if not value:
+        return label
+    try:
+        local_start = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return label
+    return f"{local_start.strftime('%B')} {local_start.day}, {local_start.year} at {label}"
+
+
+def _display_patient_name(value):
+    text = str(value or "").strip()
+    return text.title() if text and text.islower() else text
+
+
+def _selected_slot_booking_reply(selected, clinic=None, data=None, args=None):
+    service_name = _service_name_from_tool_args(clinic, args)
+    date_time = _slot_date_time_summary(selected)
+    details = _known_booking_details(data or {})
+    full_name = _display_patient_name(details.get("full_name", ""))
+    phone = details.get("phone", "")
+    email = details.get("email", "")
+    missing = []
+    if not service_name:
+        missing.append("service")
+    if not date_time:
+        missing.append("date/time")
+    if not full_name:
+        missing.append("full name")
+    if not phone:
+        missing.append("phone")
+    if not email:
+        missing.append("email")
+    if missing:
+        return f"That slot is available: {_slot_summary(selected)}. I still need: {', '.join(missing)}. I will summarize before booking."
+    return (
+        f"That slot is available: {_slot_summary(selected)}. Please confirm this booking: "
+        f"service {service_name}, date/time {date_time}, full name {full_name}, "
+        f"phone {phone}, email {email}. Reply yes to book it."
+    )
+
+
+def _reply_from_tool_result(result, *, clinic=None, data=None, args=None):
     if not isinstance(result, dict):
         return ""
     error = str(result.get("error") or "").strip()
@@ -801,7 +922,7 @@ def _reply_from_tool_result(result):
     if result.get("available") is True:
         selected = result.get("selected_slot")
         if selected:
-            return f"That slot is available: {_slot_summary(selected)}. To continue, I need: service, date/time, full name, phone, and email. I will summarize before booking."
+            return _selected_slot_booking_reply(selected, clinic=clinic, data=data, args=args)
         alternatives = result.get("alternatives") if isinstance(result.get("alternatives"), list) else []
         if alternatives:
             options = ", ".join(_slot_summary(slot) for slot in alternatives[:5])
@@ -1375,10 +1496,11 @@ def build_gateway_reply(data):
     mutation_executed = False
     last_tool_result = None
     last_tool_name = ""
+    last_tool_args = {}
     for _iteration in range(max_iterations):
         provider_message, provider_error = _call_provider_with_fallback(provider_settings, messages, tools)
         if provider_message is None:
-            tool_reply = _reply_from_tool_result(last_tool_result)
+            tool_reply = _reply_from_tool_result(last_tool_result, clinic=clinic, data=data, args=last_tool_args)
             if tool_reply:
                 return {"reply": tool_reply, "fallback": False, "error": ""}
             return _fallback_for_clinic(clinic, provider_error)
@@ -1390,7 +1512,7 @@ def build_gateway_reply(data):
                 return _fallback_for_clinic(clinic, "empty_provider_reply")
             if _contains_unverified_availability_claim(reply):
                 if last_tool_name == "check_availability":
-                    tool_reply = _reply_from_tool_result(last_tool_result)
+                    tool_reply = _reply_from_tool_result(last_tool_result, clinic=clinic, data=data, args=last_tool_args)
                     if tool_reply:
                         return {"reply": tool_reply, "fallback": False, "error": ""}
                 return _fallback_for_clinic(clinic, "unverified_availability_claim")
@@ -1405,8 +1527,9 @@ def build_gateway_reply(data):
         })
         for call in tool_calls:
             name = _tool_name(call)
+            tool_args = _json_tool_arguments(call)
             try:
-                result = _execute_tool(channel, data, name, _json_tool_arguments(call))
+                result = _execute_tool(channel, data, name, tool_args)
             except Exception:
                 logger.warning(
                     "AI gateway tool execution failed",
@@ -1415,10 +1538,11 @@ def build_gateway_reply(data):
                 result = {"error": "Tool execution failed."}
             last_tool_result = result
             last_tool_name = name
+            last_tool_args = tool_args
             if name in MUTATING_TOOL_NAMES:
                 mutation_executed = True
                 if _mutating_tool_succeeded(name, result):
-                    reply = _reply_from_tool_result(result)
+                    reply = _reply_from_tool_result(result, clinic=clinic, data=data, args=tool_args)
                     if reply:
                         return {"reply": reply, "fallback": False, "error": ""}
             messages.append({

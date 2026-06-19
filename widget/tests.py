@@ -320,6 +320,26 @@ class WidgetTests(TestCase):
         self.assertIn("this.voiceAutoListen = false;", end_block)
         self.assertIn("this.voiceSpeaking = false;", end_block)
 
+    def test_widget_voice_no_synthesis_defers_after_speak_for_auto_loop(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        speak_start = content.index("speakVoiceReply(text")
+        speak_end = content.index("async endVoice()", speak_start)
+        speak_block = content[speak_start:speak_end]
+        no_synthesis_start = speak_block.index("if (!window.speechSynthesis")
+        no_synthesis_end = speak_block.index("return;", no_synthesis_start)
+        no_synthesis_block = speak_block[no_synthesis_start:no_synthesis_end]
+
+        self.assertIn("!window.SpeechSynthesisUtterance", no_synthesis_block)
+        self.assertIn("window.setTimeout(() => {", no_synthesis_block)
+        self.assertIn("if (afterSpeak) afterSpeak();", no_synthesis_block)
+        self.assertIn("}, 0);", no_synthesis_block)
+        self.assertLess(no_synthesis_block.index("window.setTimeout(() => {"), no_synthesis_block.index("if (afterSpeak) afterSpeak();"))
+
     def test_widget_home_handles_invalid_service_query_param(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]), {"service": "not-a-number"})
 

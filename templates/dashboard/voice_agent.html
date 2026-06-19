@@ -58,22 +58,28 @@
           <span class="cf-badge cf-badge-info self-start">Website widget</span>
         </div>
         <div class="mt-4 grid gap-3 md:grid-cols-2">
-          <label class="cf-choice-card" for="{{ voice_form.is_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-choice-card-input" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
-            <span class="cf-choice-card-mark" aria-hidden="true"></span>
+          <label class="cf-switch-row" for="{{ voice_form.is_enabled.id_for_label }}">
+            <input type="checkbox" name="{{ voice_form.is_enabled.html_name }}" id="{{ voice_form.is_enabled.id_for_label }}" class="cf-switch-input" value="on" {% if voice_form.is_enabled.value %}checked{% endif %}>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Show voice as an option in the public booking widget.</span>
               {% if voice_form.is_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_enabled.errors.0 }}</span>{% endif %}
             </span>
+            <span class="cf-switch-control">
+              <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
+              <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
+            </span>
           </label>
-          <label class="cf-choice-card" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
-            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-choice-card-input" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
-            <span class="cf-choice-card-mark" aria-hidden="true"></span>
+          <label class="cf-switch-row" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
+            <input type="checkbox" name="{{ voice_form.is_test_mode_enabled.html_name }}" id="{{ voice_form.is_test_mode_enabled.id_for_label }}" class="cf-switch-input" value="on" {% if voice_form.is_test_mode_enabled.value %}checked{% endif %}>
             <span class="min-w-0">
               <span class="block text-sm font-semibold text-[var(--cf-ink)]">{{ voice_form.is_test_mode_enabled.label }}</span>
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Allow owners to run live dashboard voice tests before enabling the widget.</span>
               {% if voice_form.is_test_mode_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_test_mode_enabled.errors.0 }}</span>{% endif %}
+            </span>
+            <span class="cf-switch-control">
+              <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
+              <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
             </span>
           </label>
         </div>
@@ -169,7 +175,7 @@
             <p class="mt-1 text-sm text-[var(--cf-muted)]">Start a call to see the transcript in real time.</p>
           </div>
         </template>
-        <table class="cf-table cf-table-compact" x-show="transcript.length > 0">
+        <table x-show="transcript.length > 0" class="cf-table cf-table-compact">
           <thead>
             <tr><th class="p-4">Speaker</th><th class="p-4">Message</th></tr>
           </thead>

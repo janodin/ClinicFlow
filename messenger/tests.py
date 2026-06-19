@@ -3990,7 +3990,9 @@ def test_ai_gateway_selected_slot_tool_reply_names_required_booking_fields(mock_
     assert result["fallback"] is False
     assert "That slot is available: 1:30 PM." in result["reply"]
     assert "remaining booking details" not in result["reply"]
-    for required_field in ["service", "date/time", "full name", "phone", "email"]:
+    assert "service" not in result["reply"].split("I still need:", 1)[-1]
+    assert "date/time" not in result["reply"].split("I still need:", 1)[-1]
+    for required_field in ["full name", "phone", "email"]:
         assert required_field in result["reply"]
 
 

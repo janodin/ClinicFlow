@@ -810,8 +810,10 @@
         }
       },
       speakVoiceReply(text, stateResetVersion, sessionId, afterSpeak) {
-        if (!window.speechSynthesis || !text) {
-          if (afterSpeak) afterSpeak();
+        if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) {
+          window.setTimeout(() => {
+            if (afterSpeak) afterSpeak();
+          }, 0);
           return;
         }
         window.speechSynthesis.cancel();
