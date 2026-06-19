@@ -228,11 +228,33 @@ def _current_turn_selects_listed_option(data):
     ))
 
 
-def _availability_tool_args_match_current_turn(data, args):
+def _local_start_from_availability_args(channel, data, args):
+    clinic = _clinic_for_tool(channel, data)
+    if not clinic or not isinstance(args, dict) or not args.get("preferred_starts_at"):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(args.get("preferred_starts_at")).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    clinic_tz = ZoneInfo(clinic.timezone)
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, clinic_tz)
+    return parsed.astimezone(clinic_tz)
+
+
+def _current_turn_mentions_tool_time(channel, data, args):
+    local_start = _local_start_from_availability_args(channel, data, args)
+    if not local_start:
+        return _current_turn_mentions_specific_time(data)
+    text = "\n".join(_current_turn_texts(data)).lower()
+    return any(marker in text for marker in _time_markers_for_summary(local_start))
+
+
+def _availability_tool_args_match_current_turn(channel, data, args):
     if not isinstance(args, dict):
         return _blocked_exact_slot_tool_result()
     if args.get("preferred_starts_at") and not (
-        _current_turn_mentions_specific_time(data) or _current_turn_selects_listed_option(data)
+        _current_turn_mentions_tool_time(channel, data, args) or _current_turn_selects_listed_option(data)
     ):
         return _blocked_exact_slot_tool_result()
     return None
@@ -756,6 +778,13 @@ def _reply_from_tool_result(result):
         if reference:
             reply += f". Reference code: {reference}"
         return reply + "."
+    if result.get("found") is True and isinstance(result.get("matches"), list):
+        names = [str(match.get("name") or "").strip() for match in result["matches"] if isinstance(match, dict) and str(match.get("name") or "").strip()]
+        if len(names) == 1:
+            return f"I found {names[0]}. Please confirm the appointment date/time, full name, phone, and email so I can check availability and summarize before booking."
+        if names:
+            return f"I found these services: {', '.join(names[:5])}. Which service would you like to book?"
+        return "I could not find that service in the clinic's active services. Please choose another service."
     if result.get("available") is True:
         selected = result.get("selected_slot")
         if selected:
@@ -1127,7 +1156,7 @@ def _execute_tool(channel, data, name, args):
         if name == "check_availability":
             if not _current_turn_allows_availability_tool(data):
                 return _blocked_availability_tool_result()
-            blocked_exact_slot = _availability_tool_args_match_current_turn(data, args)
+            blocked_exact_slot = _availability_tool_args_match_current_turn(channel, data, args)
             if blocked_exact_slot:
                 return blocked_exact_slot
             mismatch = _weekday_mismatch_result(channel, data, args)
@@ -1196,7 +1225,7 @@ def _execute_tool(channel, data, name, args):
         if name == "check_availability":
             if not _current_turn_allows_availability_tool(data):
                 return _blocked_availability_tool_result()
-            blocked_exact_slot = _availability_tool_args_match_current_turn(data, args)
+            blocked_exact_slot = _availability_tool_args_match_current_turn(channel, data, args)
             if blocked_exact_slot:
                 return blocked_exact_slot
             mismatch = _weekday_mismatch_result(channel, data, args)
@@ -1256,7 +1285,7 @@ def _execute_tool(channel, data, name, args):
         if name == "check_availability":
             if not _current_turn_allows_availability_tool(data):
                 return _blocked_availability_tool_result()
-            blocked_exact_slot = _availability_tool_args_match_current_turn(data, args)
+            blocked_exact_slot = _availability_tool_args_match_current_turn(channel, data, args)
             if blocked_exact_slot:
                 return blocked_exact_slot
             mismatch = _weekday_mismatch_result(channel, data, args)

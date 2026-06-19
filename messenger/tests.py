@@ -2908,6 +2908,49 @@ def test_ai_gateway_executes_match_services_tool_with_server_side_widget_clinic(
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_uses_service_lookup_result_when_provider_fails_after_complete_booking_message(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_match_fallback", "PAGE-GATEWAY-MATCH-FALLBACK")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="Sorry, the assistant is unavailable right now. You can still book an appointment using the booking form.",
+    )
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-match-fallback")
+    Service.objects.create(clinic=clinic, name="Dental Filling", description="Tooth restoration", duration_minutes=30)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "match_services", "arguments": json.dumps({"query": "Dental Filling"})},
+            }],
+        },
+        AIProviderError("primary failed"),
+        AIProviderError("fallback failed"),
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-MATCH-FALLBACK",
+        "message": "I want to book Dental Filling tomorrow at 9am. My name is Maria Santos, phone 09175551234, email maria@example.com",
+        "history": [],
+    })
+
+    assert result["fallback"] is False
+    assert result["error"] == ""
+    assert "Dental Filling" in result["reply"]
+    assert "assistant is unavailable" not in result["reply"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_booking_tool_preserves_confirmation_and_messenger_identity(mock_call):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply
@@ -3840,6 +3883,59 @@ def test_ai_gateway_allows_exact_slot_tool_when_current_turn_selects_option(mock
     tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
     assert "exact_slot_tool_blocked" not in tool_message["content"]
     assert "selected_slot" in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_selected_slot_tool_reply_names_required_booking_fields(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_selected_slot_fields", "PAGE-GATEWAY-SELECTED-SLOT-FIELDS")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-selected-slot-fields")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime.combine(target_date, time(13, 30)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": starts_at.isoformat()}),
+                },
+            }],
+        },
+        AIProviderError("primary failed"),
+        AIProviderError("fallback failed"),
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-SELECTED-SLOT-FIELDS",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": "option 2",
+        "history": [
+            {"role": "assistant", "content": "Slots are available: 1:00 PM, 1:30 PM. Which time works best for you?"},
+        ],
+    })
+
+    assert result["fallback"] is False
+    assert "That slot is available: 1:30 PM." in result["reply"]
+    assert "remaining booking details" not in result["reply"]
+    for required_field in ["service", "date/time", "full name", "phone", "email"]:
+        assert required_field in result["reply"]
 
 
 @pytest.mark.django_db
