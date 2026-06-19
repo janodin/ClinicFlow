@@ -110,6 +110,13 @@ button:disabled { cursor: not-allowed; }
   box-shadow: none;
 }
 
+.cf-password-toggle {
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+}
+
 .cf-secret-toggle:hover,
 .cf-secret-toggle:focus-visible {
   background-color: var(--cf-brand-soft);
@@ -186,6 +193,10 @@ textarea[aria-invalid="true"],
 .cf-input-error {
   border-color: var(--cf-danger);
   box-shadow: 0 0 0 3px rgba(179, 25, 74, .16);
+}
+
+.cf-password-input {
+  padding-right: 5rem;
 }
 
 input[type="date"],

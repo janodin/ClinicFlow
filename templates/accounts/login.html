@@ -36,7 +36,13 @@
             <label for="{{ form.password.id_for_label }}" class="cf-label">{{ form.password.label }}</label>
             <a class="text-xs font-bold text-[var(--cf-brand-strong)] transition-colors hover:text-[var(--cf-dashboard-dark)]" href="{% url 'accounts:password_reset' %}">Forgot password?</a>
           </div>
-          {{ form.password }}
+          <div class="relative" x-data="{ shown: false, input: null }" x-init="input = $el.querySelector('input')" data-password-toggle="password">
+            {{ form.password }}
+            <button type="button" class="cf-secret-toggle cf-password-toggle absolute right-2 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-full text-[var(--cf-brand-strong)] transition-colors hover:text-[var(--cf-dashboard-dark)]" aria-controls="{{ form.password.id_for_label }}" aria-label="Show password" aria-pressed="false" :aria-label="shown ? 'Hide password' : 'Show password'" :aria-pressed="shown.toString()" @click="shown = !shown; input.type = shown ? 'text' : 'password'">
+              <i data-lucide="eye" class="h-4 w-4" aria-hidden="true" x-show="!shown"></i>
+              <i data-lucide="eye-off" class="h-4 w-4" aria-hidden="true" x-show="shown" style="display: none;"></i>
+            </button>
+          </div>
         </div>
         <button class="cf-btn cf-btn-primary w-full"><i data-lucide="log-in" class="h-4 w-4"></i>Sign In</button>
         <p class="text-center text-sm text-[var(--cf-muted)]">

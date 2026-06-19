@@ -36,7 +36,17 @@
           {% else %}
             <div>
               <label for="{{ field.id_for_label }}" class="cf-label">{{ field.label }}</label>
-              {{ field }}
+              {% if field.name == 'password' or field.name == 'password_confirm' %}
+                <div class="relative" x-data="{ shown: false, input: null }" x-init="input = $el.querySelector('input')" data-password-toggle="{{ field.name }}">
+                  {{ field }}
+                  <button type="button" class="cf-secret-toggle cf-password-toggle absolute right-2 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-full text-[var(--cf-brand-strong)] transition-colors hover:text-[var(--cf-dashboard-dark)]" aria-controls="{{ field.id_for_label }}" aria-label="Show password" aria-pressed="false" :aria-label="shown ? 'Hide password' : 'Show password'" :aria-pressed="shown.toString()" @click="shown = !shown; input.type = shown ? 'text' : 'password'">
+                    <i data-lucide="eye" class="h-4 w-4" aria-hidden="true" x-show="!shown"></i>
+                    <i data-lucide="eye-off" class="h-4 w-4" aria-hidden="true" x-show="shown" style="display: none;"></i>
+                  </button>
+                </div>
+              {% else %}
+                {{ field }}
+              {% endif %}
               {% if field.errors %}
                 <p class="mt-1 text-xs text-[var(--cf-status-cancelled-text)]">{{ field.errors.0 }}</p>
               {% endif %}

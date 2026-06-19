@@ -1419,6 +1419,19 @@ def test_messenger_secret_reveal_buttons_do_not_overlap_input_border():
     assert "box-shadow: inset 0 0 0 2px var(--cf-focus);" in css
 
 
+def test_auth_password_visibility_buttons_fit_inside_input_border():
+    login = source_text("templates/accounts/login.html")
+    signup = source_text("templates/accounts/signup.html")
+    password_toggle = css_rule_block(".cf-password-toggle")
+
+    assert "cf-secret-toggle cf-password-toggle" in login
+    assert "cf-secret-toggle cf-password-toggle" in signup
+    assert "width: 2rem;" in password_toggle
+    assert "min-width: 2rem;" in password_toggle
+    assert "height: 2rem;" in password_toggle
+    assert "min-height: 2rem;" in password_toggle
+
+
 def test_calendar_page_header_groups_description_actions_and_filters():
     template = source_text("templates/dashboard/calendar.html")
 
@@ -1457,7 +1470,11 @@ def test_dashboard_shell_uses_task_2_navigation_groups_and_labels():
     assert "label=\"Assistant\"" in template
     assert 'url_name="dashboard:widget_embed"' in setup_group
     assert 'icon="panel-top-open" label="Booking Widget"' in template
-    assert 'url_name="dashboard:billing"' in setup_group
+    nav_link_template = source_text("templates/dashboard/partials/nav_link.html")
+
+    assert 'url_name="dashboard:yakap" icon="shield-check" label="YAKAP" hidden=True' in setup_group
+    assert 'url_name="dashboard:billing" icon="credit-card" label="Billing" hidden=True' in setup_group
+    assert "{% if hidden %}hidden{% endif %}" in nav_link_template
     assert "icon=\"message-circle\" label=\"Assistant\"" in template
     assert '<span class="block max-w-full truncate">Overview</span>' in template
     assert "label=\"Dashboard\"" not in template

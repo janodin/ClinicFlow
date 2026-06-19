@@ -78,6 +78,11 @@ CORE_AI_SAFETY_RULES = """Core KliniAssist assistant safety rules:
 - Do not assign a doctor or provider unless the clinic context explicitly names one for that service or FAQ.
 - If doctor/provider information is missing, say you do not have that information and offer clinic contact details if available.
 - Before saying any date/time is available, unavailable, fully booked, open, or closed, call check_availability in the current turn and base the claim only on its result."""
+BLOCKED_AVAILABILITY_TOOL_MESSAGE = (
+    "check_availability can only be used when the current patient message asks about "
+    "booking availability, dates, times, or chooses a specific slot. Answer the current "
+    "patient message from clinic context instead of repeating previous slots."
+)
 WEEKDAY_NAMES = {
     "monday": 0,
     "tuesday": 1,
@@ -236,6 +241,60 @@ def _mentioned_weekday(texts):
         if re.search(rf"\b(?:this\s+|next\s+)?{name}\b", text):
             return name.capitalize(), weekday
     return "", None
+
+
+def _current_turn_allows_availability_tool(data):
+    texts = [text.strip() for text in _current_turn_texts(data) if str(text or "").strip()]
+    if not texts:
+        return False
+    text = "\n".join(texts)
+    lower = text.lower()
+
+    greeting_pattern = r"(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|kumusta|kamusta|thanks|thank you)[!.\s]*"
+    if all(re.fullmatch(greeting_pattern, item, flags=re.IGNORECASE) for item in texts):
+        return False
+    provider_terms = r"(?:doctors?|providers?|dentists?|physicians?)"
+    if re.search(rf"\b(?:who(?:'s|\s+is)?|which|what)\b.{{0,50}}\b{provider_terms}\b", lower):
+        return False
+    if re.search(rf"\b{provider_terms}\b.{{0,50}}\b(?:available|availability|working|on\s+duty)\b", lower):
+        return False
+    if re.search(rf"\b(?:available|availability|working|on\s+duty)\b.{{0,50}}\b{provider_terms}\b", lower):
+        return False
+    appointment_availability_cue = re.search(
+        r"\b(?:available|availability|unavailable|fully\s+booked|slots?)\b",
+        lower,
+    )
+    time_word_cue = re.search(r"\btimes?\b", lower)
+    clinic_info_question = re.search(
+        r"\b(?:location|located|address|directions?|contact|phone|email|hours?)\b|"
+        r"\bwhere\s+(?:are\s+you|is\s+(?:the\s+)?clinic)\b|"
+        r"\b(?:are\s+you|is\s+(?:the\s+)?clinic)\s+(?:open|closed)\b|"
+        r"\bwhat\s+time\s+(?:are\s+you|is\s+(?:the\s+)?clinic)\s+open\b",
+        lower,
+    )
+    if clinic_info_question and not appointment_availability_cue:
+        return False
+
+    booking_cue = re.search(r"\b(?:appointment|book|booking|schedule|reschedule)\b", lower)
+    date_or_time_value = re.search(
+        r"\b(?:today|tomorrow|this\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+        r"next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|"
+        r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|"
+        r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:,\s*\d{4})?\b|"
+        r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b",
+        lower,
+    )
+    return bool(appointment_availability_cue or time_word_cue or booking_cue or date_or_time_value)
+
+
+def _blocked_availability_tool_result():
+    return {
+        "found": False,
+        "availability_tool_blocked": True,
+        "message": BLOCKED_AVAILABILITY_TOOL_MESSAGE,
+    }
 
 
 def _target_date_from_tool_args(clinic, args):
@@ -948,6 +1007,8 @@ def _execute_tool(channel, data, name, args):
         if name == "match_services":
             return match_services(page_id, args.get("query", ""))
         if name == "check_availability":
+            if not _current_turn_allows_availability_tool(data):
+                return _blocked_availability_tool_result()
             mismatch = _weekday_mismatch_result(channel, data, args)
             if mismatch:
                 return mismatch
@@ -1012,6 +1073,8 @@ def _execute_tool(channel, data, name, args):
         if name == "match_services":
             return match_widget_services(clinic_slug, args.get("query", ""))
         if name == "check_availability":
+            if not _current_turn_allows_availability_tool(data):
+                return _blocked_availability_tool_result()
             mismatch = _weekday_mismatch_result(channel, data, args)
             if mismatch:
                 return mismatch

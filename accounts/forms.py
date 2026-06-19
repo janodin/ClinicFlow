@@ -14,6 +14,7 @@ from scheduling.models import Weekday
 User = get_user_model()
 
 _INPUT = "cf-input"
+_PASSWORD_INPUT = "cf-input cf-password-input"
 _TIMEZONE_CHOICES = sorted((tz, tz) for tz in available_timezones())
 
 
@@ -22,8 +23,8 @@ class SignUpForm(forms.Form):
     email = forms.EmailField(widget=forms.EmailInput(attrs={"class": _INPUT, "placeholder": "you@clinic.com"}))
     clinic_name = forms.CharField(max_length=160, widget=forms.TextInput(attrs={"class": _INPUT, "placeholder": "Clinic name"}))
     timezone = forms.ChoiceField(choices=_TIMEZONE_CHOICES, initial="Asia/Manila", widget=forms.Select(attrs={"class": "cf-select"}))
-    password = forms.CharField(widget=forms.PasswordInput(attrs={"class": _INPUT, "placeholder": "Create a password"}), min_length=8)
-    password_confirm = forms.CharField(label="Confirm password", widget=forms.PasswordInput(attrs={"class": _INPUT, "placeholder": "Confirm your password"}))
+    password = forms.CharField(widget=forms.PasswordInput(attrs={"class": _PASSWORD_INPUT, "placeholder": "Create a password"}), min_length=8)
+    password_confirm = forms.CharField(label="Confirm password", widget=forms.PasswordInput(attrs={"class": _PASSWORD_INPUT, "placeholder": "Confirm your password"}))
     terms_accepted = forms.BooleanField(
         label="I agree to KliniAssist's terms and privacy policy.",
         error_messages={"required": "You must accept the terms and privacy policy."},
@@ -65,7 +66,7 @@ class SignUpForm(forms.Form):
 
 class LoginForm(AuthenticationForm):
     username = forms.EmailField(label="Email address", widget=forms.EmailInput(attrs={"class": _INPUT, "placeholder": "you@clinic.com"}))
-    password = forms.CharField(widget=forms.PasswordInput(attrs={"class": _INPUT, "placeholder": "Your password"}))
+    password = forms.CharField(widget=forms.PasswordInput(attrs={"class": _PASSWORD_INPUT, "placeholder": "Your password"}))
 
 
 class AppPasswordResetForm(PasswordResetForm):

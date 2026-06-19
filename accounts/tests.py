@@ -121,12 +121,45 @@ def test_login_page_links_to_password_reset(client):
 
 
 @pytest.mark.django_db
+def test_login_page_includes_password_visibility_toggle(client):
+    response = client.get(reverse("accounts:login"))
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'data-password-toggle="password"' in html
+    assert 'aria-controls="id_password"' in html
+    assert 'aria-label="Show password"' in html
+    assert 'data-lucide="eye"' in html
+    assert 'data-lucide="eye-off"' in html
+    assert 'x-show="!shown"' in html
+    assert 'x-show="shown"' in html
+
+
+@pytest.mark.django_db
 def test_signup_page_does_not_link_to_password_reset(client):
     response = client.get(reverse("accounts:signup"))
 
     assert response.status_code == 200
     assert reverse("accounts:password_reset").encode() not in response.content
     assert b"Forgot password?" not in response.content
+
+
+@pytest.mark.django_db
+def test_signup_page_includes_password_visibility_toggles(client):
+    response = client.get(reverse("accounts:signup"))
+    html = response.content.decode()
+
+    assert response.status_code == 200
+    assert html.count("data-password-toggle=") == 2
+    assert 'data-password-toggle="password"' in html
+    assert 'data-password-toggle="password_confirm"' in html
+    assert 'aria-controls="id_password"' in html
+    assert 'aria-controls="id_password_confirm"' in html
+    assert html.count('aria-label="Show password"') == 2
+    assert html.count('data-lucide="eye"') == 2
+    assert html.count('data-lucide="eye-off"') == 2
+    assert html.count('x-show="!shown"') == 2
+    assert html.count('x-show="shown"') == 2
 
 
 @pytest.mark.django_db
