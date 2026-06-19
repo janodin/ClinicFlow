@@ -123,8 +123,6 @@ def widget_book(request, clinic_slug):
     source = _public_booking_source(request)
     if request.method == "POST":
         appointment, error = _process_guest_booking(clinic, request, source)
-        if not error:
-            _schedule_patient_booking_confirmation_email(appointment)
         if request.headers.get("HX-Request"):
             if error:
                 status = 429 if error == BOOKING_RATE_LIMIT_MESSAGE else 409
@@ -294,6 +292,7 @@ def _process_guest_booking(clinic, request_or_data, source):
         yakap_settings = _enabled_yakap_settings(locked_clinic)
         if yakap_requested and is_public_yakap_request_allowed(locked_clinic, service, settings=yakap_settings):
             create_appointment_yakap_snapshot(appointment, requested=True)
+        _schedule_patient_booking_confirmation_email(appointment)
     return appointment, None
 
 

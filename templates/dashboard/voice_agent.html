@@ -192,6 +192,8 @@
         return this.requestVersion === requestVersion && this.sessionId === sessionId;
       },
       async startTestSession() {
+        this.requestVersion += 1;
+        const requestVersion = this.requestVersion;
         this.error = '';
         this.statusLabel = 'Starting test';
         try {
@@ -200,6 +202,7 @@
             headers: {'X-CSRFToken': this.csrfToken()}
           });
           const data = await this.responseJson(response);
+          if (this.requestVersion !== requestVersion) return;
           if (!response.ok || !data.session_id) {
             this.error = data.message || 'Could not start voice test.';
             return;
@@ -210,9 +213,9 @@
           this.statusLabel = 'Ready to test';
           this.startTimer();
         } catch (error) {
-          this.error = 'Could not start voice test.';
+          if (this.requestVersion === requestVersion) this.error = 'Could not start voice test.';
         } finally {
-          if (!this.sessionId) this.statusLabel = 'Ready to test';
+          if (this.requestVersion === requestVersion && !this.sessionId) this.statusLabel = 'Ready to test';
         }
       },
       async toggleListening() {
@@ -289,6 +292,7 @@
       },
       async endTest() {
         this.requestVersion += 1;
+        const requestVersion = this.requestVersion;
         if (this.recognition) this.recognition.stop();
         if (window.speechSynthesis) window.speechSynthesis.cancel();
         const sessionId = this.sessionId;
@@ -303,12 +307,14 @@
               headers: {'X-CSRFToken': this.csrfToken()}
             });
             const data = await this.responseJson(response);
-            if (!response.ok) this.error = data.message || 'Could not end voice test.';
+            if (!response.ok && this.requestVersion === requestVersion) this.error = data.message || 'Could not end voice test.';
           } catch (error) {
-            this.error = 'Could not end voice test.';
+            if (this.requestVersion === requestVersion) this.error = 'Could not end voice test.';
           } finally {
-            this.isProcessing = false;
-            this.statusLabel = 'Ready to test';
+            if (this.requestVersion === requestVersion) {
+              this.isProcessing = false;
+              this.statusLabel = 'Ready to test';
+            }
           }
         }
       },

@@ -14,6 +14,7 @@ from patients.models import Patient
 from scheduling.models import ClinicBusinessHour
 from scheduling.utils import generate_slots
 from services.models import Service
+from widget.views import _process_guest_booking
 
 User = get_user_model()
 
@@ -114,12 +115,18 @@ class WidgetTests(TestCase):
 
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()
+        voice_panel_start = content.index("<div x-show=\"mode==='voice'\"")
+        voice_panel_end = content.index("function widgetApp()", voice_panel_start)
+        voice_panel = content[voice_panel_start:voice_panel_end]
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Talk to Voice Agent", content)
         self.assertIn("startVoice()", content)
         self.assertIn("Microphone access was blocked. You can still type or book manually.", content)
         self.assertIn(reverse("voice:widget_session", args=[self.clinic.slug]), content)
+        self.assertNotIn(":data-lucide=\"voiceListening ? 'square' : 'mic'\"", voice_panel)
+        self.assertIn('data-lucide="mic" x-show="!voiceListening"', voice_panel)
+        self.assertIn('data-lucide="square" x-show="voiceListening"', voice_panel)
 
     def test_widget_voice_panel_does_not_show_blocked_message_before_error(self):
         from voice.models import VoiceAgentSettings
@@ -857,14 +864,17 @@ class WidgetTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(callbacks), 1)
         self.assertEqual(len(mail.outbox), 1)
+        appointment = Appointment.objects.get(clinic=self.clinic, patient__full_name="Email Patient")
         message = mail.outbox[0]
         self.assertEqual(message.to, ["email.patient@example.com"])
         self.assertEqual(message.subject, f"Your appointment at {self.clinic.name}")
+        self.assertIn(appointment.reference_code, message.body)
         self.assertIn("Email Patient", message.body)
         self.assertIn(self.clinic.name, message.body)
         self.assertIn(self.service.name, message.body)
         self.assertEqual(len(message.alternatives), 1)
         self.assertEqual(message.alternatives[0][1], "text/html")
+        self.assertIn(appointment.reference_code, message.alternatives[0][0])
         self.assertIn("Your appointment has been confirmed.", message.alternatives[0][0])
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -892,6 +902,33 @@ class WidgetTests(TestCase):
             Appointment.objects.filter(clinic=self.clinic, patient__full_name="SMTP Failure Patient").exists()
         )
         mock_send.assert_called_once()
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_shared_guest_booking_processor_sends_patient_confirmation_email(self):
+        mail.outbox = []
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            appointment, error = _process_guest_booking(
+                self.clinic,
+                {
+                    "service": self.service.id,
+                    "starts_at": slot["starts_at"].isoformat(),
+                    "full_name": "Messenger Email Patient",
+                    "phone": "09175550003",
+                    "email": "messenger.patient@example.com",
+                },
+                Appointment.SOURCE_MESSENGER,
+            )
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(appointment)
+        self.assertEqual(appointment.source, Appointment.SOURCE_MESSENGER)
+        self.assertEqual(len(callbacks), 1)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["messenger.patient@example.com"])
+        self.assertIn(appointment.reference_code, mail.outbox[0].body)
 
     def test_booking_via_embed_sets_embed_source(self):
         tomorrow = timezone.localdate() + timedelta(days=1)

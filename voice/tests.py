@@ -207,6 +207,38 @@ def test_voice_turn_rejects_dashboard_test_source_session(voice_clinic, client):
 
 
 @pytest.mark.django_db
+def test_handle_voice_turn_sends_latest_prior_history_without_current_message(voice_clinic):
+    from voice.models import VoiceSession, VoiceTranscriptTurn
+    from voice.services import handle_voice_turn
+
+    session = VoiceSession.objects.create(
+        clinic=voice_clinic,
+        status=VoiceSession.STATUS_ACTIVE,
+        source=VoiceSession.SOURCE_WIDGET,
+    )
+    prior_turns = []
+    for sequence in range(1, 21):
+        role = VoiceTranscriptTurn.ROLE_USER if sequence % 2 else VoiceTranscriptTurn.ROLE_ASSISTANT
+        prior_turns.append(
+            VoiceTranscriptTurn.objects.create(
+                session=session,
+                role=role,
+                text=f"Prior final turn {sequence:02d}",
+                sequence=sequence,
+            )
+        )
+
+    with patch("voice.services.build_gateway_reply", return_value={"reply": "Assistant reply."}) as mock_gateway:
+        handle_voice_turn(session, "Current user message")
+
+    payload = mock_gateway.call_args.args[0]
+    expected_history = [{"role": turn.role, "content": turn.text} for turn in prior_turns[-16:]]
+    assert payload["message"] == "Current user message"
+    assert payload["history"] == expected_history
+    assert all(turn["content"] != "Current user message" for turn in payload["history"])
+
+
+@pytest.mark.django_db
 def test_dashboard_test_session_rejects_staff_member(voice_clinic, client):
     User = get_user_model()
     staff = User.objects.create_user(username="voice-staff@example.com", email="voice-staff@example.com", password="password123")
@@ -263,6 +295,12 @@ def test_dashboard_voice_test_page_hardens_live_test_javascript(voice_clinic, cl
     response = client.get(reverse("dashboard:voice_agent"))
     content = response.content.decode()
     compact_content = " ".join(content.split())
+    start_test_start = content.index("async startTestSession()")
+    start_test_end = content.index("async toggleListening()", start_test_start)
+    start_test_block = content[start_test_start:start_test_end]
+    end_test_start = content.index("async endTest()")
+    end_test_end = content.index("clearTranscript()", end_test_start)
+    end_test_block = content[end_test_start:end_test_end]
 
     assert "requestVersion: 0" in content
     assert "async responseJson(response)" in content
@@ -274,6 +312,15 @@ def test_dashboard_voice_test_page_hardens_live_test_javascript(voice_clinic, cl
     assert "this.isCurrentRequest(requestVersion, sessionId)" in content
     assert "async endTest() { this.requestVersion += 1;" in compact_content
     assert "clearTranscript() { this.requestVersion += 1;" in compact_content
+    assert "this.requestVersion += 1;" in start_test_block
+    assert "const requestVersion = this.requestVersion;" in start_test_block
+    assert "if (this.requestVersion !== requestVersion) return;" in start_test_block
+    assert start_test_block.index("const requestVersion = this.requestVersion;") < start_test_block.index("await fetch")
+    assert start_test_block.index("if (this.requestVersion !== requestVersion) return;") < start_test_block.index("this.sessionId = data.session_id;")
+    assert "const requestVersion = this.requestVersion;" in end_test_block
+    assert "if (this.requestVersion === requestVersion) this.error = data.message || 'Could not end voice test.';" in end_test_block
+    assert "if (this.requestVersion === requestVersion) this.error = 'Could not end voice test.';" in end_test_block
+    assert "if (this.requestVersion === requestVersion) {" in end_test_block
     assert "window.speechSynthesis && window.SpeechSynthesisUtterance && data.message" in content
     assert "new window.SpeechSynthesisUtterance(data.message)" in content
 

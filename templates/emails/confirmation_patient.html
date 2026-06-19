@@ -5,6 +5,7 @@
 <p>Your appointment has been confirmed.</p>
 
 <div class="detail-row"><span class="detail-label">Clinic:</span> {{ appointment.clinic.name }}</div>
+<div class="detail-row"><span class="detail-label">Reference:</span> {{ appointment.reference_code }}</div>
 <div class="detail-row"><span class="detail-label">Service:</span> {{ appointment.service.name }}</div>
 <div class="detail-row"><span class="detail-label">Date and time:</span> {{ appointment.starts_at|date:"M j, Y g:i A" }}</div>
 

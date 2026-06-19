@@ -98,10 +98,15 @@ def _next_sequence_for_locked_session(session):
 
 
 def _history_for_session(session):
+    turns = list(
+        session.transcript_turns.filter(
+            status=VoiceTranscriptTurn.STATUS_FINAL,
+            role__in=[VoiceTranscriptTurn.ROLE_USER, VoiceTranscriptTurn.ROLE_ASSISTANT],
+        ).order_by("-sequence")[:16]
+    )
     return [
         {"role": turn.role, "content": turn.text}
-        for turn in session.transcript_turns.filter(status=VoiceTranscriptTurn.STATUS_FINAL).order_by("sequence")[:16]
-        if turn.role in {VoiceTranscriptTurn.ROLE_USER, VoiceTranscriptTurn.ROLE_ASSISTANT}
+        for turn in reversed(turns)
     ]
 
 
@@ -113,6 +118,7 @@ def handle_voice_turn(session, message):
     else:
         with transaction.atomic():
             locked_session = VoiceSession.objects.select_for_update().select_related("clinic").get(pk=session.pk)
+            history = _history_for_session(locked_session)
             next_sequence = _next_sequence_for_locked_session(locked_session)
             VoiceTranscriptTurn.objects.create(
                 session=locked_session,
@@ -126,7 +132,7 @@ def handle_voice_turn(session, message):
             "channel": "voice",
             "clinic_slug": session.clinic.slug,
             "message": clean_message,
-            "history": _history_for_session(session),
+            "history": history,
             "conversation_id": session.conversation_id,
         })
         reply = gateway_reply.get("reply") or fallback_message_for(ai_settings)
