@@ -42,6 +42,8 @@ from patients.forms import PatientForm
 from patients.models import Patient
 from patients.utils import normalize_phone
 from services.forms import ServiceForm
+from voice.forms import VoiceAgentSettingsForm
+from voice.models import VoiceAgentSettings
 from accounts.forms import AppPasswordChangeForm
 from yakap.forms import (
     AppointmentYakapStatusForm,
@@ -2092,6 +2094,30 @@ def assistant_settings(request):
         "dashboard/assistant_settings.html",
         _assistant_settings_context(request, clinic, ai_form=ai_form, ai_provider_form=ai_provider_form),
     )
+
+
+@login_required
+def voice_agent(request):
+    clinic = _clinic_or_redirect(request)
+    membership = get_active_membership(request.user)
+    if not user_can_manage_settings(membership):
+        raise PermissionDenied
+
+    settings_obj, _ = VoiceAgentSettings.objects.get_or_create(clinic=clinic)
+    form = VoiceAgentSettingsForm(instance=settings_obj)
+
+    if request.method == "POST":
+        form = VoiceAgentSettingsForm(request.POST, instance=settings_obj)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Voice agent settings saved.")
+            return redirect("dashboard:voice_agent")
+
+    return render(request, "dashboard/voice_agent.html", {
+        "clinic": clinic,
+        "voice_settings": settings_obj,
+        "voice_form": form,
+    })
 
 
 @login_required

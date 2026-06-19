@@ -17,10 +17,12 @@ from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.http import require_POST
 
 from appointments.models import Appointment
+from appointments.notifications import send_patient_booking_confirmation
 from clinics.models import Clinic, ClinicAISettings
 from messenger.callback_urls import build_n8n_callback_urls
 from patients.models import Patient, normalize_phone
 from scheduling.utils import generate_slots
+from voice.services import voice_settings_for_clinic
 from widget.ai_client import AssistantUnavailable, call_assistant_webhook, fallback_message_for
 from yakap.services import create_appointment_yakap_snapshot, is_public_yakap_request_allowed, public_yakap_badge_label
 
@@ -121,6 +123,8 @@ def widget_book(request, clinic_slug):
     source = _public_booking_source(request)
     if request.method == "POST":
         appointment, error = _process_guest_booking(clinic, request, source)
+        if not error:
+            _schedule_patient_booking_confirmation_email(appointment)
         if request.headers.get("HX-Request"):
             if error:
                 status = 429 if error == BOOKING_RATE_LIMIT_MESSAGE else 409
@@ -139,6 +143,9 @@ def widget_home(request, clinic_slug):
     context["faqs"] = clinic.faqs.filter(is_active=True)
     context["widget_source"] = _public_booking_source(request)
     context["widget_ai_max_message_length"] = getattr(settings, "WIDGET_AI_CHAT_MAX_MESSAGE_LENGTH", WIDGET_AI_DEFAULT_MAX_MESSAGE_LENGTH)
+    voice_settings = voice_settings_for_clinic(clinic)
+    context["voice_settings"] = voice_settings
+    context["voice_enabled"] = bool(voice_settings and voice_settings.is_enabled)
     return render(request, "widget/widget.html", context)
 
 
@@ -151,6 +158,16 @@ def _public_booking_source(request):
     if request.GET.get("source") == Appointment.SOURCE_EMBED:
         return Appointment.SOURCE_EMBED
     return Appointment.SOURCE_CHAT_WIDGET
+
+
+def _schedule_patient_booking_confirmation_email(appointment):
+    appointment_id = appointment.pk
+
+    def send_email():
+        booked_appointment = Appointment.objects.select_related("clinic", "patient", "service").get(pk=appointment_id)
+        send_patient_booking_confirmation(booked_appointment)
+
+    transaction.on_commit(send_email)
 
 
 def _validate_guest_identity(full_name, phone, email, reason=""):
@@ -308,7 +325,7 @@ def embed_js(request, clinic_slug):
       iframe.className = 'kliniassist-widget-frame';
       iframe.src = src;
       iframe.style.cssText = 'position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);opacity:0;transform:translateY(20px);transition:opacity .3s, transform .3s;';
-      iframe.allow = 'clipboard-write';
+      iframe.allow = 'microphone; clipboard-write';
       document.body.appendChild(iframe);
       requestAnimationFrame(function() {{ iframe.style.opacity = '1'; iframe.style.transform = 'translateY(0)'; }});
     }} else {{

@@ -44,6 +44,12 @@
           <span class="grid h-11 w-11 place-items-center rounded-2xl bg-[var(--cf-surface-muted)] text-[var(--cf-muted)]"><i data-lucide="message-circle" class="h-5 w-5"></i></span>
           <span><strong class="text-[var(--cf-ink)]">Chat with Assistant</strong><br><span class="text-sm text-[var(--cf-muted)]">Ask questions or get help</span></span>
         </button>
+        {% if voice_enabled %}
+        <button @click="startVoice()" class="mt-3 flex w-full items-center gap-3 rounded-2xl border border-[var(--cf-brand-soft)] bg-[var(--cf-brand-soft)] p-3 text-left transition hover:bg-[var(--cf-surface-muted)]">
+          <span class="grid h-11 w-11 place-items-center rounded-2xl bg-[var(--cf-brand)] text-white"><i data-lucide="mic-2" class="h-5 w-5" aria-hidden="true"></i></span>
+          <span><strong class="text-[var(--cf-ink)]">Talk to Voice Agent</strong><br><span class="text-sm text-[var(--cf-muted)]">Speak instead of typing</span></span>
+        </button>
+        {% endif %}
       </div>
 
       <!-- BOOK MODE -->
@@ -234,6 +240,43 @@
           <button @click="sendChat()" :disabled="isAssistantTyping || !chatInput.trim()" class="min-h-11 min-w-11 rounded-xl px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" :style="'background-color:' + accentColor + '; color:' + accentForeground()"><i data-lucide="send" class="h-4 w-4"></i></button>
         </div>
       </div>
+      {% if voice_enabled %}
+      <div x-show="mode==='voice'" class="flex h-full min-h-0 flex-col text-[var(--cf-ink)]" x-transition>
+        <div class="flex items-center gap-2">
+          <button @click="endVoice(); goHome()" class="min-h-10 min-w-10 rounded-xl p-2 hover:bg-[var(--cf-surface-muted)]" aria-label="Back to widget home"><i data-lucide="arrow-left" class="h-4 w-4" aria-hidden="true"></i></button>
+          <div>
+            <h3 class="font-black text-lg text-[var(--cf-ink)]">{{ voice_settings.display_name }}</h3>
+            <p class="text-xs text-[var(--cf-muted)]">Voice assistant</p>
+          </div>
+        </div>
+        <div class="mt-6 grid place-items-center text-center">
+          <button type="button" @click="toggleVoiceListening()" class="grid h-28 w-28 place-items-center rounded-full text-white shadow-[0_0_36px_rgba(6,182,212,.3)]" :style="'background-color:' + accentColor" :aria-label="voiceListening ? 'Stop listening' : 'Start listening'">
+            <i :data-lucide="voiceListening ? 'square' : 'mic'" class="h-10 w-10" aria-hidden="true"></i>
+          </button>
+          <p class="mt-4 font-semibold" x-text="voiceStatusLabel"></p>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]" x-text="voiceHelpText"></p>
+          <p x-show="voiceError" class="mt-3 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-3 text-sm text-[var(--cf-muted)]" x-text="voiceError"></p>
+          <p class="sr-only" aria-live="polite" x-text="voiceStatusLabel"></p>
+        </div>
+        <div class="mt-5 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-[var(--cf-line)] bg-white p-3" x-ref="voiceTranscript">
+          <template x-if="voiceTranscript.length === 0">
+            <div class="grid min-h-[160px] place-items-center text-center text-sm text-[var(--cf-muted)]">
+              <div>
+                <i data-lucide="message-square" class="mx-auto h-6 w-6" aria-hidden="true"></i>
+                <p class="mt-2">No conversation yet</p>
+              </div>
+            </div>
+          </template>
+          <template x-for="turn in voiceTranscript" :key="turn.id">
+            <div class="mb-2 flex" :class="turn.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div class="max-w-[85%] rounded-2xl px-3 py-2 text-sm" :class="turn.role === 'user' ? '' : 'border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] text-[var(--cf-ink)]'" :style="turn.role === 'user' ? 'background-color:' + accentColor + '; color:' + accentForeground() : ''" x-text="turn.text"></div>
+            </div>
+          </template>
+        </div>
+        <button @click="endVoice()" class="cf-btn cf-btn-secondary mt-3 w-full" type="button"><i data-lucide="phone-off" class="h-4 w-4" aria-hidden="true"></i> End voice session</button>
+        <p class="mt-2 text-center text-xs text-[var(--cf-muted)]">Tap the mic to speak with the assistant.</p>
+      </div>
+      {% endif %}
     </div>
 
     <footer class="border-t border-[var(--cf-line)] p-3 text-center text-xs text-[var(--cf-muted)]">Powered by KliniAssist</footer>
@@ -267,6 +310,16 @@
       collectInfo: { full_name: '', phone: '', email: '' },
       nextId: 1,
       stateResetVersion: 0,
+      {% if voice_enabled %}
+      voiceSessionId: '',
+      voiceTranscript: [],
+      voiceListening: false,
+      voiceProcessing: false,
+      voiceError: '',
+      voiceRecognition: null,
+      voiceStatusLabel: 'Ready to talk',
+      voiceHelpText: 'Tap the mic and speak clearly.',
+      {% endif %}
       accentForeground() {
         const color = this.accentColor || '#06b6d4';
         const hex = color.replace('#', '').trim();
@@ -434,6 +487,11 @@
       },
       goHome() {
         this.stateResetVersion += 1;
+        {% if voice_enabled %}
+        this.endVoice();
+        this.voiceTranscript = [];
+        this.voiceError = '';
+        {% endif %}
         this.mode = 'home';
         this.bookStep = 1;
         this.selectedService = '';
@@ -555,6 +613,167 @@
         this.chatHistory.push({id: this.nextId++, role: 'user', text: full_name + ' / ' + phone});
         this.sendChatAction('submit_info', '', {full_name, phone, email});
       },
+      {% if voice_enabled %}
+      speechRecognitionConstructor() {
+        return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+      },
+      voiceSupported() {
+        return Boolean(this.speechRecognitionConstructor());
+      },
+      async startVoice() {
+        const stateResetVersion = this.stateResetVersion;
+        this.mode = 'voice';
+        this.voiceError = '';
+        this.voiceTranscript = [];
+        this.voiceStatusLabel = 'Preparing voice session';
+        this.voiceHelpText = 'Allow microphone access when prompted.';
+        try {
+          const resp = await fetch('{% url "voice:widget_session" clinic.slug %}', {
+            method: 'POST',
+            headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
+          });
+          const data = await resp.json();
+          if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;
+          if (!resp.ok) throw new Error(data.message || 'Voice assistant is unavailable.');
+          this.voiceSessionId = data.session_id;
+          this.voiceStatusLabel = 'Ready to talk';
+          this.voiceHelpText = 'Tap the mic and speak clearly.';
+          if (data.message) this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
+          if (!this.voiceSupported()) {
+            this.voiceError = 'Voice recognition is not available in this browser. You can still type or book manually.';
+          }
+        } catch (error) {
+          if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;
+          this.voiceStatusLabel = 'Voice unavailable';
+          this.voiceHelpText = 'Use chat or manual booking instead.';
+          this.voiceError = error.message || 'Voice assistant is unavailable.';
+        }
+      },
+      toggleVoiceListening() {
+        if (this.voiceListening) {
+          if (this.voiceRecognition) this.voiceRecognition.stop();
+          this.voiceListening = false;
+          this.voiceStatusLabel = 'Ready to talk';
+          return;
+        }
+        this.startVoiceListening();
+      },
+      startVoiceListening() {
+        const stateResetVersion = this.stateResetVersion;
+        const sessionId = this.voiceSessionId;
+        if (!sessionId || this.mode !== 'voice') return;
+        const Recognition = this.speechRecognitionConstructor();
+        if (!Recognition) {
+          this.voiceError = 'Voice recognition is not available in this browser. You can still type or book manually.';
+          return;
+        }
+        const recognition = new Recognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+        recognition.onstart = () => {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          this.voiceListening = true;
+          this.voiceStatusLabel = 'Listening';
+          this.voiceHelpText = 'Speak now. The assistant is hearing you.';
+          this.voiceError = '';
+        };
+        recognition.onerror = (event) => {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
+          this.voiceListening = false;
+          this.voiceStatusLabel = blocked ? 'Microphone blocked' : 'Voice error';
+          this.voiceHelpText = blocked ? 'You can still type or book manually.' : 'Tap the mic and try again.';
+          this.voiceError = blocked ? 'Microphone access was blocked. You can still type or book manually.' : 'Voice recognition had trouble hearing you. Please try again.';
+        };
+        recognition.onend = () => {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          this.voiceListening = false;
+          if (!this.voiceProcessing) this.voiceStatusLabel = 'Ready to talk';
+        };
+        recognition.onresult = async (event) => {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          if (text) await this.sendVoiceTurn(text);
+        };
+        this.voiceRecognition = recognition;
+        recognition.start();
+      },
+      async sendVoiceTurn(text) {
+        const stateResetVersion = this.stateResetVersion;
+        const sessionId = this.voiceSessionId;
+        if (!sessionId || this.mode !== 'voice') return;
+        this.voiceProcessing = true;
+        this.voiceStatusLabel = 'Thinking';
+        this.voiceHelpText = 'The assistant is preparing a reply.';
+        this.voiceTranscript.push({id: this.nextId++, role: 'user', text});
+        try {
+          const formData = new FormData();
+          formData.append('message', text);
+          const resp = await fetch('{% url "voice:widget_turn" clinic.slug "VOICE_SESSION_ID" %}'.replace('VOICE_SESSION_ID', encodeURIComponent(sessionId)), {
+            method: 'POST',
+            body: formData,
+            headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
+          });
+          const data = await resp.json();
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          if (!resp.ok) throw new Error(data.message || 'Voice assistant could not reply.');
+          this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
+          this.speakVoiceReply(data.message);
+        } catch (error) {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          this.voiceError = error.message || 'Voice assistant could not reply.';
+        } finally {
+          if (stateResetVersion === this.stateResetVersion && sessionId === this.voiceSessionId && this.mode === 'voice') {
+            this.voiceProcessing = false;
+            this.voiceStatusLabel = 'Ready to talk';
+            this.voiceHelpText = 'Tap the mic to continue.';
+            this.$nextTick(() => {
+              const panel = this.$refs.voiceTranscript;
+              if (panel) panel.scrollTop = panel.scrollHeight;
+            });
+          }
+        }
+      },
+      speakVoiceReply(text) {
+        if (!window.speechSynthesis || !text) return;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      },
+      async endVoice() {
+        this.stateResetVersion += 1;
+        const recognition = this.voiceRecognition;
+        this.voiceRecognition = null;
+        if (recognition) {
+          try {
+            recognition.stop();
+          } catch (error) {
+            // Recognition may already be stopped by the browser.
+          }
+        }
+        if (window.speechSynthesis) {
+          try {
+            window.speechSynthesis.cancel();
+          } catch (error) {
+            // Speech cancellation is best-effort.
+          }
+        }
+        const sessionId = this.voiceSessionId;
+        this.voiceListening = false;
+        this.voiceProcessing = false;
+        this.voiceSessionId = '';
+        this.voiceStatusLabel = 'Session ended';
+        if (!sessionId) return;
+        try {
+          await fetch('{% url "voice:widget_end" clinic.slug "VOICE_SESSION_ID" %}'.replace('VOICE_SESSION_ID', encodeURIComponent(sessionId)), {
+            method: 'POST',
+            headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value}
+          });
+        } catch (error) {
+          // Ending is best-effort; ignore network failures.
+        }
+      },
+      {% endif %}
       get filteredFaqs() {
         const q = this.faqQuery.toLowerCase();
         return this.faqs.filter(f => f.question.toLowerCase().includes(q) || f.answer.toLowerCase().includes(q));

@@ -27,6 +27,7 @@ urlpatterns = [
     path("accounts/", include("accounts.urls")),
     path("widget/", include("widget.urls")),
     path("messenger/", include("messenger.urls")),
+    path("voice/", include("voice.urls")),
     path("privacy-policy/", privacy_policy, name="privacy_policy"),
 ]
 

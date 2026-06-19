@@ -38,6 +38,7 @@ urlpatterns = [
     path("services/<int:pk>/restore/", views.restore_service, name="restore_service"),
     path("services/<int:pk>/delete/", views.delete_service, name="delete_service"),
     path("assistant/", views.assistant_settings, name="assistant_settings"),
+    path("voice-agent/", views.voice_agent, name="voice_agent"),
     path("assistant/provider-models/", views.ai_provider_models, name="ai_provider_models"),
     path("assistant/faqs/create/", views.create_faq, name="create_faq"),
     path("assistant/faqs/<int:pk>/edit/", views.edit_faq, name="edit_faq"),

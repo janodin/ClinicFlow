@@ -38,6 +38,7 @@ class Appointment(TimeStampedModel):
     SOURCE_WALK_IN = "walk_in"
     SOURCE_PHONE = "phone"
     SOURCE_MESSENGER = "messenger"
+    SOURCE_VOICE_WIDGET = "voice_widget"
     SOURCE_CHOICES = [
         (SOURCE_DIRECT, "Direct booking"),
         (SOURCE_EMBED, "Embed"),
@@ -46,6 +47,7 @@ class Appointment(TimeStampedModel):
         (SOURCE_WALK_IN, "Walk-in"),
         (SOURCE_PHONE, "Phone"),
         (SOURCE_MESSENGER, "Messenger"),
+        (SOURCE_VOICE_WIDGET, "Voice widget"),
     ]
 
     clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name="appointments")

@@ -688,3 +688,23 @@ def book_widget_confirmed_appointment(clinic_slug, service_id, starts_at, full_n
         email,
         reason,
     )
+
+
+def book_voice_widget_confirmed_appointment(clinic_slug, service_id, starts_at, full_name, phone, confirmed, email="", reason=""):
+    clinic = get_clinic_for_slug(clinic_slug)
+    if not clinic:
+        return {"created": False, "error": "Clinic not found."}
+    disabled = _website_ai_disabled_response_for_clinic(clinic)
+    if disabled:
+        return {**disabled, "created": False, "error": "AI is disabled for this clinic."}
+    return _book_confirmed_appointment_for_clinic(
+        clinic,
+        Appointment.SOURCE_VOICE_WIDGET,
+        service_id,
+        starts_at,
+        full_name,
+        phone,
+        confirmed,
+        email,
+        reason,
+    )

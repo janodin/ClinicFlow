@@ -13,6 +13,7 @@ from patients.models import normalize_phone
 from .ai_provider_client import AIProviderError, call_chat_completion
 from .ai_tools import (
     book_confirmed_appointment,
+    book_voice_widget_confirmed_appointment,
     book_widget_confirmed_appointment,
     build_ai_context,
     build_widget_ai_context,
@@ -64,6 +65,9 @@ SECRET_CONTEXT_KEYS = {
 }
 CURRENT_BOOKING_SAFETY_RULES = """Current KliniAssist booking safety rules:
 - Collect service, local date/time, full name, phone, and email before asking for final booking confirmation.
+- If the patient gives a date/time but no service, ask for the service only before asking for patient details.
+- Do not infer a patient's full name from booking, service, date, or time messages.
+- Do not say the patient mentioned something earlier unless that exact detail is present in conversation history or known patient details.
 - Do not describe email as optional for bookings.
 - Before booking, summarize service, local date/time, full name, phone, and email, then ask for explicit confirmation.
 - Do not call book_confirmed_appointment in the same turn where the patient first provides or changes a required booking detail.
@@ -82,6 +86,11 @@ BLOCKED_AVAILABILITY_TOOL_MESSAGE = (
     "check_availability can only be used when the current patient message asks about "
     "booking availability, dates, times, or chooses a specific slot. Answer the current "
     "patient message from clinic context instead of repeating previous slots."
+)
+BLOCKED_EXACT_SLOT_TOOL_MESSAGE = (
+    "exact_slot_tool_blocked: check_availability with preferred_starts_at requires the "
+    "current patient message to include a specific time or clearly select a listed option. "
+    "Ask a clarifying question instead of repeating the previous slot."
 )
 WEEKDAY_NAMES = {
     "monday": 0,
@@ -140,7 +149,7 @@ def _resolve_gateway_clinic(data):
     if channel == "messenger":
         connection = get_connection_for_page(data.get("page_id", ""))
         return connection.clinic if connection else None
-    if channel == "widget":
+    if channel in {"widget", "voice"}:
         return get_clinic_for_slug(data.get("clinic_slug", ""))
     return None
 
@@ -150,6 +159,11 @@ def _context_for_gateway(channel, data):
         return build_ai_context(data.get("page_id", ""))
     if channel == "widget":
         return build_widget_ai_context(data.get("clinic_slug", ""))
+    if channel == "voice":
+        context = build_widget_ai_context(data.get("clinic_slug", ""))
+        if context.get("found"):
+            context["channel"] = "voice"
+        return context
     return {"found": False}
 
 
@@ -194,6 +208,36 @@ def _text_has_contact_detail(text):
     )
 
 
+def _current_turn_mentions_specific_time(data):
+    text = "\n".join(_current_turn_texts(data)).lower()
+    if not text:
+        return False
+    return bool(re.search(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b", text))
+
+
+def _current_turn_selects_listed_option(data):
+    text = "\n".join(_current_turn_texts(data)).lower()
+    if not text:
+        return False
+    if re.fullmatch(r"\s*[1-9]\s*", text):
+        return True
+    return bool(re.search(
+        r"\b(?:that one|this one|the first|first one|1st|the second|second one|2nd|the third|third one|3rd|"
+        r"earliest|latest|option\s+[1-9]|number\s+[1-9]|slot\s+[1-9])\b",
+        text,
+    ))
+
+
+def _availability_tool_args_match_current_turn(data, args):
+    if not isinstance(args, dict):
+        return _blocked_exact_slot_tool_result()
+    if args.get("preferred_starts_at") and not (
+        _current_turn_mentions_specific_time(data) or _current_turn_selects_listed_option(data)
+    ):
+        return _blocked_exact_slot_tool_result()
+    return None
+
+
 def _text_confirms_booking(text):
     return bool(
         re.search(
@@ -231,6 +275,8 @@ def _clinic_for_tool(channel, data):
         connection = get_connection_for_page(data.get("page_id", ""))
         return connection.clinic if connection else None
     if channel == "widget":
+        return get_clinic_for_slug(data.get("clinic_slug", ""))
+    if channel == "voice":
         return get_clinic_for_slug(data.get("clinic_slug", ""))
     return None
 
@@ -286,7 +332,13 @@ def _current_turn_allows_availability_tool(data):
         r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b",
         lower,
     )
-    return bool(appointment_availability_cue or time_word_cue or booking_cue or date_or_time_value)
+    return bool(
+        appointment_availability_cue
+        or time_word_cue
+        or booking_cue
+        or date_or_time_value
+        or _current_turn_selects_listed_option(data)
+    )
 
 
 def _blocked_availability_tool_result():
@@ -294,6 +346,15 @@ def _blocked_availability_tool_result():
         "found": False,
         "availability_tool_blocked": True,
         "message": BLOCKED_AVAILABILITY_TOOL_MESSAGE,
+    }
+
+
+def _blocked_exact_slot_tool_result():
+    return {
+        "found": False,
+        "available": False,
+        "exact_slot_tool_blocked": True,
+        "message": BLOCKED_EXACT_SLOT_TOOL_MESSAGE,
     }
 
 
@@ -368,6 +429,55 @@ def _extract_name_from_contact_text(text, phone_text=""):
     return candidate[:160]
 
 
+def _text_has_booking_or_date_cue(text):
+    value = str(text or "").lower()
+    return bool(re.search(
+        r"\b(?:book|booking|appointment|schedule|service|slot|available|availability|interested|looking|lunch|today|tomorrow|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|"
+        r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+        value,
+    ))
+
+
+def _trim_explicit_name_candidate(candidate):
+    value = str(candidate or "").strip()
+    value = re.split(
+        r"\b(?:and\s+i\b|and\s+my\b|phone\b|email\b|book\b|booking\b|appointment\b|schedule\b|service\b|for\b)\b",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    return value.strip(" ,.-")
+
+
+def _candidate_looks_like_non_name(candidate):
+    value = str(candidate or "").strip().lower()
+    return bool(re.search(
+        r"\b(?:i|i'm|am|new|here|available|availability|interested|looking|want|wants|need|needs)\b",
+        value,
+    ))
+
+
+def _extract_explicit_name_from_text(text, phone_text=""):
+    value = str(text or "")
+    patterns = [
+        r"\bmy\s+(?:full\s+)?name\s+is\s+([A-Za-z][A-Za-z' -]{1,160})",
+        r"\bfull\s+name\s*[:\-]?\s*([A-Za-z][A-Za-z' -]{1,160})",
+        r"\bako\s+si\s+([A-Za-z][A-Za-z' -]{1,160})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = _trim_explicit_name_candidate(match.group(1))
+        if _text_has_booking_or_date_cue(candidate):
+            return ""
+        return _extract_name_from_contact_text(candidate, phone_text)
+    return ""
+
+
 def _extract_contact_details(text):
     details = {}
     email_match = EMAIL_RE.search(str(text or ""))
@@ -380,7 +490,15 @@ def _extract_contact_details(text):
         phone = normalize_phone(phone_text)
         if len(phone) >= 9:
             details["phone"] = phone[:40]
-    name = _extract_name_from_contact_text(text, phone_text)
+    explicit_name = _extract_explicit_name_from_text(text, phone_text)
+    if explicit_name:
+        name = explicit_name
+    elif (details.get("phone") or details.get("email")) and not _text_has_booking_or_date_cue(text):
+        name = _extract_name_from_contact_text(text, phone_text)
+        if _candidate_looks_like_non_name(name):
+            name = ""
+    else:
+        name = ""
     if name:
         details["full_name"] = name
     return details
@@ -1009,6 +1127,9 @@ def _execute_tool(channel, data, name, args):
         if name == "check_availability":
             if not _current_turn_allows_availability_tool(data):
                 return _blocked_availability_tool_result()
+            blocked_exact_slot = _availability_tool_args_match_current_turn(data, args)
+            if blocked_exact_slot:
+                return blocked_exact_slot
             mismatch = _weekday_mismatch_result(channel, data, args)
             if mismatch:
                 return mismatch
@@ -1075,6 +1196,9 @@ def _execute_tool(channel, data, name, args):
         if name == "check_availability":
             if not _current_turn_allows_availability_tool(data):
                 return _blocked_availability_tool_result()
+            blocked_exact_slot = _availability_tool_args_match_current_turn(data, args)
+            if blocked_exact_slot:
+                return blocked_exact_slot
             mismatch = _weekday_mismatch_result(channel, data, args)
             if mismatch:
                 return mismatch
@@ -1125,6 +1249,66 @@ def _execute_tool(channel, data, name, args):
                 email=args.get("email", ""),
                 reason=args.get("reason", ""),
             )
+    if channel == "voice":
+        clinic_slug = data.get("clinic_slug", "")
+        if name == "match_services":
+            return match_widget_services(clinic_slug, args.get("query", ""))
+        if name == "check_availability":
+            if not _current_turn_allows_availability_tool(data):
+                return _blocked_availability_tool_result()
+            blocked_exact_slot = _availability_tool_args_match_current_turn(data, args)
+            if blocked_exact_slot:
+                return blocked_exact_slot
+            mismatch = _weekday_mismatch_result(channel, data, args)
+            if mismatch:
+                return mismatch
+            return check_widget_availability(
+                clinic_slug,
+                args.get("service_id"),
+                preferred_starts_at=args.get("preferred_starts_at"),
+                preferred_date=args.get("preferred_date"),
+            )
+        if name == "find_verified_appointment":
+            return find_widget_verified_appointment(clinic_slug, args.get("reference_code", ""), args.get("phone", ""))
+        if name == "cancel_verified_appointment":
+            confirmed, confirmation_error = _appointment_change_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"cancelled": False, "error": confirmation_error}
+            return cancel_widget_verified_appointment(
+                clinic_slug,
+                args.get("reference_code", ""),
+                args.get("phone", ""),
+                confirmed,
+                reason=args.get("reason", ""),
+            )
+        if name == "reschedule_verified_appointment":
+            confirmed, confirmation_error = _appointment_change_confirmed_argument(data, args)
+            if confirmation_error:
+                return {"rescheduled": False, "error": confirmation_error}
+            return reschedule_widget_verified_appointment(
+                clinic_slug,
+                args.get("reference_code", ""),
+                args.get("phone", ""),
+                args.get("starts_at", ""),
+                confirmed,
+            )
+        if name == "book_confirmed_appointment":
+            mismatch = _weekday_mismatch_result(channel, data, args, mutation=True)
+            if mismatch:
+                return mismatch
+            confirmed, confirmation_error = _booking_confirmed_argument(channel, data, args)
+            if confirmation_error:
+                return {"created": False, "error": confirmation_error}
+            return book_voice_widget_confirmed_appointment(
+                clinic_slug,
+                args.get("service_id"),
+                args.get("starts_at", ""),
+                args.get("full_name", ""),
+                args.get("phone", ""),
+                confirmed,
+                email=args.get("email", ""),
+                reason=args.get("reason", ""),
+            )
     return {"error": "Unknown tool."}
 
 
@@ -1135,7 +1319,7 @@ def build_gateway_reply(data):
         return _fallback_for_clinic(None, "clinic_not_found")
     if not _gateway_ai_enabled(channel, clinic):
         return _fallback_for_clinic(clinic, "ai_disabled")
-    if channel == "widget" and _is_out_of_scope_system_question(data.get("message", "")):
+    if channel in {"widget", "voice"} and _is_out_of_scope_system_question(data.get("message", "")):
         return {"reply": _scoped_out_of_scope_reply(clinic), "fallback": False, "error": ""}
 
     provider_settings = _provider_settings_for_clinic(clinic)

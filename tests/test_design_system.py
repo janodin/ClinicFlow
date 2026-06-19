@@ -205,6 +205,7 @@ CF_BTN_TEMPLATE_PATHS = [
     "templates/dashboard/slot_preview.html",
     "templates/dashboard/business_hours.html",
     "templates/dashboard/assistant_settings.html",
+    "templates/dashboard/voice_agent.html",
     "dashboard/templates/dashboard/messenger_settings.html",
     "templates/dashboard/partials/appointment_detail.html",
     "templates/dashboard/partials/appointment_form.html",

@@ -1732,6 +1732,73 @@ def test_assistant_settings_page_shows_messenger_response_mode_control(clinic_se
 
 
 @pytest.mark.django_db
+def test_voice_agent_nav_link_and_page_render_for_owner(clinic_setup, client):
+    from voice.models import VoiceAgentSettings
+
+    clinic, service, user = clinic_setup
+    VoiceAgentSettings.objects.create(clinic=clinic, is_enabled=False, display_name="Clinic Voice")
+    client.force_login(user)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    assert ">Voice Agent</h1>" in content
+    assert "Configure and test the website voice assistant" in content
+    assert "Test Live" in content
+    assert "Conversation Transcript" in content
+    assert "Ready to test" in content
+    assert 'name="display_name"' in content
+    assert 'name="is_enabled"' in content
+    assert reverse("dashboard:assistant_settings") in content
+    assert reverse("dashboard:voice_agent") in content
+
+
+@pytest.mark.django_db
+def test_voice_agent_settings_save_is_clinic_scoped(clinic_setup, client):
+    from voice.models import VoiceAgentSettings
+
+    clinic, service, user = clinic_setup
+    client.force_login(user)
+
+    response = client.post(
+        reverse("dashboard:voice_agent"),
+        {
+            "is_enabled": "on",
+            "display_name": "Welcome Voice",
+            "voice_label": VoiceAgentSettings.VOICE_WARM,
+            "welcome_message": "Hello, I can help you book.",
+            "provider": VoiceAgentSettings.PROVIDER_BROWSER,
+            "is_test_mode_enabled": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    settings = VoiceAgentSettings.objects.get(clinic=clinic)
+    assert settings.is_enabled is True
+    assert settings.display_name == "Welcome Voice"
+    assert settings.voice_label == VoiceAgentSettings.VOICE_WARM
+    assert settings.welcome_message == "Hello, I can help you book."
+    assert settings.provider == VoiceAgentSettings.PROVIDER_BROWSER
+
+
+@pytest.mark.django_db
+def test_staff_cannot_manage_voice_agent_settings(clinic_setup, client):
+    from django.contrib.auth import get_user_model
+    from clinics.models import ClinicMembership
+
+    clinic, service, owner = clinic_setup
+    User = get_user_model()
+    staff = User.objects.create_user(username="voice-staff@example.com", email="voice-staff@example.com", password="password123")
+    ClinicMembership.objects.create(clinic=clinic, user=staff, role=ClinicMembership.ROLE_STAFF)
+    client.force_login(staff)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
 def test_booking_widget_page_shows_full_configuration(clinic_setup, client):
     clinic, service, user = clinic_setup
     clinic.widget_accent_color = "#0891b2"

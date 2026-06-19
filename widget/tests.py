@@ -2,6 +2,7 @@ from datetime import datetime, time, timedelta, timezone as dt_timezone
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -67,6 +68,12 @@ class WidgetTests(TestCase):
         self.assertIn("iframe.style.display = 'none';", content)
         self.assertIn("launcher.style.display = 'flex';", content)
 
+    def test_embed_js_allows_microphone_for_embedded_voice_widget(self):
+        response = self.client.get(reverse("widget:embed_js", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        self.assertIn("iframe.allow = 'microphone; clipboard-write';", content)
+
     def test_embed_js_uses_safe_accent_color_for_invalid_stored_value(self):
         Clinic.objects.filter(pk=self.clinic.pk).update(widget_accent_color='";alert(1)//')
 
@@ -92,6 +99,152 @@ class WidgetTests(TestCase):
         self.assertContains(resp, self.service.name)
         self.assertNotContains(resp, "Doctor")
         self.assertNotContains(resp, "First available")
+
+    def test_widget_home_hides_voice_entry_when_disabled(self):
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Talk to Voice Agent")
+        self.assertNotContains(response, "startVoice()")
+
+    def test_widget_home_shows_voice_entry_when_enabled(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Talk to Voice Agent", content)
+        self.assertIn("startVoice()", content)
+        self.assertIn("Microphone access was blocked. You can still type or book manually.", content)
+        self.assertIn(reverse("voice:widget_session", args=[self.clinic.slug]), content)
+
+    def test_widget_voice_panel_does_not_show_blocked_message_before_error(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        voice_panel_start = content.index("<div x-show=\"mode==='voice'\"")
+        voice_panel_end = content.index("function widgetApp()", voice_panel_start)
+        voice_panel = content[voice_panel_start:voice_panel_end]
+
+        self.assertNotIn("Microphone access was blocked. You can still type or book manually.", voice_panel)
+        self.assertIn("Tap the mic to speak with the assistant.", voice_panel)
+
+    def test_widget_voice_start_session_ignores_stale_response(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        start_voice_start = content.index("async startVoice()")
+        start_voice_end = content.index("toggleVoiceListening()", start_voice_start)
+        start_voice_block = content[start_voice_start:start_voice_end]
+
+        self.assertIn("const stateResetVersion = this.stateResetVersion;", start_voice_block)
+        self.assertIn("if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;", start_voice_block)
+        self.assertLess(
+            start_voice_block.index("const stateResetVersion = this.stateResetVersion;"),
+            start_voice_block.index("const resp = await fetch"),
+        )
+        self.assertLess(
+            start_voice_block.index("if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;"),
+            start_voice_block.index("this.voiceSessionId = data.session_id;"),
+        )
+
+    def test_widget_voice_end_invalidates_pending_start_voice_response(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        start_voice_start = content.index("async startVoice()")
+        start_voice_end = content.index("toggleVoiceListening()", start_voice_start)
+        start_voice_block = content[start_voice_start:start_voice_end]
+        end_start = content.index("async endVoice()")
+        end_end = content.index("get filteredFaqs()", end_start)
+        end_block = content[end_start:end_end]
+
+        self.assertIn("const stateResetVersion = this.stateResetVersion;", start_voice_block)
+        self.assertIn("if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;", start_voice_block)
+        self.assertIn("this.stateResetVersion += 1;", end_block)
+        self.assertLess(end_block.index("this.stateResetVersion += 1;"), end_block.index("const sessionId = this.voiceSessionId;"))
+
+    def test_widget_voice_turn_ignores_stale_response_before_reply_mutation(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        turn_start = content.index("async sendVoiceTurn(text)")
+        turn_end = content.index("speakVoiceReply(text)", turn_start)
+        turn_block = content[turn_start:turn_end]
+
+        stale_guard = "if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;"
+        self.assertIn("const stateResetVersion = this.stateResetVersion;", turn_block)
+        self.assertIn("const sessionId = this.voiceSessionId;", turn_block)
+        self.assertIn(stale_guard, turn_block)
+        self.assertIn("if (stateResetVersion === this.stateResetVersion && sessionId === this.voiceSessionId && this.mode === 'voice')", turn_block)
+        self.assertLess(turn_block.index("const sessionId = this.voiceSessionId;"), turn_block.index("const resp = await fetch"))
+        self.assertLess(turn_block.index(stale_guard), turn_block.index("this.voiceTranscript.push({id: this.nextId++, role: 'assistant'"))
+        self.assertLess(turn_block.index(stale_guard), turn_block.index("this.speakVoiceReply(data.message);"))
+
+    def test_widget_voice_end_resets_processing_and_ignores_end_failures(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        end_start = content.index("async endVoice()")
+        end_end = content.index("get filteredFaqs()", end_start)
+        end_block = content[end_start:end_end]
+
+        self.assertIn("this.voiceProcessing = false;", end_block)
+        self.assertIn("try {", end_block)
+        self.assertIn("} catch (error) {", end_block)
+        self.assertIn("// Ending is best-effort", end_block)
+        self.assertLess(end_block.index("this.voiceProcessing = false;"), end_block.index("if (!sessionId) return;"))
+
+    def test_widget_voice_recognition_errors_only_label_permission_denials_as_blocked(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening()")
+        listen_end = content.index("async sendVoiceTurn(text)", listen_start)
+        listen_block = content[listen_start:listen_end]
+
+        self.assertIn("recognition.onerror = (event) => {", listen_block)
+        self.assertIn("const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';", listen_block)
+        self.assertIn("this.voiceStatusLabel = blocked ? 'Microphone blocked' : 'Voice error';", listen_block)
+        self.assertIn("blocked ? 'Microphone access was blocked. You can still type or book manually.' : 'Voice recognition had trouble hearing you. Please try again.'", listen_block)
+
+    def test_widget_voice_recognition_callbacks_ignore_stale_session(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening()")
+        listen_end = content.index("async sendVoiceTurn(text)", listen_start)
+        listen_block = content[listen_start:listen_end]
+        stale_guard = "if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;"
+
+        self.assertIn("const stateResetVersion = this.stateResetVersion;", listen_block)
+        self.assertIn("const sessionId = this.voiceSessionId;", listen_block)
+        self.assertGreaterEqual(listen_block.count(stale_guard), 4)
+        self.assertLess(listen_block.index("const sessionId = this.voiceSessionId;"), listen_block.index("recognition.onstart = () => {"))
 
     def test_widget_home_handles_invalid_service_query_param(self):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]), {"service": "not-a-number"})
@@ -317,6 +470,42 @@ class WidgetTests(TestCase):
             Appointment.objects.filter(clinic=self.clinic, service=self.service, starts_at=slot["starts_at"]).count(),
             1,
         )
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_widget_booking_rejection_does_not_send_confirmation_email(self):
+        mail.outbox = []
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+        existing_patient = Patient.objects.create(
+            clinic=self.clinic,
+            full_name="Existing Patient",
+            phone="09170000000",
+            email="existing@example.com",
+        )
+        Appointment.objects.create(
+            clinic=self.clinic,
+            patient=existing_patient,
+            service=self.service,
+            starts_at=slot["starts_at"],
+            ends_at=slot["ends_at"],
+        )
+
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            response = self.client.post(
+                reverse("widget:book", args=[self.clinic.slug]),
+                {
+                    "service": self.service.id,
+                    "starts_at": slot["starts_at"].isoformat(),
+                    "full_name": "Rejected Patient",
+                    "phone": "09175550001",
+                    "email": "rejected@example.com",
+                },
+                HTTP_HX_REQUEST="true",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(callbacks, [])
+        self.assertEqual(mail.outbox, [])
 
     def test_widget_booking_rejects_duplicate_same_patient_service_start_even_with_capacity(self):
         self.service.simultaneous_capacity = 2
@@ -645,6 +834,64 @@ class WidgetTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         appt = Appointment.objects.get(clinic=self.clinic, patient__full_name="John Doe")
         self.assertEqual(appt.source, Appointment.SOURCE_CHAT_WIDGET)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_widget_booking_sends_patient_confirmation_email(self):
+        mail.outbox = []
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            response = self.client.post(
+                reverse("widget:book", args=[self.clinic.slug]),
+                {
+                    "service": self.service.id,
+                    "starts_at": slot["starts_at"].isoformat(),
+                    "full_name": "Email Patient",
+                    "phone": "09175550000",
+                    "email": "email.patient@example.com",
+                },
+                HTTP_HX_REQUEST="true",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(callbacks), 1)
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, ["email.patient@example.com"])
+        self.assertEqual(message.subject, f"Your appointment at {self.clinic.name}")
+        self.assertIn("Email Patient", message.body)
+        self.assertIn(self.clinic.name, message.body)
+        self.assertIn(self.service.name, message.body)
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertEqual(message.alternatives[0][1], "text/html")
+        self.assertIn("Your appointment has been confirmed.", message.alternatives[0][0])
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    @patch("appointments.notifications.EmailMultiAlternatives.send", side_effect=Exception("SMTP down"))
+    def test_widget_booking_success_continues_when_confirmation_email_fails(self, mock_send):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        slot = generate_slots(self.clinic, self.service, tomorrow)[0]
+
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            response = self.client.post(
+                reverse("widget:book", args=[self.clinic.slug]),
+                {
+                    "service": self.service.id,
+                    "starts_at": slot["starts_at"].isoformat(),
+                    "full_name": "SMTP Failure Patient",
+                    "phone": "09175550002",
+                    "email": "smtp.failure@example.com",
+                },
+                HTTP_HX_REQUEST="true",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(callbacks), 1)
+        self.assertTrue(
+            Appointment.objects.filter(clinic=self.clinic, patient__full_name="SMTP Failure Patient").exists()
+        )
+        mock_send.assert_called_once()
 
     def test_booking_via_embed_sets_embed_source(self):
         tomorrow = timezone.localdate() + timedelta(days=1)

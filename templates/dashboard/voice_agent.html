@@ -1,0 +1,324 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Voice Agent{% endblock %}
+{% block content %}
+<div class="cf-page" x-data="voiceAgentPage()">
+  <div class="cf-page-header">
+    <div>
+      <h1 class="cf-page-title ui-page-title">Voice Agent</h1>
+      <p class="cf-page-description">Configure and test the website voice assistant for patient bookings and inquiries.</p>
+    </div>
+    <div class="cf-page-actions">
+      {% if voice_settings.is_enabled %}
+        <span class="cf-badge cf-badge-active"><i data-lucide="check-circle-2" class="h-3 w-3" aria-hidden="true"></i> Ready</span>
+      {% else %}
+        <span class="cf-badge cf-badge-inactive"><i data-lucide="mic-off" class="h-3 w-3" aria-hidden="true"></i> Inactive</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="inline-flex rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-1">
+    <button type="button" class="cf-btn cf-btn-sm" :class="tab === 'configure' ? 'cf-btn-primary' : 'cf-btn-secondary'" @click="tab = 'configure'">
+      <i data-lucide="sliders-horizontal" class="h-4 w-4" aria-hidden="true"></i> Configure
+    </button>
+    <button type="button" class="cf-btn cf-btn-sm" :class="tab === 'test' ? 'cf-btn-primary' : 'cf-btn-secondary'" @click="tab = 'test'">
+      <i data-lucide="play" class="h-4 w-4" aria-hidden="true"></i> Test Live
+    </button>
+  </div>
+
+  <section x-show="tab === 'configure'" class="cf-card p-6" aria-labelledby="voice-config-title">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div class="flex min-w-0 items-start gap-3">
+        <div class="cf-icon-box p-3"><i data-lucide="mic-2" class="h-5 w-5" aria-hidden="true"></i></div>
+        <div>
+          <p class="cf-eyebrow">Website channel</p>
+          <h2 id="voice-config-title" class="cf-section-title mt-2">Voice Settings</h2>
+          <p class="mt-2 text-sm text-[var(--cf-muted)]">Voice uses shared Assistant settings, active services, FAQs, availability, and booking safeguards.</p>
+        </div>
+      </div>
+      <a href="{% url 'dashboard:assistant_settings' %}" class="cf-btn cf-btn-secondary shrink-0">
+        <i data-lucide="settings" class="h-4 w-4" aria-hidden="true"></i> Shared Assistant
+      </a>
+    </div>
+
+    <form method="post" action="{% url 'dashboard:voice_agent' %}" class="mt-6 grid gap-5">
+      {% csrf_token %}
+      <label class="flex items-center gap-2 text-sm font-semibold text-[var(--cf-ink)]">
+        {{ voice_form.is_enabled }} {{ voice_form.is_enabled.label }}
+      </label>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="cf-field">
+          <label class="cf-label" for="{{ voice_form.display_name.id_for_label }}">{{ voice_form.display_name.label }}</label>
+          {{ voice_form.display_name }}
+          {% if voice_form.display_name.errors %}<p class="cf-error">{{ voice_form.display_name.errors.0 }}</p>{% endif %}
+        </div>
+        <div class="cf-field">
+          <label class="cf-label" for="{{ voice_form.voice_label.id_for_label }}">{{ voice_form.voice_label.label }}</label>
+          {{ voice_form.voice_label }}
+          {% if voice_form.voice_label.errors %}<p class="cf-error">{{ voice_form.voice_label.errors.0 }}</p>{% endif %}
+        </div>
+        <div class="cf-field">
+          <label class="cf-label" for="{{ voice_form.provider.id_for_label }}">{{ voice_form.provider.label }}</label>
+          {{ voice_form.provider }}
+          <p class="mt-1 text-xs text-[var(--cf-muted)]">Browser is the first provider adapter. External providers can be added behind the adapter boundary.</p>
+          {% if voice_form.provider.errors %}<p class="cf-error">{{ voice_form.provider.errors.0 }}</p>{% endif %}
+        </div>
+        <label class="flex items-center gap-2 self-end text-sm font-semibold text-[var(--cf-ink)]">
+          {{ voice_form.is_test_mode_enabled }} {{ voice_form.is_test_mode_enabled.label }}
+        </label>
+      </div>
+
+      <div class="cf-field">
+        <label class="cf-label" for="{{ voice_form.welcome_message.id_for_label }}">{{ voice_form.welcome_message.label }}</label>
+        {{ voice_form.welcome_message }}
+        {% if voice_form.welcome_message.errors %}<p class="cf-error">{{ voice_form.welcome_message.errors.0 }}</p>{% endif %}
+      </div>
+
+      <div class="flex justify-end border-t border-[var(--cf-line)] pt-4">
+        <button type="submit" class="cf-btn cf-btn-primary"><i data-lucide="save" class="h-4 w-4" aria-hidden="true"></i> Save Voice Agent</button>
+      </div>
+    </form>
+  </section>
+
+  <section x-show="tab === 'test'" class="grid gap-5 lg:grid-cols-[minmax(280px,.75fr)_minmax(0,1.25fr)]" aria-labelledby="voice-test-title">
+    <div class="cf-card p-6">
+      <p class="cf-eyebrow">Live Test</p>
+      <h2 id="voice-test-title" class="cf-section-title mt-2">Talk to your agent in real time</h2>
+      <div class="mt-5 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-3">
+            <div class="cf-icon-box"><i data-lucide="bot" class="h-5 w-5" aria-hidden="true"></i></div>
+            <div class="min-w-0">
+              <p class="font-semibold text-[var(--cf-ink)]">{{ voice_settings.display_name }}</p>
+              <p class="text-xs text-[var(--cf-muted)]">{{ voice_settings.voice_label_display }} voice</p>
+            </div>
+          </div>
+          {% if voice_settings.is_enabled %}<span class="cf-badge cf-badge-active">Active</span>{% else %}<span class="cf-badge cf-badge-inactive">Inactive</span>{% endif %}
+        </div>
+      </div>
+      <div class="grid min-h-[280px] place-items-center py-8 text-center">
+        <button type="button" @click="toggleListening()" class="grid h-32 w-32 place-items-center rounded-full bg-[var(--cf-brand)] text-white shadow-[0_0_42px_rgba(6,182,212,.32)]" :aria-label="isListening ? 'Stop voice test' : 'Start voice test'">
+          <i data-lucide="mic" x-show="!isListening" class="h-12 w-12" aria-hidden="true"></i>
+          <i data-lucide="square" x-show="isListening" class="h-12 w-12" aria-hidden="true"></i>
+        </button>
+        <div>
+          <p class="mt-5 font-semibold text-[var(--cf-ink)]" x-text="statusLabel">Ready to test</p>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]" x-text="sessionId ? 'Speak now or end the test.' : 'Click the mic to start a call.'">Click the mic to start a call.</p>
+          <p class="mt-3 text-sm text-[var(--cf-muted)]" x-show="sessionId" x-text="elapsedLabel()">00:00</p>
+          <button x-show="sessionId" @click="endTest()" type="button" class="cf-btn cf-btn-danger mt-4"><i data-lucide="phone-off" class="h-4 w-4" aria-hidden="true"></i> End test</button>
+          <p x-show="error" class="mt-3 rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-3 text-sm text-[var(--cf-muted)]" x-text="error"></p>
+        </div>
+      </div>
+      <div class="rounded-2xl border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 text-sm text-[var(--cf-muted)]">
+        <p class="font-semibold text-[var(--cf-brand-strong)]">Testing tips</p>
+        <p class="mt-2">Allow microphone access when prompted.</p>
+        <p class="mt-1">Test booking an appointment end-to-end.</p>
+        <p class="mt-1">Ask about services, hours, pricing, and appointment changes.</p>
+      </div>
+    </div>
+
+    <div class="cf-card p-6">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h2 class="cf-section-title">Conversation Transcript</h2>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]">Transcript appears here during the call.</p>
+        </div>
+        <button type="button" class="cf-btn cf-btn-secondary cf-btn-sm" @click="clearTranscript()"><i data-lucide="rotate-ccw" class="h-4 w-4" aria-hidden="true"></i> Clear</button>
+      </div>
+      <div class="mt-8 min-h-[320px]" aria-live="polite">
+        <template x-if="transcript.length === 0">
+          <div class="grid min-h-[320px] place-items-center text-center">
+            <div>
+              <div class="cf-icon-box mx-auto h-14 w-14"><i data-lucide="message-square" class="h-6 w-6" aria-hidden="true"></i></div>
+              <p class="mt-4 font-semibold text-[var(--cf-ink)]">No conversation yet</p>
+              <p class="mt-1 text-sm text-[var(--cf-muted)]">Start a call to see the transcript in real time.</p>
+            </div>
+          </div>
+        </template>
+        <div class="space-y-3">
+          <template x-for="turn in transcript" :key="turn.id">
+            <div class="flex" :class="turn.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div class="max-w-[80%] rounded-2xl px-4 py-3 text-sm" :class="turn.role === 'user' ? 'bg-[var(--cf-brand)] text-white' : 'border border-[var(--cf-line)] bg-[var(--cf-brand-soft)] text-[var(--cf-ink)]'" x-text="turn.text"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<script>
+  function voiceAgentPage() {
+    return {
+      tab: 'configure',
+      sessionId: '',
+      transcript: [],
+      isListening: false,
+      isProcessing: false,
+      elapsedSeconds: 0,
+      timerId: null,
+      error: '',
+      recognition: null,
+      requestVersion: 0,
+      statusLabel: 'Ready to test',
+      csrfToken() {
+        const input = document.querySelector('[name=csrfmiddlewaretoken]');
+        return input ? input.value : '';
+      },
+      elapsedLabel() {
+        const minutes = Math.floor(this.elapsedSeconds / 60).toString().padStart(2, '0');
+        const seconds = (this.elapsedSeconds % 60).toString().padStart(2, '0');
+        return minutes + ':' + seconds;
+      },
+      startTimer() {
+        this.stopTimer();
+        this.elapsedSeconds = 0;
+        this.timerId = setInterval(() => { this.elapsedSeconds += 1; }, 1000);
+      },
+      stopTimer() {
+        if (this.timerId) clearInterval(this.timerId);
+        this.timerId = null;
+      },
+      speechRecognitionConstructor() {
+        return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+      },
+      async responseJson(response) {
+        try {
+          return await response.json();
+        } catch (error) {
+          return {};
+        }
+      },
+      isCurrentRequest(requestVersion, sessionId) {
+        return this.requestVersion === requestVersion && this.sessionId === sessionId;
+      },
+      async startTestSession() {
+        this.error = '';
+        this.statusLabel = 'Starting test';
+        try {
+          const response = await fetch('{% url "voice:dashboard_test_session" %}', {
+            method: 'POST',
+            headers: {'X-CSRFToken': this.csrfToken()}
+          });
+          const data = await this.responseJson(response);
+          if (!response.ok || !data.session_id) {
+            this.error = data.message || 'Could not start voice test.';
+            return;
+          }
+          this.sessionId = data.session_id;
+          this.transcript = [];
+          if (data.message) this.transcript.push({id: Date.now(), role: 'assistant', text: data.message});
+          this.statusLabel = 'Ready to test';
+          this.startTimer();
+        } catch (error) {
+          this.error = 'Could not start voice test.';
+        } finally {
+          if (!this.sessionId) this.statusLabel = 'Ready to test';
+        }
+      },
+      async toggleListening() {
+        if (!this.sessionId) await this.startTestSession();
+        if (!this.sessionId) return;
+        if (this.isListening) {
+          if (this.recognition) this.recognition.stop();
+          this.isListening = false;
+          this.statusLabel = 'Ready to test';
+          return;
+        }
+        const Recognition = this.speechRecognitionConstructor();
+        if (!Recognition) {
+          this.error = 'Voice recognition is not available in this browser.';
+          return;
+        }
+        const recognition = new Recognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+        recognition.onstart = () => {
+          this.isListening = true;
+          this.statusLabel = 'Listening';
+        };
+        recognition.onerror = () => {
+          this.isListening = false;
+          this.statusLabel = 'Microphone blocked';
+          this.error = 'Microphone access was blocked.';
+        };
+        recognition.onend = () => {
+          this.isListening = false;
+          if (!this.isProcessing) this.statusLabel = 'Ready to test';
+        };
+        recognition.onresult = async (event) => {
+          const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          if (text) await this.sendTurn(text);
+        };
+        this.recognition = recognition;
+        recognition.start();
+      },
+      async sendTurn(text) {
+        const sessionId = this.sessionId;
+        const requestVersion = this.requestVersion;
+        if (!sessionId) return;
+
+        this.error = '';
+        this.isProcessing = true;
+        this.statusLabel = 'Processing';
+        this.transcript.push({id: Date.now(), role: 'user', text});
+        const formData = new FormData();
+        formData.append('message', text);
+        try {
+          const response = await fetch('{% url "voice:dashboard_test_turn" "VOICE_SESSION_ID" %}'.replace('VOICE_SESSION_ID', encodeURIComponent(sessionId)), {
+            method: 'POST',
+            body: formData,
+            headers: {'X-CSRFToken': this.csrfToken()}
+          });
+          const data = await this.responseJson(response);
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+          if (response.ok && data.message) {
+            this.transcript.push({id: Date.now() + 1, role: 'assistant', text: data.message});
+            if (window.speechSynthesis && window.SpeechSynthesisUtterance && data.message) window.speechSynthesis.speak(new window.SpeechSynthesisUtterance(data.message));
+          } else {
+            this.error = data.message || 'Voice test failed.';
+          }
+        } catch (error) {
+          if (this.isCurrentRequest(requestVersion, sessionId)) this.error = 'Voice test failed.';
+        } finally {
+          if (this.isCurrentRequest(requestVersion, sessionId)) {
+            this.isProcessing = false;
+            this.statusLabel = 'Ready to test';
+          }
+        }
+      },
+      async endTest() {
+        this.requestVersion += 1;
+        if (this.recognition) this.recognition.stop();
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        const sessionId = this.sessionId;
+        this.sessionId = '';
+        this.isProcessing = false;
+        this.statusLabel = 'Ready to test';
+        this.stopTimer();
+        if (sessionId) {
+          try {
+            const response = await fetch('{% url "voice:dashboard_test_end" "VOICE_SESSION_ID" %}'.replace('VOICE_SESSION_ID', encodeURIComponent(sessionId)), {
+              method: 'POST',
+              headers: {'X-CSRFToken': this.csrfToken()}
+            });
+            const data = await this.responseJson(response);
+            if (!response.ok) this.error = data.message || 'Could not end voice test.';
+          } catch (error) {
+            this.error = 'Could not end voice test.';
+          } finally {
+            this.isProcessing = false;
+            this.statusLabel = 'Ready to test';
+          }
+        }
+      },
+      clearTranscript() {
+        this.requestVersion += 1;
+        this.transcript = [];
+        this.isProcessing = false;
+        this.statusLabel = 'Ready to test';
+      }
+    }
+  }
+</script>
+{% endblock %}
