@@ -443,6 +443,35 @@ def test_dashboard_voice_test_browser_service_errors_stop_auto_loop_and_use_spec
 
 
 @pytest.mark.django_db
+def test_dashboard_voice_selected_microphone_stream_is_used_for_recognition(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    listen_start = content.index("startTestListening({ auto = false } = {})")
+    listen_end = content.index("async sendTurn(text)", listen_start)
+    listen_block = content[listen_start:listen_end]
+    end_block = content[content.index("async endTest()"):content.index("clearTranscript()")]
+    clear_block = content[content.index("clearTranscript()") : content.index("</script>", content.index("clearTranscript()"))]
+
+    assert "recognitionStream: null," in content
+    assert "selectedMicrophoneStreamForRecognition()" in content
+    assert "recognitionStream = await this.selectedMicrophoneStreamForRecognition();" in listen_block
+    assert "const audioTrack = recognitionStream ? recognitionStream.getAudioTracks()[0] : null;" in listen_block
+    assert "this.recognitionStream = recognitionStream;" in listen_block
+    assert "recognition.start(audioTrack);" in listen_block
+    assert "recognition.start();" in listen_block
+    assert "const micReady = await this.activateSelectedMicrophone();" not in listen_block
+    assert "this.stopRecognitionStream();" in listen_block
+    assert "this.stopRecognitionStream();" in end_block
+    assert "this.stopRecognitionStream();" in clear_block
+
+
+@pytest.mark.django_db
 def test_dashboard_voice_test_clear_transcript_stops_audio_and_recognition(voice_clinic, client):
     from clinics.models import ClinicMembership
 

@@ -90,9 +90,6 @@ def _looks_like_internal_reasoning(paragraph):
     if not value:
         return True
 
-    if "?" in value:
-        return False
-
     explicit_markers = (
         "analysis:",
         "reasoning:",
@@ -101,6 +98,9 @@ def _looks_like_internal_reasoning(paragraph):
     )
     if value.startswith(explicit_markers):
         return True
+
+    if "?" in value:
+        return False
 
     first_person_process = (
         "i should ",

@@ -10,6 +10,7 @@ from django.utils import timezone
 from clinics.models import ClinicAIProviderSettings, ClinicAISettings
 from patients.models import normalize_phone
 
+from .ai_reply_formatting import format_ai_reply
 from .ai_provider_client import AIProviderError, call_chat_completion
 from .ai_tools import (
     book_confirmed_appointment,
@@ -140,13 +141,31 @@ def _scoped_out_of_scope_reply(clinic):
     )
 
 
-def _fallback_for_clinic(clinic, error):
+def _gateway_reply(channel, reply, *, fallback=False, error=""):
+    try:
+        formatted = format_ai_reply(reply, channel)
+    except ValueError:
+        formatted = ""
+    if not formatted:
+        try:
+            default_reply = format_ai_reply(DEFAULT_AI_FALLBACK_MESSAGE, channel)
+        except ValueError:
+            default_reply = DEFAULT_AI_FALLBACK_MESSAGE
+        return {
+            "reply": default_reply or DEFAULT_AI_FALLBACK_MESSAGE,
+            "fallback": True,
+            "error": error or "empty_formatted_reply",
+        }
+    return {"reply": formatted, "fallback": fallback, "error": error}
+
+
+def _fallback_for_clinic(clinic, error, channel=""):
     if clinic:
         ai_settings = get_or_create_clinic_ai_settings(clinic)
         message = ai_settings.fallback_message or DEFAULT_AI_FALLBACK_MESSAGE
     else:
         message = DEFAULT_AI_FALLBACK_MESSAGE
-    return {"reply": message, "fallback": True, "error": error}
+    return _gateway_reply(channel, message, fallback=True, error=error)
 
 
 def _resolve_gateway_clinic(data):
@@ -1535,15 +1554,15 @@ def build_gateway_reply(data):
     channel = str(data.get("channel", "")).strip().lower()
     clinic = _resolve_gateway_clinic(data)
     if not clinic:
-        return _fallback_for_clinic(None, "clinic_not_found")
+        return _fallback_for_clinic(None, "clinic_not_found", channel)
     if not _gateway_ai_enabled(channel, clinic):
-        return _fallback_for_clinic(clinic, "ai_disabled")
+        return _fallback_for_clinic(clinic, "ai_disabled", channel)
     if channel in {"widget", "voice"} and _is_out_of_scope_system_question(data.get("message", "")):
-        return {"reply": _scoped_out_of_scope_reply(clinic), "fallback": False, "error": ""}
+        return _gateway_reply(channel, _scoped_out_of_scope_reply(clinic))
 
     provider_settings = _provider_settings_for_clinic(clinic)
     if not provider_settings.is_configured:
-        return _fallback_for_clinic(clinic, "ai_provider_unconfigured")
+        return _fallback_for_clinic(clinic, "ai_provider_unconfigured", channel)
 
     context = _context_for_gateway(channel, data)
     messages = _messages_for_request(clinic, context, data)
@@ -1558,23 +1577,23 @@ def build_gateway_reply(data):
         if provider_message is None:
             tool_reply = _reply_from_tool_result(last_tool_result, clinic=clinic, data=data, args=last_tool_args)
             if tool_reply:
-                return {"reply": tool_reply, "fallback": False, "error": ""}
-            return _fallback_for_clinic(clinic, provider_error)
+                return _gateway_reply(channel, tool_reply)
+            return _fallback_for_clinic(clinic, provider_error, channel)
 
         tool_calls = provider_message.get("tool_calls") or []
         if not tool_calls:
             reply = _clean_gateway_content(provider_message.get("content", ""))
             if not reply:
-                return _fallback_for_clinic(clinic, "empty_provider_reply")
+                return _fallback_for_clinic(clinic, "empty_provider_reply", channel)
             if _contains_unverified_availability_claim(reply):
                 if last_tool_name == "check_availability":
                     tool_reply = _reply_from_tool_result(last_tool_result, clinic=clinic, data=data, args=last_tool_args)
                     if tool_reply:
-                        return {"reply": tool_reply, "fallback": False, "error": ""}
-                return _fallback_for_clinic(clinic, "unverified_availability_claim")
-            return {"reply": reply, "fallback": False, "error": ""}
+                        return _gateway_reply(channel, tool_reply)
+                return _fallback_for_clinic(clinic, "unverified_availability_claim", channel)
+            return _gateway_reply(channel, reply)
         if not _tool_calls_are_allowed(tool_calls, mutation_executed):
-            return _fallback_for_clinic(clinic, "invalid_tool_call")
+            return _fallback_for_clinic(clinic, "invalid_tool_call", channel)
 
         messages.append({
             "role": "assistant",
@@ -1600,11 +1619,11 @@ def build_gateway_reply(data):
                 if _mutating_tool_succeeded(name, result):
                     reply = _reply_from_tool_result(result, clinic=clinic, data=data, args=tool_args)
                     if reply:
-                        return {"reply": reply, "fallback": False, "error": ""}
+                        return _gateway_reply(channel, reply)
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.get("id", "") if isinstance(call, dict) else "",
                 "content": json.dumps(result, default=str),
             })
 
-    return _fallback_for_clinic(clinic, "tool_loop_exceeded")
+    return _fallback_for_clinic(clinic, "tool_loop_exceeded", channel)

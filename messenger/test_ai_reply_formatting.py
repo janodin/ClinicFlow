@@ -54,6 +54,12 @@ def test_patient_facing_reschedule_cta_is_not_stripped_as_reasoning():
     assert format_ai_reply(raw, "messenger") == "Need to reschedule? Reply here and we can help."
 
 
+def test_explicit_reasoning_marker_with_question_is_stripped():
+    raw = "Analysis: Should I call the availability tool?\n\nPlease send your preferred date."
+
+    assert format_ai_reply(raw, "messenger") == "Please send your preferred date."
+
+
 def test_voice_flattens_booking_confirmation_into_spoken_sentence():
     raw = """# BOOKING CONFIRMATION
 

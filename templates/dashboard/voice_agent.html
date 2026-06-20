@@ -217,6 +217,7 @@
       timerId: null,
       error: '',
       recognition: null,
+      recognitionStream: null,
       micDevices: [],
       selectedMicDeviceId: 'default',
       micSourceHelp: 'Default microphone will be used until device access is allowed.',
@@ -250,6 +251,10 @@
       stopMediaStream(stream) {
         if (!stream) return;
         stream.getTracks().forEach((track) => track.stop());
+      },
+      stopRecognitionStream() {
+        this.stopMediaStream(this.recognitionStream);
+        this.recognitionStream = null;
       },
       async loadMicrophones({ requestPermission = false } = {}) {
         const mediaDevices = this.mediaDevices();
@@ -297,6 +302,12 @@
       selectedMicrophoneAudioConstraint() {
         if (!this.selectedMicDeviceId || this.selectedMicDeviceId === 'default') return true;
         return { deviceId: { exact: this.selectedMicDeviceId } };
+      },
+      async selectedMicrophoneStreamForRecognition() {
+        if (!this.selectedMicDeviceId || this.selectedMicDeviceId === 'default') return null;
+        const mediaDevices = this.mediaDevices();
+        if (!mediaDevices || !mediaDevices.getUserMedia) return null;
+        return await mediaDevices.getUserMedia({ audio: this.selectedMicrophoneAudioConstraint() });
       },
       async activateSelectedMicrophone() {
         const mediaDevices = this.mediaDevices();
@@ -392,8 +403,6 @@
         const requestVersion = this.requestVersion;
         const sessionId = this.sessionId;
         if (!sessionId || this.isProcessing || this.isSpeaking) return;
-        const micReady = await this.activateSelectedMicrophone();
-        if (!micReady || !this.isCurrentRequest(requestVersion, sessionId)) return;
         const Recognition = this.speechRecognitionConstructor();
         if (!Recognition) {
           this.error = 'Voice recognition is not available in this browser.';
@@ -410,6 +419,24 @@
           } catch (error) {
             // Recognition may already be stopped by the browser.
           }
+        }
+        this.stopRecognitionStream();
+        let recognitionStream = null;
+        try {
+          recognitionStream = await this.selectedMicrophoneStreamForRecognition();
+        } catch (error) {
+          if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+          const blocked = error && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
+          this.autoListen = false;
+          this.isListening = false;
+          this.statusLabel = blocked ? 'Microphone blocked' : 'Voice error';
+          this.error = blocked ? 'Microphone access was blocked.' : 'Selected microphone is unavailable. Choose another source or allow access.';
+          this.micSourceHelp = this.error;
+          return;
+        }
+        if (!this.isCurrentRequest(requestVersion, sessionId)) {
+          this.stopMediaStream(recognitionStream);
+          return;
         }
         let heardSpeech = false;
         const recognition = new Recognition();
@@ -429,11 +456,13 @@
           if (recoverableRecognitionError) {
             this.isListening = false;
             this.error = '';
+            this.stopRecognitionStream();
             return;
           }
           const blocked = recognitionError === 'not-allowed' || recognitionError === 'service-not-allowed';
           this.isListening = false;
           this.autoListen = false;
+          this.stopRecognitionStream();
           this.statusLabel = blocked ? 'Microphone blocked' : 'Voice error';
           if (blocked) {
             this.error = 'Microphone access was blocked.';
@@ -455,6 +484,7 @@
         };
         recognition.onend = () => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+          this.stopRecognitionStream();
           this.isListening = false;
           if (!this.isProcessing && !heardSpeech && this.autoListen) {
             window.setTimeout(() => {
@@ -471,11 +501,18 @@
           if (text) await this.sendTurn(text);
         };
         this.recognition = recognition;
+        this.recognitionStream = recognitionStream;
+        const audioTrack = recognitionStream ? recognitionStream.getAudioTracks()[0] : null;
         try {
-          recognition.start();
+          if (audioTrack) {
+            recognition.start(audioTrack);
+          } else {
+            recognition.start();
+          }
         } catch (error) {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
           this.isListening = false;
+          this.stopRecognitionStream();
           this.statusLabel = 'Voice error';
           this.error = 'Voice recognition had trouble starting. Please try again.';
         }
@@ -565,6 +602,7 @@
         this.isSpeaking = false;
         const requestVersion = this.requestVersion;
         if (this.recognition) this.recognition.stop();
+        this.stopRecognitionStream();
         if (window.speechSynthesis) window.speechSynthesis.cancel();
         const sessionId = this.sessionId;
         this.sessionId = '';
@@ -594,6 +632,7 @@
         this.autoListen = false;
         const recognition = this.recognition;
         this.recognition = null;
+        this.stopRecognitionStream();
         if (recognition) {
           recognition.onstart = null;
           recognition.onerror = null;

@@ -2367,6 +2367,105 @@ def test_ai_gateway_calls_provider_for_widget_clinic(mock_call):
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_formats_messenger_provider_reply_for_plain_text(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_format_messenger", "PAGE-GATEWAY-FORMAT-MESSENGER")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-format-messenger")
+    mock_call.return_value = {
+        "role": "assistant",
+        "content": (
+            "<think>private reasoning</think>\n\n"
+            "**Please confirm:**\n\n"
+            "| Field | Value |\n"
+            "| --- | --- |\n"
+            "| Service | Dental Cleaning |\n"
+            "| Date/time | Monday, June 22, 2026 at 9:00 AM |"
+        ),
+    }
+
+    result = build_gateway_reply({"channel": "messenger", "page_id": connection.page_id, "message": "Can I book?"})
+
+    assert result == {
+        "reply": "Please confirm:\n\nService: Dental Cleaning\nDate/time: Monday, June 22, 2026 at 9:00 AM",
+        "fallback": False,
+        "error": "",
+    }
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_formats_widget_provider_reply_without_raw_html(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_format_widget", "PAGE-GATEWAY-FORMAT-WIDGET")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-format-widget")
+    mock_call.return_value = {"role": "assistant", "content": "<b>Please confirm:</b>\n\n**Service:** Dental Cleaning"}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Can I book?"})
+
+    assert result == {
+        "reply": "Please confirm:\n\n**Service:** Dental Cleaning",
+        "fallback": False,
+        "error": "",
+    }
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_formats_voice_provider_reply_for_spoken_output(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_format_voice", "PAGE-GATEWAY-FORMAT-VOICE")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-format-voice")
+    mock_call.return_value = {
+        "role": "assistant",
+        "content": (
+            "BOOKING CONFIRMATION\n\n"
+            "Service: Dental Cleaning\n"
+            "Date/time: Monday, June 22, 2026 at 9:00 AM\n\n"
+            "Reply YES to book this appointment."
+        ),
+    }
+
+    result = build_gateway_reply({"channel": "voice", "clinic_slug": clinic.slug, "message": "Please confirm"})
+
+    assert result == {
+        "reply": "Service: Dental Cleaning. Date/time: Monday, June 22, 2026 at 9:00 AM. Reply YES to book this appointment.",
+        "fallback": False,
+        "error": "",
+    }
+
+
+@pytest.mark.django_db
+def test_ai_gateway_formats_fallback_reply_for_widget_channel():
+    from clinics.models import ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_format_fallback", "PAGE-GATEWAY-FORMAT-FALLBACK")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        is_ai_enabled=True,
+        fallback_message="<b>Assistant unavailable.</b>\n\n**Please call:** 09171234567",
+    )
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "Hello"})
+
+    assert result == {
+        "reply": "Assistant unavailable.\n\n**Please call:** 09171234567",
+        "fallback": True,
+        "error": "ai_provider_unconfigured",
+    }
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_appends_current_booking_safety_rules_after_stale_saved_instructions(mock_call):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply
