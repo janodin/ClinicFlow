@@ -48,7 +48,7 @@
               </button>
 
               <div x-show="previewOpen" x-transition x-cloak class="absolute inset-0 bg-transparent">
-                <iframe src="{{ iframe_url }}" class="h-full w-full" style="border:none;" allow="clipboard-write"></iframe>
+                <iframe src="{{ iframe_url }}" class="h-full w-full" style="border:none;" allow="microphone; clipboard-write"></iframe>
               </div>
             </div>
           </div>
@@ -104,7 +104,7 @@
           </div>
           <p class="text-xs text-[var(--cf-muted)] mb-3">Embeds the full panel directly and can be visible immediately. Use only for custom placements where you intentionally want the widget panel shown.</p>
           <div class="relative">
-            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-4 sm:pr-24 text-xs text-[var(--cf-brand-soft)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="clipboard-write"&gt;&lt;/iframe&gt;</pre>
+            <pre class="whitespace-pre-wrap break-words rounded-lg bg-[var(--cf-ink)] p-4 pr-4 sm:pr-24 text-xs text-[var(--cf-brand-soft)]" id="iframe-code">&lt;iframe src="{{ iframe_url }}" style="position:fixed;bottom:max(16px, env(safe-area-inset-bottom));right:max(16px, env(safe-area-inset-right));width:420px;max-width:calc(100vw - 32px - env(safe-area-inset-right));height:680px;max-height:calc(100dvh - 32px - env(safe-area-inset-bottom));border:none;z-index:9999;background:transparent;border-radius:24px;box-shadow:0 20px 50px rgba(0,0,0,0.2);" allow="microphone; clipboard-write"&gt;&lt;/iframe&gt;</pre>
             <button @click="navigator.clipboard.writeText(document.getElementById('iframe-code').innerText).then(() => {iframeCopied=true; setTimeout(() => iframeCopied=false, 2000)})" class="cf-btn cf-btn-sm cf-btn-secondary min-h-10 static mt-2 sm:absolute sm:right-2 sm:top-2 sm:mt-0" type="button">
               <i data-lucide="copy" class="h-3 w-3" x-show="!iframeCopied"></i>
               <i data-lucide="check" class="h-3 w-3" x-show="iframeCopied" x-cloak></i>

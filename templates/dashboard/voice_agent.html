@@ -153,7 +153,7 @@
         </button>
         <div>
           <p class="mt-5 font-semibold text-[var(--cf-ink)]" x-text="statusLabel">Ready to test</p>
-          <p class="mt-1 text-sm text-[var(--cf-muted)]" x-text="sessionId ? 'Speak now or end the test.' : 'Click the mic to start a call.'">Click the mic to start a call.</p>
+          <p class="mt-1 text-sm text-[var(--cf-muted)]" x-text="sessionId ? (isListening ? 'Speak now or end the test.' : 'Tap the mic to speak, or end the test.') : 'Click the mic to start a call.'">Click the mic to start a call.</p>
           <p class="cf-tabular mt-3 text-sm text-[var(--cf-muted)]" x-show="sessionId" x-text="elapsedLabel()">00:00</p>
           <button x-show="sessionId" @click="endTest()" type="button" class="cf-btn cf-btn-danger mt-4"><i data-lucide="phone-off" class="h-4 w-4" aria-hidden="true"></i> End test</button>
           <p x-show="error" class="cf-form-error mt-3" x-text="error"></p>
@@ -351,16 +351,12 @@
           }
           this.sessionId = data.session_id;
           this.transcript = [];
-          this.autoListen = true;
+          this.autoListen = false;
           if (data.message) this.transcript.push({id: Date.now(), role: 'assistant', text: data.message});
           this.statusLabel = 'Ready to test';
           this.startTimer();
           if (data.message) {
-            this.speakTestReply(data.message, requestVersion, data.session_id, () => {
-              this.continueTestLoop(requestVersion, data.session_id);
-            });
-          } else {
-            this.continueTestLoop(requestVersion, data.session_id);
+            this.speakTestReply(data.message, requestVersion, data.session_id);
           }
         } catch (error) {
           if (this.requestVersion === requestVersion) this.error = 'Could not start voice test.';

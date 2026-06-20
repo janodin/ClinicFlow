@@ -173,7 +173,7 @@ class WidgetTests(TestCase):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()
         start_voice_start = content.index("async startVoice()")
-        start_voice_end = content.index("toggleVoiceListening()", start_voice_start)
+        start_voice_end = content.index("interruptVoice()", start_voice_start)
         start_voice_block = content[start_voice_start:start_voice_end]
 
         self.assertIn("const stateResetVersion = this.stateResetVersion;", start_voice_block)
@@ -195,7 +195,7 @@ class WidgetTests(TestCase):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()
         start_voice_start = content.index("async startVoice()")
-        start_voice_end = content.index("toggleVoiceListening()", start_voice_start)
+        start_voice_end = content.index("interruptVoice()", start_voice_start)
         start_voice_block = content[start_voice_start:start_voice_end]
         end_start = content.index("async endVoice()")
         end_end = content.index("get filteredFaqs()", end_start)
@@ -338,7 +338,7 @@ class WidgetTests(TestCase):
         self.assertGreaterEqual(listen_block.count(stale_guard), 4)
         self.assertLess(listen_block.index("const sessionId = this.voiceSessionId;"), listen_block.index("recognition.onstart = () => {"))
 
-    def test_widget_voice_auto_loop_speaks_then_listens_after_session_and_reply(self):
+    def test_widget_voice_speaks_welcome_then_waits_for_explicit_mic_tap(self):
         from voice.models import VoiceAgentSettings
 
         VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
@@ -346,7 +346,7 @@ class WidgetTests(TestCase):
         response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
         content = response.content.decode()
         start_voice_start = content.index("async startVoice()")
-        start_voice_end = content.index("toggleVoiceListening()", start_voice_start)
+        start_voice_end = content.index("interruptVoice()", start_voice_start)
         start_voice_block = content[start_voice_start:start_voice_end]
         send_turn_start = content.index("async sendVoiceTurn(text)")
         send_turn_end = content.index("speakVoiceReply(text", send_turn_start)
@@ -354,10 +354,10 @@ class WidgetTests(TestCase):
 
         self.assertIn("voiceAutoListen: false,", content)
         self.assertIn("voiceSpeaking: false,", content)
-        self.assertIn("this.voiceAutoListen = true;", start_voice_block)
+        self.assertNotIn("this.voiceAutoListen = true;", start_voice_block)
         self.assertIn("this.speakVoiceReply(data.message, stateResetVersion, data.session_id, () => {", start_voice_block)
-        self.assertIn("this.continueVoiceLoop(stateResetVersion, data.session_id);", start_voice_block)
-        self.assertIn("this.continueVoiceLoop(stateResetVersion, this.voiceSessionId);", start_voice_block)
+        self.assertIn("this.voiceHelpText = 'Tap the mic to speak.';", start_voice_block)
+        self.assertNotIn("this.continueVoiceLoop", start_voice_block)
         self.assertIn("this.speakVoiceReply(data.message, stateResetVersion, sessionId, () => {", send_turn_block)
         self.assertIn("this.continueVoiceLoop(stateResetVersion, sessionId);", send_turn_block)
 

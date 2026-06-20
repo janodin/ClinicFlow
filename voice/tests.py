@@ -346,12 +346,14 @@ def test_dashboard_voice_test_page_auto_loop_and_interrupt_javascript(voice_clin
 
     assert "isSpeaking: false," in content
     assert "autoListen: false," in content
-    assert "this.autoListen = true;" in start_block
-    assert "this.speakTestReply(data.message, requestVersion, data.session_id, () => {" in start_block
-    assert "this.continueTestLoop(requestVersion, data.session_id);" in start_block
+    assert "this.autoListen = true;" not in start_block
+    assert "this.speakTestReply(data.message, requestVersion, data.session_id);" in start_block
+    assert "this.continueTestLoop" not in start_block
+    assert "Tap the mic to speak, or end the test." in content
     assert "if (this.isProcessing) {" in toggle_block
     assert "if (this.isSpeaking) {" in toggle_block
     assert "this.interruptTest();" in toggle_block
+    assert "this.autoListen = true;" in toggle_block
     assert "if (!this.isProcessing && !heardSpeech && this.autoListen) {" in listen_block
     assert "auto && this.autoListen" not in listen_block
     assert "this.speakTestReply(data.message, requestVersion, sessionId, () => {" in send_block

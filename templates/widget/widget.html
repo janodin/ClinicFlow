@@ -641,16 +641,16 @@
           if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;
           if (!resp.ok) throw new Error(data.message || 'Voice assistant is unavailable.');
           this.voiceSessionId = data.session_id;
-          this.voiceAutoListen = true;
+          this.voiceAutoListen = false;
           this.voiceStatusLabel = 'Ready to talk';
-          this.voiceHelpText = 'Tap the mic and speak clearly.';
+          this.voiceHelpText = 'Tap the mic to speak.';
           if (data.message) {
             this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
             this.speakVoiceReply(data.message, stateResetVersion, data.session_id, () => {
-              this.continueVoiceLoop(stateResetVersion, data.session_id);
+              this.voiceHelpText = 'Tap the mic to speak.';
             });
           } else {
-            this.continueVoiceLoop(stateResetVersion, this.voiceSessionId);
+            this.voiceHelpText = 'Tap the mic to speak.';
           }
           if (!this.voiceSupported()) {
             this.voiceError = 'Voice recognition is not available in this browser. You can still type or book manually.';

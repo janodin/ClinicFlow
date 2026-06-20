@@ -771,6 +771,7 @@ def test_settings_public_widget_mobile_hardening_contracts():
         pre_tokens = class_tokens_from_markup(pre)
         assert_class_tokens(pre_tokens, "pr-4", "sm:pr-24")
         assert "pr-24" not in pre_tokens
+    assert 'allow="microphone; clipboard-write"' in widget_embed
     assert "cf-mobile-scroll-hint" in onboarding_hours_section
     assert_class_tokens(class_tokens_from_markup(onboarding_title), "cf-mobile-break")
     assert "min-h-dvh" in widget_success

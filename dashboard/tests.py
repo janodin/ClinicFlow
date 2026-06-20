@@ -1833,6 +1833,7 @@ def test_booking_widget_page_shows_full_configuration(clinic_setup, client):
     assert "Embeds the full panel directly" in content
     assert "visible immediately" in content
     assert "&lt;iframe src=" in content
+    assert 'allow="microphone; clipboard-write"' in content
 
 
 @pytest.mark.django_db
@@ -3506,3 +3507,4 @@ def test_widget_embed_iframe_uses_embed_source_and_responsive_dimensions(clinic_
     assert "right:max(16px, env(safe-area-inset-right))" in content
     assert "max-width:calc(100vw - 32px - env(safe-area-inset-right))" in content
     assert "max-height:calc(100dvh - 32px - env(safe-area-inset-bottom))" in content
+    assert 'allow="microphone; clipboard-write"' in content
