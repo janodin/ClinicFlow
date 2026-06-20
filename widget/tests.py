@@ -255,9 +255,33 @@ class WidgetTests(TestCase):
         listen_block = content[listen_start:listen_end]
 
         self.assertIn("recognition.onerror = (event) => {", listen_block)
-        self.assertIn("const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';", listen_block)
+        self.assertIn("const recognitionError = event.error || '';", listen_block)
+        self.assertIn("const blocked = recognitionError === 'not-allowed' || recognitionError === 'service-not-allowed';", listen_block)
+        self.assertIn("this.voiceAutoListen = false;", listen_block)
         self.assertIn("this.voiceStatusLabel = blocked ? 'Microphone blocked' : 'Voice error';", listen_block)
-        self.assertIn("blocked ? 'Microphone access was blocked. You can still type or book manually.' : 'Voice recognition had trouble hearing you. Please try again.'", listen_block)
+        self.assertIn("if (blocked) {", listen_block)
+        self.assertIn("this.voiceError = 'Microphone access was blocked. You can still type or book manually.';", listen_block)
+
+    def test_widget_voice_browser_service_errors_stop_auto_loop_and_use_specific_messages(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening({ auto = false } = {})")
+        listen_end = content.index("async sendVoiceTurn(text)", listen_start)
+        listen_block = content[listen_start:listen_end]
+
+        self.assertIn("this.voiceAutoListen = false;", listen_block)
+        self.assertIn("if (recognitionError === 'audio-capture') {", listen_block)
+        self.assertIn("this.voiceError = 'Microphone could not be reached. You can still type or book manually.';", listen_block)
+        self.assertIn("if (recognitionError === 'network') {", listen_block)
+        self.assertIn("this.voiceError = 'Browser voice recognition service is unavailable. Check your connection or use chat/manual booking.';", listen_block)
+        self.assertIn("if (recognitionError === 'language-not-supported') {", listen_block)
+        self.assertIn("this.voiceError = 'This browser does not support the selected voice language. You can still type or book manually.';", listen_block)
+        self.assertLess(listen_block.index("if (recognitionError === 'audio-capture') {"), listen_block.index("Voice recognition had trouble hearing you. Please try again."))
+        self.assertLess(listen_block.index("if (recognitionError === 'network') {"), listen_block.index("Voice recognition had trouble hearing you. Please try again."))
 
     def test_widget_voice_auto_no_speech_does_not_show_trouble_hearing_error(self):
         from voice.models import VoiceAgentSettings
@@ -270,12 +294,32 @@ class WidgetTests(TestCase):
         listen_end = content.index("async sendVoiceTurn(text)", listen_start)
         listen_block = content[listen_start:listen_end]
 
-        self.assertIn("const noSpeech = event.error === 'no-speech';", listen_block)
-        no_speech_block = listen_block[listen_block.index("const noSpeech = event.error === 'no-speech';"):listen_block.index("const blocked =", listen_block.index("const noSpeech = event.error === 'no-speech';"))]
-        self.assertIn("if (noSpeech) {", no_speech_block)
-        self.assertIn("this.voiceError = '';", no_speech_block)
-        self.assertIn("return;", no_speech_block)
-        self.assertNotIn("Voice recognition had trouble hearing you. Please try again.", no_speech_block)
+        self.assertIn("const recoverableRecognitionError = recognitionError === 'no-speech' || recognitionError === 'aborted';", listen_block)
+        recoverable_block = listen_block[listen_block.index("const recoverableRecognitionError = recognitionError === 'no-speech' || recognitionError === 'aborted';"):listen_block.index("const blocked =", listen_block.index("const recoverableRecognitionError = recognitionError === 'no-speech' || recognitionError === 'aborted';"))]
+        self.assertIn("if (recoverableRecognitionError) {", recoverable_block)
+        self.assertIn("this.voiceListening = false;", recoverable_block)
+        self.assertNotIn("this.voiceAutoListen = false;", recoverable_block)
+        self.assertIn("this.voiceError = '';", recoverable_block)
+        self.assertIn("return;", recoverable_block)
+        self.assertNotIn("Voice recognition had trouble hearing you. Please try again.", recoverable_block)
+
+    def test_widget_voice_auto_aborted_does_not_show_trouble_hearing_error(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening({ auto = false } = {})")
+        listen_end = content.index("async sendVoiceTurn(text)", listen_start)
+        listen_block = content[listen_start:listen_end]
+
+        self.assertIn("recognitionError === 'aborted'", listen_block)
+        recoverable_block = listen_block[listen_block.index("const recoverableRecognitionError"):listen_block.index("const blocked =", listen_block.index("const recoverableRecognitionError"))]
+        self.assertIn("if (recoverableRecognitionError) {", recoverable_block)
+        self.assertIn("this.voiceError = '';", recoverable_block)
+        self.assertIn("return;", recoverable_block)
+        self.assertNotIn("Voice recognition had trouble hearing you. Please try again.", recoverable_block)
 
     def test_widget_voice_recognition_callbacks_ignore_stale_session(self):
         from voice.models import VoiceAgentSettings

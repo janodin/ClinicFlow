@@ -735,18 +735,35 @@
         };
         recognition.onerror = (event) => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
-          const noSpeech = event.error === 'no-speech';
-          if (noSpeech) {
+          const recognitionError = event.error || '';
+          const recoverableRecognitionError = recognitionError === 'no-speech' || recognitionError === 'aborted';
+          if (recoverableRecognitionError) {
             this.voiceListening = false;
             this.voiceError = '';
             return;
           }
-          const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
+          const blocked = recognitionError === 'not-allowed' || recognitionError === 'service-not-allowed';
           this.voiceListening = false;
-          if (blocked) this.voiceAutoListen = false;
+          this.voiceAutoListen = false;
           this.voiceStatusLabel = blocked ? 'Microphone blocked' : 'Voice error';
           this.voiceHelpText = blocked ? 'You can still type or book manually.' : 'Tap the mic and try again.';
-          this.voiceError = blocked ? 'Microphone access was blocked. You can still type or book manually.' : 'Voice recognition had trouble hearing you. Please try again.';
+          if (blocked) {
+            this.voiceError = 'Microphone access was blocked. You can still type or book manually.';
+            return;
+          }
+          if (recognitionError === 'audio-capture') {
+            this.voiceError = 'Microphone could not be reached. You can still type or book manually.';
+            return;
+          }
+          if (recognitionError === 'network') {
+            this.voiceError = 'Browser voice recognition service is unavailable. Check your connection or use chat/manual booking.';
+            return;
+          }
+          if (recognitionError === 'language-not-supported') {
+            this.voiceError = 'This browser does not support the selected voice language. You can still type or book manually.';
+            return;
+          }
+          this.voiceError = 'Voice recognition had trouble hearing you. Please try again.';
         };
         recognition.onend = () => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;

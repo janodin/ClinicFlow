@@ -428,17 +428,34 @@
         };
         recognition.onerror = (event) => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
-          const noSpeech = event.error === 'no-speech';
-          if (noSpeech) {
+          const recognitionError = event.error || '';
+          const recoverableRecognitionError = recognitionError === 'no-speech' || recognitionError === 'aborted';
+          if (recoverableRecognitionError) {
             this.isListening = false;
             this.error = '';
             return;
           }
-          const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
+          const blocked = recognitionError === 'not-allowed' || recognitionError === 'service-not-allowed';
           this.isListening = false;
-          if (blocked) this.autoListen = false;
+          this.autoListen = false;
           this.statusLabel = blocked ? 'Microphone blocked' : 'Voice error';
-          this.error = blocked ? 'Microphone access was blocked.' : 'Voice recognition had trouble hearing you. Please try again.';
+          if (blocked) {
+            this.error = 'Microphone access was blocked.';
+            return;
+          }
+          if (recognitionError === 'audio-capture') {
+            this.error = 'Microphone could not be reached. Check your microphone source and try again.';
+            return;
+          }
+          if (recognitionError === 'network') {
+            this.error = 'Browser voice recognition service is unavailable. Check your connection and try again.';
+            return;
+          }
+          if (recognitionError === 'language-not-supported') {
+            this.error = 'This browser does not support the selected voice language.';
+            return;
+          }
+          this.error = 'Voice recognition had trouble hearing you. Please try again.';
         };
         recognition.onend = () => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;

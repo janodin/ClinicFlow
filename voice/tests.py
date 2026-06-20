@@ -381,13 +381,63 @@ def test_dashboard_voice_test_auto_no_speech_does_not_show_trouble_hearing_error
     listen_end = content.index("async sendTurn(text)", listen_start)
     listen_block = content[listen_start:listen_end]
 
-    assert "const noSpeech = event.error === 'no-speech';" in listen_block
-    no_speech_start = listen_block.index("const noSpeech = event.error === 'no-speech';")
-    no_speech_block = listen_block[no_speech_start:listen_block.index("const blocked =", no_speech_start)]
-    assert "if (noSpeech) {" in no_speech_block
-    assert "this.error = '';" in no_speech_block
-    assert "return;" in no_speech_block
-    assert "Voice recognition had trouble hearing you. Please try again." not in no_speech_block
+    assert "const recognitionError = event.error || '';" in listen_block
+    assert "const recoverableRecognitionError = recognitionError === 'no-speech' || recognitionError === 'aborted';" in listen_block
+    recoverable_start = listen_block.index("const recoverableRecognitionError = recognitionError === 'no-speech' || recognitionError === 'aborted';")
+    recoverable_block = listen_block[recoverable_start:listen_block.index("const blocked =", recoverable_start)]
+    assert "if (recoverableRecognitionError) {" in recoverable_block
+    assert "this.isListening = false;" in recoverable_block
+    assert "this.autoListen = false;" not in recoverable_block
+    assert "this.error = '';" in recoverable_block
+    assert "return;" in recoverable_block
+    assert "Voice recognition had trouble hearing you. Please try again." not in recoverable_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_auto_aborted_does_not_show_trouble_hearing_error(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    listen_start = content.index("startTestListening({ auto = false } = {})")
+    listen_end = content.index("async sendTurn(text)", listen_start)
+    listen_block = content[listen_start:listen_end]
+
+    assert "recognitionError === 'aborted'" in listen_block
+    recoverable_block = listen_block[listen_block.index("const recoverableRecognitionError"):listen_block.index("const blocked =", listen_block.index("const recoverableRecognitionError"))]
+    assert "if (recoverableRecognitionError) {" in recoverable_block
+    assert "this.error = '';" in recoverable_block
+    assert "return;" in recoverable_block
+    assert "Voice recognition had trouble hearing you. Please try again." not in recoverable_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_browser_service_errors_stop_auto_loop_and_use_specific_messages(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    listen_start = content.index("startTestListening({ auto = false } = {})")
+    listen_end = content.index("async sendTurn(text)", listen_start)
+    listen_block = content[listen_start:listen_end]
+
+    assert "this.autoListen = false;" in listen_block
+    assert "if (recognitionError === 'audio-capture') {" in listen_block
+    assert "this.error = 'Microphone could not be reached. Check your microphone source and try again.';" in listen_block
+    assert "if (recognitionError === 'network') {" in listen_block
+    assert "this.error = 'Browser voice recognition service is unavailable. Check your connection and try again.';" in listen_block
+    assert "if (recognitionError === 'language-not-supported') {" in listen_block
+    assert "this.error = 'This browser does not support the selected voice language.';" in listen_block
+    assert listen_block.index("if (recognitionError === 'audio-capture') {") < listen_block.index("Voice recognition had trouble hearing you. Please try again.")
+    assert listen_block.index("if (recognitionError === 'network') {") < listen_block.index("Voice recognition had trouble hearing you. Please try again.")
 
 
 @pytest.mark.django_db
