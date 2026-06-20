@@ -259,6 +259,24 @@ class WidgetTests(TestCase):
         self.assertIn("this.voiceStatusLabel = blocked ? 'Microphone blocked' : 'Voice error';", listen_block)
         self.assertIn("blocked ? 'Microphone access was blocked. You can still type or book manually.' : 'Voice recognition had trouble hearing you. Please try again.'", listen_block)
 
+    def test_widget_voice_auto_no_speech_does_not_show_trouble_hearing_error(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening({ auto = false } = {})")
+        listen_end = content.index("async sendVoiceTurn(text)", listen_start)
+        listen_block = content[listen_start:listen_end]
+
+        self.assertIn("const noSpeech = event.error === 'no-speech';", listen_block)
+        no_speech_block = listen_block[listen_block.index("const noSpeech = event.error === 'no-speech';"):listen_block.index("const blocked =", listen_block.index("const noSpeech = event.error === 'no-speech';"))]
+        self.assertIn("if (noSpeech) {", no_speech_block)
+        self.assertIn("this.voiceError = '';", no_speech_block)
+        self.assertIn("return;", no_speech_block)
+        self.assertNotIn("Voice recognition had trouble hearing you. Please try again.", no_speech_block)
+
     def test_widget_voice_recognition_callbacks_ignore_stale_session(self):
         from voice.models import VoiceAgentSettings
 

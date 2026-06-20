@@ -65,7 +65,6 @@
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Show voice as an option in the public booking widget.</span>
               {% if voice_form.is_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
             <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
           </label>
           <label class="cf-switch-row" for="{{ voice_form.is_test_mode_enabled.id_for_label }}">
@@ -75,7 +74,6 @@
               <span class="mt-1 block text-sm text-[var(--cf-muted)]">Allow owners to run live dashboard voice tests before enabling the widget.</span>
               {% if voice_form.is_test_mode_enabled.errors %}<span class="cf-error mt-2 block">{{ voice_form.is_test_mode_enabled.errors.0 }}</span>{% endif %}
             </span>
-            <span class="cf-switch-state" aria-hidden="true"><span class="cf-switch-state-on">On</span><span class="cf-switch-state-off">Off</span></span>
             <span class="cf-switch-track" aria-hidden="true"><span class="cf-switch-thumb"></span></span>
           </label>
         </div>
@@ -97,6 +95,23 @@
           {{ voice_form.provider }}
           <p class="mt-1 text-xs text-[var(--cf-muted)]">Browser is the first provider adapter. External providers can be added behind the adapter boundary.</p>
           {% if voice_form.provider.errors %}<p class="cf-error">{{ voice_form.provider.errors.0 }}</p>{% endif %}
+        </div>
+        <div class="cf-field" data-section="voice-agent-mic-source">
+          <label class="cf-label" for="voice-mic-source">Microphone source</label>
+          <div class="flex gap-2">
+            <div class="min-w-0 flex-1">
+              <select id="voice-mic-source" class="cf-select" x-model="selectedMicDeviceId" @focus="loadMicrophones({ requestPermission: true })" @change="activateSelectedMicrophone()">
+                <option value="default">Default microphone</option>
+                <template x-for="device in micDevices" :key="device.deviceId">
+                  <option :value="device.deviceId" x-text="device.label"></option>
+                </template>
+              </select>
+            </div>
+            <button type="button" class="cf-btn cf-btn-secondary cf-btn-sm shrink-0" @click="loadMicrophones({ requestPermission: true })" aria-label="Refresh microphone sources">
+              <i data-lucide="refresh-cw" class="h-4 w-4" aria-hidden="true"></i>
+            </button>
+          </div>
+          <p class="mt-1 text-xs text-[var(--cf-muted)]" x-text="micSourceHelp">Default microphone will be used until device access is allowed.</p>
         </div>
       </div>
 
@@ -128,24 +143,6 @@
             </div>
           </div>
           {% if voice_settings.is_enabled %}<span class="cf-badge cf-badge-active">Active</span>{% else %}<span class="cf-badge cf-badge-inactive">Inactive</span>{% endif %}
-        </div>
-      </div>
-
-      <div class="cf-card mt-4 border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none" data-section="voice-agent-mic-source">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div class="cf-field min-w-0 flex-1">
-            <label class="cf-label" for="voice-mic-source">Microphone source</label>
-            <select id="voice-mic-source" class="cf-select" x-model="selectedMicDeviceId" @focus="loadMicrophones({ requestPermission: true })" @change="activateSelectedMicrophone()">
-              <option value="default">Default microphone</option>
-              <template x-for="device in micDevices" :key="device.deviceId">
-                <option :value="device.deviceId" x-text="device.label"></option>
-              </template>
-            </select>
-            <p class="mt-1 text-xs text-[var(--cf-muted)]" x-text="micSourceHelp">Default microphone will be used until device access is allowed.</p>
-          </div>
-          <button type="button" class="cf-btn cf-btn-secondary cf-btn-sm" @click="loadMicrophones({ requestPermission: true })">
-            <i data-lucide="refresh-cw" class="h-4 w-4" aria-hidden="true"></i> Refresh
-          </button>
         </div>
       </div>
 
@@ -181,7 +178,7 @@
         </div>
         <button type="button" class="cf-btn cf-btn-secondary cf-btn-sm" @click="clearTranscript"><i data-lucide="rotate-ccw" class="h-4 w-4" aria-hidden="true"></i> Clear</button>
       </div>
-      <div class="cf-table-scroll" tabindex="0" aria-label="Voice test conversation transcript">
+      <div class="cf-table-scroll cf-voice-transcript-scroll" tabindex="0" aria-label="Voice test conversation transcript">
         <template x-if="transcript.length === 0">
           <div class="cf-empty-state min-h-[320px]">
             <div class="cf-icon-box h-14 w-14"><i data-lucide="message-square" class="h-6 w-6" aria-hidden="true"></i></div>
@@ -431,6 +428,12 @@
         };
         recognition.onerror = (event) => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
+          const noSpeech = event.error === 'no-speech';
+          if (noSpeech) {
+            this.isListening = false;
+            this.error = '';
+            return;
+          }
           const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
           this.isListening = false;
           if (blocked) this.autoListen = false;

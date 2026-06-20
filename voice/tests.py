@@ -368,6 +368,29 @@ def test_dashboard_voice_test_page_auto_loop_and_interrupt_javascript(voice_clin
 
 
 @pytest.mark.django_db
+def test_dashboard_voice_test_auto_no_speech_does_not_show_trouble_hearing_error(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    listen_start = content.index("startTestListening({ auto = false } = {})")
+    listen_end = content.index("async sendTurn(text)", listen_start)
+    listen_block = content[listen_start:listen_end]
+
+    assert "const noSpeech = event.error === 'no-speech';" in listen_block
+    no_speech_start = listen_block.index("const noSpeech = event.error === 'no-speech';")
+    no_speech_block = listen_block[no_speech_start:listen_block.index("const blocked =", no_speech_start)]
+    assert "if (noSpeech) {" in no_speech_block
+    assert "this.error = '';" in no_speech_block
+    assert "return;" in no_speech_block
+    assert "Voice recognition had trouble hearing you. Please try again." not in no_speech_block
+
+
+@pytest.mark.django_db
 def test_dashboard_voice_test_clear_transcript_stops_audio_and_recognition(voice_clinic, client):
     from clinics.models import ClinicMembership
 

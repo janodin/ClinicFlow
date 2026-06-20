@@ -735,6 +735,12 @@
         };
         recognition.onerror = (event) => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
+          const noSpeech = event.error === 'no-speech';
+          if (noSpeech) {
+            this.voiceListening = false;
+            this.voiceError = '';
+            return;
+          }
           const blocked = event.error === 'not-allowed' || event.error === 'service-not-allowed';
           this.voiceListening = false;
           if (blocked) this.voiceAutoListen = false;

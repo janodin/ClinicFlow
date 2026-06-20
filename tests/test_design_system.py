@@ -2260,10 +2260,15 @@ def test_assistant_page_messenger_mode_uses_custom_aqua_radio_cards():
 
 def test_voice_agent_page_uses_dashboard_design_system_patterns():
     template = source_text("templates/dashboard/voice_agent.html")
+    css = css_text()
     tabs = tag_block_containing(template, "div", 'class="cf-tabs"')
+    configure_section = tag_block_containing(template, "section", 'aria-labelledby="voice-config-title"')
+    test_section = tag_block_containing(template, "section", 'aria-labelledby="voice-test-title"')
     channel_controls = tag_block_containing(template, "div", 'data-section="voice-agent-channel-controls"')
+    settings_grid = tag_block_containing(template, "div", 'class="grid gap-4 lg:grid-cols-2"')
     mic_source = tag_block_containing(template, "div", 'data-section="voice-agent-mic-source"')
     transcript_panel = tag_block_containing(template, "div", 'aria-label="Voice test conversation transcript"')
+    voice_transcript_scroll = css_rule_block(".cf-voice-transcript-scroll")
     switch_row = css_rule_block(".cf-switch-row")
     switch_track = css_rule_block(".cf-switch-track")
     switch_thumb = css_rule_block(".cf-switch-thumb")
@@ -2287,13 +2292,13 @@ def test_voice_agent_page_uses_dashboard_design_system_patterns():
     assert "cf-choice-card" not in channel_controls
     assert "cf-choice-card-input" not in channel_controls
     assert "cf-choice-card-mark" not in channel_controls
-    assert sum("cf-switch-state" in class_tokens_from_markup(span) for span in switch_spans) == 2
-    assert sum("cf-switch-state-on" in class_tokens_from_markup(span) for span in switch_spans) == 2
-    assert sum("cf-switch-state-off" in class_tokens_from_markup(span) for span in switch_spans) == 2
+    assert sum("cf-switch-state" in class_tokens_from_markup(span) for span in switch_spans) == 0
+    assert sum("cf-switch-state-on" in class_tokens_from_markup(span) for span in switch_spans) == 0
+    assert sum("cf-switch-state-off" in class_tokens_from_markup(span) for span in switch_spans) == 0
     assert sum("cf-switch-track" in class_tokens_from_markup(span) for span in switch_spans) == 2
     assert sum("cf-switch-thumb" in class_tokens_from_markup(span) for span in switch_spans) == 2
-    assert ">On<" in channel_controls
-    assert ">Off<" in channel_controls
+    assert ">On<" not in channel_controls
+    assert ">Off<" not in channel_controls
     assert 'name="{{ voice_form.is_enabled.html_name }}"' in channel_controls
     assert 'name="{{ voice_form.is_test_mode_enabled.html_name }}"' in channel_controls
     assert "{{ voice_form.is_enabled.label }}" in channel_controls
@@ -2309,10 +2314,28 @@ def test_voice_agent_page_uses_dashboard_design_system_patterns():
     assert "cf-table-wrap" in template
     assert "cf-table-header" in template
     assert 'class="cf-table cf-table-compact"' in template
+    assert '<div class="cf-table-scroll cf-voice-transcript-scroll" tabindex="0" aria-label="Voice test conversation transcript">' in template
+    assert_class_tokens(class_tokens_from_markup(transcript_panel), "cf-table-scroll", "cf-voice-transcript-scroll")
+    assert "overflow-y: auto;" in voice_transcript_scroll
+    assert "max-height: min(32rem, 70vh);" in voice_transcript_scroll
+    assert "overscroll-behavior-block: contain;" in voice_transcript_scroll
+    assert re.search(
+        r"(?ms)^\.cf-table-scroll\s*\{.*?^\}\n\n"
+        r"\.cf-voice-transcript-scroll \{\n"
+        r"  max-height: min\(32rem, 70vh\);\n"
+        r"  overflow-y: auto;\n"
+        r"  overscroll-behavior-block: contain;\n"
+        r"\}\n",
+        css,
+    )
     assert "cf-empty-state" in transcript_panel
     assert "No conversation yet" in transcript_panel
 
     assert "Microphone source" in mic_source
+    assert 'data-section="voice-agent-mic-source"' in configure_section
+    assert 'data-section="voice-agent-mic-source"' not in test_section
+    assert "Microphone source" in settings_grid
+    assert settings_grid.index("Microphone source") > settings_grid.index("{{ voice_form.provider.label }}")
     assert 'id="voice-mic-source"' in mic_source
     assert 'class="cf-select"' in mic_source
     assert 'x-model="selectedMicDeviceId"' in mic_source
