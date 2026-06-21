@@ -324,6 +324,9 @@
       voiceBargeInRecognition: null,
       voiceCurrentSpokenText: '',
       voiceSpeechTurnId: 0,
+      voicePendingTranscriptText: '',
+      voicePendingTranscriptTimeoutId: null,
+      voiceTurnSilenceDelayMs: 1200,
       voiceStatusLabel: 'Ready to talk',
       voiceHelpText: 'Tap once to start a hands-free voice call.',
       {% endif %}
@@ -627,7 +630,29 @@
       voiceSupported() {
         return Boolean(this.speechRecognitionConstructor());
       },
+      clearPendingVoiceTranscriptTurn() {
+        if (this.voicePendingTranscriptTimeoutId) window.clearTimeout(this.voicePendingTranscriptTimeoutId);
+        this.voicePendingTranscriptTimeoutId = null;
+        this.voicePendingTranscriptText = '';
+      },
+      recognitionEventText(event) {
+        const results = event && event.results ? event.results : [];
+        const parts = [];
+        for (let index = 0; index < results.length; index += 1) {
+          const transcript = results[index] && results[index][0] ? results[index][0].transcript.trim() : '';
+          if (transcript) parts.push(transcript);
+        }
+        return parts.join(' ').replace(/\s+/g, ' ').trim();
+      },
+      recognitionEventHasFinalResult(event) {
+        const results = event && event.results ? event.results : [];
+        for (let index = 0; index < results.length; index += 1) {
+          if (results[index] && results[index].isFinal) return true;
+        }
+        return false;
+      },
       stopVoiceActiveRecognition() {
+        this.clearPendingVoiceTranscriptTurn();
         const recognition = this.voiceRecognition;
         this.voiceRecognition = null;
         if (recognition) {
@@ -728,7 +753,7 @@
           this.voiceHelpText = 'Hands-free mode is active.';
           if (data.message) {
             this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
-            this.speakVoiceReply(data.message, stateResetVersion, data.session_id, () => {
+            this.speakVoiceReply(data.message, data.provider_payload, stateResetVersion, data.session_id, () => {
               this.continueVoiceLoop(stateResetVersion, data.session_id);
             });
           } else {
@@ -784,7 +809,7 @@
         }
         if (this.voiceListening) {
           this.voiceAutoListen = false;
-          if (this.voiceRecognition) this.voiceRecognition.stop();
+          this.stopVoiceActiveRecognition();
           this.voiceListening = false;
           this.voiceStatusLabel = 'Ready to talk';
           this.voiceHelpText = 'Tap the mic to continue.';
@@ -792,6 +817,28 @@
         }
         this.voiceAutoListen = true;
         this.startVoiceListening({ auto: false });
+      },
+      schedulePendingVoiceTranscriptTurn(recognition, stateResetVersion, sessionId, text) {
+        if (!text || stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice' || this.voiceRecognition !== recognition) return;
+        this.voicePendingTranscriptText = text;
+        if (this.voicePendingTranscriptTimeoutId) window.clearTimeout(this.voicePendingTranscriptTimeoutId);
+        this.voicePendingTranscriptTimeoutId = window.setTimeout(async () => {
+          if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice' || this.voiceRecognition !== recognition) return;
+          const text = this.voicePendingTranscriptText.trim();
+          this.clearPendingVoiceTranscriptTurn();
+          if (!text) return;
+          this.voiceListening = false;
+          if (this.voiceRecognition === recognition) this.voiceRecognition = null;
+          recognition.onend = null;
+          recognition.onerror = null;
+          recognition.onresult = null;
+          try {
+            recognition.stop();
+          } catch (error) {
+            // Recognition may already be stopped by the browser.
+          }
+          await this.sendVoiceTurn(text);
+        }, this.voiceTurnSilenceDelayMs);
       },
       startVoiceListening({ auto = false } = {}) {
         const stateResetVersion = this.stateResetVersion;
@@ -808,7 +855,8 @@
         let terminalRecognitionError = false;
         const recognition = new Recognition();
         recognition.lang = 'en-US';
-        recognition.interimResults = false;
+        recognition.continuous = true;
+        recognition.interimResults = true;
         recognition.maxAlternatives = 1;
         recognition.onstart = () => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
@@ -851,9 +899,10 @@
           this.voiceError = 'Voice recognition had trouble hearing you. Please try again.';
         };
         recognition.onend = () => {
-          if (this.voiceRecognition === recognition) this.voiceRecognition = null;
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           this.voiceListening = false;
+          if (this.voicePendingTranscriptTimeoutId) return;
+          if (this.voiceRecognition === recognition) this.voiceRecognition = null;
           if (terminalRecognitionError) return;
           if (!heardSpeech && auto && this.voiceAutoListen && !this.voiceProcessing && !this.voiceSpeaking) {
             window.setTimeout(() => {
@@ -866,20 +915,10 @@
         };
         recognition.onresult = async (event) => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
-          const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          const text = this.recognitionEventText(event);
           heardSpeech = Boolean(text);
           if (text) {
-            this.voiceListening = false;
-            if (this.voiceRecognition === recognition) this.voiceRecognition = null;
-            recognition.onend = null;
-            recognition.onerror = null;
-            recognition.onresult = null;
-            try {
-              recognition.stop();
-            } catch (error) {
-              // Recognition may already be stopped by the browser.
-            }
-            await this.sendVoiceTurn(text);
+            this.schedulePendingVoiceTranscriptTurn(recognition, stateResetVersion, sessionId, text);
           }
         };
         this.voiceRecognition = recognition;
@@ -907,7 +946,7 @@
         const recognition = new Recognition();
         recognition.lang = 'en-US';
         recognition.continuous = false;
-        recognition.interimResults = false;
+        recognition.interimResults = true;
         recognition.maxAlternatives = 1;
         recognition.onerror = (event) => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
@@ -942,10 +981,13 @@
         recognition.onresult = async (event) => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           if (this.voiceSpeechTurnId !== voiceSpeechTurnId) return;
-          const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          const text = this.recognitionEventText(event);
+          const hasFinalResult = this.recognitionEventHasFinalResult(event);
           if (!this.isValidBargeInTranscript(text, assistantText)) {
-            restartScheduled = true;
-            this.restartVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId);
+            if (hasFinalResult) {
+              restartScheduled = true;
+              this.restartVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId);
+            }
             return;
           }
           acceptedBargeIn = true;
@@ -1009,7 +1051,7 @@
           if (!resp.ok) throw new Error(data.message || 'Voice assistant could not reply.');
           this.voiceTranscript.push({id: this.nextId++, role: 'assistant', text: data.message});
           this.voiceProcessing = false;
-          this.speakVoiceReply(data.message, stateResetVersion, sessionId, () => {
+          this.speakVoiceReply(data.message, data.provider_payload, stateResetVersion, sessionId, () => {
             this.continueVoiceLoop(stateResetVersion, sessionId);
           });
         } catch (error) {
@@ -1031,7 +1073,7 @@
           }
         }
       },
-      speakVoiceReply(text, stateResetVersion, sessionId, afterSpeak) {
+      speakVoiceReply(text, providerPayload, stateResetVersion, sessionId, afterSpeak) {
         if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) {
           window.setTimeout(() => {
             if (afterSpeak) afterSpeak();
@@ -1051,6 +1093,7 @@
         this.voiceCurrentSpokenText = text;
         this.startVoiceBargeInListening(stateResetVersion, sessionId, text, voiceSpeechTurnId);
         const utterance = new window.SpeechSynthesisUtterance(text);
+        this.applyVoiceSpeechHints(utterance, providerPayload);
         const finishSpeaking = () => {
           if (stateResetVersion !== this.stateResetVersion || sessionId !== this.voiceSessionId || this.mode !== 'voice') return;
           if (this.voiceSpeechTurnId !== voiceSpeechTurnId) return;
@@ -1067,6 +1110,17 @@
         utterance.onend = finishSpeaking;
         utterance.onerror = finishSpeaking;
         window.speechSynthesis.speak(utterance);
+      },
+      voiceSpeechHintNumber(value, fallback, minimum, maximum) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return fallback;
+        return Math.min(Math.max(parsed, minimum), maximum);
+      },
+      applyVoiceSpeechHints(utterance, providerPayload) {
+        const speech = providerPayload && providerPayload.speech ? providerPayload.speech : null;
+        if (!speech) return;
+        utterance.rate = this.voiceSpeechHintNumber(speech.rate, 1, 0.85, 1.12);
+        utterance.pitch = this.voiceSpeechHintNumber(speech.pitch, 1, 0.92, 1.12);
       },
       async endVoice() {
         this.stateResetVersion += 1;

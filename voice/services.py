@@ -8,6 +8,7 @@ from clinics.models import ClinicAISettings
 from widget.ai_client import fallback_message_for
 
 from .adapters import get_voice_adapter
+from .emotion import resolve_voice_emotion, voice_emotion_profile, voice_style_guidance
 from .models import VoiceAgentSettings, VoiceSession, VoiceTranscriptTurn
 
 
@@ -66,6 +67,13 @@ def create_dashboard_test_session(clinic):
     return session, voice_settings
 
 
+def voice_welcome_reply_payload(voice_settings):
+    adapter = get_voice_adapter(voice_settings.provider)
+    emotion = resolve_voice_emotion("", voice_settings.welcome_message, voice_settings)
+    profile = voice_emotion_profile(emotion, voice_settings.safe_emotion_intensity)
+    return adapter.reply_payload(voice_settings.welcome_message, emotion_profile=profile)
+
+
 def _cache_rate_limited(key, limit, window_seconds):
     if limit <= 0:
         return False
@@ -113,6 +121,7 @@ def _history_for_session(session):
 def handle_voice_turn(session, message):
     clean_message = str(message or "").strip()
     ai_settings, _ = ClinicAISettings.objects.get_or_create(clinic=session.clinic)
+    voice_settings = get_or_create_voice_settings(session.clinic)
     if not clean_message:
         reply = "I did not catch that. Please try again."
     else:
@@ -128,17 +137,23 @@ def handle_voice_turn(session, message):
             )
             locked_session.last_activity_at = timezone.now()
             locked_session.save(update_fields=["last_activity_at", "updated_at"])
+        preliminary_emotion = resolve_voice_emotion(clean_message, "", voice_settings)
+        if preliminary_emotion == VoiceAgentSettings.EMOTION_CELEBRATORY:
+            preliminary_emotion = VoiceAgentSettings.EMOTION_WARM
         gateway_reply = build_gateway_reply({
             "channel": "voice",
             "clinic_slug": session.clinic.slug,
             "message": clean_message,
             "history": history,
             "conversation_id": session.conversation_id,
+            "voice_style": voice_style_guidance(preliminary_emotion, voice_settings.safe_emotion_intensity),
         })
         reply = gateway_reply.get("reply") or fallback_message_for(ai_settings)
 
+    emotion = resolve_voice_emotion(clean_message, reply, voice_settings)
+    profile = voice_emotion_profile(emotion, voice_settings.safe_emotion_intensity)
     adapter = get_voice_adapter(session.provider)
-    provider_reply = adapter.reply_payload(reply)
+    provider_reply = adapter.reply_payload(reply, emotion_profile=profile)
     with transaction.atomic():
         locked_session = VoiceSession.objects.select_for_update().get(pk=session.pk)
         next_sequence = _next_sequence_for_locked_session(locked_session)

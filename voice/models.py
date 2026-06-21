@@ -33,10 +33,44 @@ class VoiceAgentSettings(TimeStampedModel):
         (VOICE_CONCISE, "Concise"),
     ]
 
+    EMOTION_MODE_ADAPTIVE = "adaptive"
+    EMOTION_MODE_FIXED = "fixed"
+    EMOTION_MODE_OFF = "off"
+    EMOTION_MODE_CHOICES = [
+        (EMOTION_MODE_ADAPTIVE, "Adaptive"),
+        (EMOTION_MODE_FIXED, "Fixed"),
+        (EMOTION_MODE_OFF, "Off"),
+    ]
+
+    EMOTION_INTENSITY_SUBTLE = "subtle"
+    EMOTION_INTENSITY_BALANCED = "balanced"
+    EMOTION_INTENSITY_EXPRESSIVE = "expressive"
+    EMOTION_INTENSITY_CHOICES = [
+        (EMOTION_INTENSITY_SUBTLE, "Subtle"),
+        (EMOTION_INTENSITY_BALANCED, "Balanced"),
+        (EMOTION_INTENSITY_EXPRESSIVE, "Expressive"),
+    ]
+
+    EMOTION_NEUTRAL = "neutral"
+    EMOTION_WARM = "warm"
+    EMOTION_REASSURING = "reassuring"
+    EMOTION_CONCISE = "concise"
+    EMOTION_CELEBRATORY = "celebratory"
+    EMOTION_CHOICES = [
+        (EMOTION_NEUTRAL, "Neutral"),
+        (EMOTION_WARM, "Warm"),
+        (EMOTION_REASSURING, "Reassuring"),
+        (EMOTION_CONCISE, "Concise"),
+        (EMOTION_CELEBRATORY, "Celebratory"),
+    ]
+
     clinic = models.OneToOneField(Clinic, on_delete=models.CASCADE, related_name="voice_agent_settings")
     is_enabled = models.BooleanField(default=False)
     display_name = models.CharField(max_length=80, default="Voice Assistant")
     voice_label = models.CharField(max_length=32, choices=VOICE_CHOICES, default=VOICE_PROFESSIONAL)
+    emotion_mode = models.CharField(max_length=24, choices=EMOTION_MODE_CHOICES, default=EMOTION_MODE_ADAPTIVE)
+    emotion_intensity = models.CharField(max_length=24, choices=EMOTION_INTENSITY_CHOICES, default=EMOTION_INTENSITY_BALANCED)
+    fixed_emotion = models.CharField(max_length=24, choices=EMOTION_CHOICES, default=EMOTION_WARM)
     welcome_message = models.TextField(default="Hi, I can help with clinic questions and appointments. How can I help?")
     provider = models.CharField(max_length=32, choices=PROVIDER_CHOICES, default=PROVIDER_BROWSER)
     provider_config = models.JSONField(default=dict, blank=True)
@@ -46,6 +80,27 @@ class VoiceAgentSettings(TimeStampedModel):
     @property
     def voice_label_display(self):
         return self.get_voice_label_display()
+
+    @property
+    def safe_emotion_mode(self):
+        valid_modes = {choice[0] for choice in self.EMOTION_MODE_CHOICES}
+        if self.emotion_mode in valid_modes:
+            return self.emotion_mode
+        return self.EMOTION_MODE_OFF
+
+    @property
+    def safe_emotion_intensity(self):
+        valid_intensities = {choice[0] for choice in self.EMOTION_INTENSITY_CHOICES}
+        if self.emotion_intensity in valid_intensities:
+            return self.emotion_intensity
+        return self.EMOTION_INTENSITY_BALANCED
+
+    @property
+    def safe_fixed_emotion(self):
+        valid_emotions = {choice[0] for choice in self.EMOTION_CHOICES}
+        if self.fixed_emotion in valid_emotions:
+            return self.fixed_emotion
+        return self.EMOTION_WARM
 
     def __str__(self):
         return f"VoiceAgentSettings({self.clinic.name})"

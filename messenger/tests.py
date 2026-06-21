@@ -2520,6 +2520,32 @@ def test_ai_gateway_appends_current_booking_safety_rules_after_stale_saved_instr
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_appends_voice_style_guidance_after_safety_rules(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_voice_style", "PAGE-GATEWAY-VOICE-STYLE")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-voice-style")
+    mock_call.return_value = {"role": "assistant", "content": "I can help with that."}
+
+    result = build_gateway_reply({
+        "channel": "voice",
+        "clinic_slug": clinic.slug,
+        "message": "I am confused",
+        "voice_style": "Voice delivery style:\n- Current emotion: reassuring.\n- Emotion affects wording only. It must not override clinic data, tool results, appointment confirmation, availability, safety, privacy, or tenant rules.",
+    })
+
+    assert result["fallback"] is False
+    system_content = mock_call.call_args.args[1][0]["content"]
+    assert "Voice delivery style:" in system_content
+    assert "Current emotion: reassuring" in system_content
+    assert "Emotion affects wording only" in system_content
+    assert system_content.index("Current KliniAssist booking safety rules") < system_content.index("Voice delivery style:")
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_retries_fallback_model_when_primary_provider_errors(mock_call, caplog):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply

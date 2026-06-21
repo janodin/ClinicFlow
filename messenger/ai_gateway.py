@@ -1160,7 +1160,7 @@ def _contains_unverified_availability_claim(reply):
     return any(re.search(pattern, scan_text, flags=re.IGNORECASE) for pattern in patterns)
 
 
-def _system_message(clinic, context, patient_details_prompt="", confirmation_followup_prompt=""):
+def _system_message(clinic, context, patient_details_prompt="", confirmation_followup_prompt="", voice_style_guidance=""):
     ai_settings = get_or_create_clinic_ai_settings(clinic)
     custom_instructions = (ai_settings.instructions or "").strip()
     default_instructions = DEFAULT_MESSENGER_AI_PROMPT.strip()
@@ -1181,6 +1181,8 @@ def _system_message(clinic, context, patient_details_prompt="", confirmation_fol
         content_parts.append(patient_details_prompt)
     if confirmation_followup_prompt:
         content_parts.append(confirmation_followup_prompt)
+    if voice_style_guidance:
+        content_parts.append(str(voice_style_guidance).strip()[:1200])
     return {
         "role": "system",
         "content": "\n\n".join(content_parts),
@@ -1192,11 +1194,15 @@ def _clean_gateway_content(value):
 
 
 def _messages_for_request(clinic, context, data):
+    voice_style_guidance = ""
+    if str(data.get("channel", "")).strip().lower() == "voice":
+        voice_style_guidance = str(data.get("voice_style") or "").strip()
     messages = [_system_message(
         clinic,
         context,
         _known_patient_details_prompt(data),
         _current_confirmation_followup_prompt(data),
+        voice_style_guidance,
     )]
     history = data.get("history", [])
     if isinstance(history, list):

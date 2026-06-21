@@ -8,8 +8,8 @@ from .models import VoiceAgentSettings, VoiceSession, VoiceTranscriptTurn
 @admin.register(VoiceAgentSettings)
 class VoiceAgentSettingsAdmin(SuperuserOnlyAdminMixin, admin.ModelAdmin):
     exclude = ("provider_secret_ref",)
-    list_display = ("clinic", "is_enabled", "provider", "voice_label", "is_test_mode_enabled", "updated_at")
-    list_filter = ("is_enabled", "provider", "voice_label", "is_test_mode_enabled")
+    list_display = ("clinic", "is_enabled", "provider", "voice_label", "emotion_mode", "emotion_intensity", "is_test_mode_enabled", "updated_at")
+    list_filter = ("is_enabled", "provider", "voice_label", "emotion_mode", "emotion_intensity", "fixed_emotion", "is_test_mode_enabled")
     search_fields = ("clinic__name", "clinic__slug", "display_name")
 
 

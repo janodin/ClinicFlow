@@ -24,6 +24,7 @@ from .services import (
     voice_settings_enabled,
     voice_settings_for_clinic,
     voice_turn_rate_limited,
+    voice_welcome_reply_payload,
 )
 
 
@@ -80,10 +81,12 @@ def widget_session(request, clinic_slug):
     if voice_session_rate_limited(clinic, _client_ip(request)):
         return JsonResponse({"message": VOICE_SESSION_RATE_LIMIT_MESSAGE}, status=429)
     session, voice_settings = create_widget_voice_session(clinic)
+    welcome_reply = voice_welcome_reply_payload(voice_settings)
     return JsonResponse({
         "session_id": session.public_session_id,
         "state": session.status,
-        "message": voice_settings.welcome_message,
+        "message": welcome_reply.text,
+        "provider_payload": welcome_reply.provider_payload,
     })
 
 
@@ -127,7 +130,13 @@ def dashboard_test_session(request):
     if not voice_settings.is_test_mode_enabled:
         return JsonResponse({"message": "Dashboard voice tests are disabled for this clinic."}, status=403)
     session, voice_settings = create_dashboard_test_session(clinic)
-    return JsonResponse({"session_id": session.public_session_id, "state": session.status, "message": voice_settings.welcome_message})
+    welcome_reply = voice_welcome_reply_payload(voice_settings)
+    return JsonResponse({
+        "session_id": session.public_session_id,
+        "state": session.status,
+        "message": welcome_reply.text,
+        "provider_payload": welcome_reply.provider_payload,
+    })
 
 
 @login_required

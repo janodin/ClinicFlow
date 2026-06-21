@@ -79,6 +79,34 @@
         </div>
       </div>
 
+      <div class="cf-card border border-[var(--cf-line)] bg-[var(--cf-surface-muted)] p-4 shadow-none" data-section="voice-agent-emotion-controls">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-[var(--cf-ink)]">Voice Emotion</p>
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Emotion changes voice style only. Services, availability, confirmations, safety rules, and clinic data still come from KliniAssist.</p>
+          </div>
+          <span class="cf-badge cf-badge-info self-start">Style only</span>
+        </div>
+        <div class="mt-4 grid gap-4 md:grid-cols-3">
+          <div class="cf-field">
+            <label class="cf-label" for="{{ voice_form.emotion_mode.id_for_label }}">{{ voice_form.emotion_mode.label }}</label>
+            {{ voice_form.emotion_mode }}
+            {% if voice_form.emotion_mode.errors %}<p class="cf-error">{{ voice_form.emotion_mode.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label class="cf-label" for="{{ voice_form.emotion_intensity.id_for_label }}">{{ voice_form.emotion_intensity.label }}</label>
+            {{ voice_form.emotion_intensity }}
+            {% if voice_form.emotion_intensity.errors %}<p class="cf-error">{{ voice_form.emotion_intensity.errors.0 }}</p>{% endif %}
+          </div>
+          <div class="cf-field">
+            <label class="cf-label" for="{{ voice_form.fixed_emotion.id_for_label }}">{{ voice_form.fixed_emotion.label }}</label>
+            {{ voice_form.fixed_emotion }}
+            <p class="mt-1 text-xs text-[var(--cf-muted)]">Used when emotion mode is fixed.</p>
+            {% if voice_form.fixed_emotion.errors %}<p class="cf-error">{{ voice_form.fixed_emotion.errors.0 }}</p>{% endif %}
+          </div>
+        </div>
+      </div>
+
       <div class="grid gap-4 lg:grid-cols-2">
         <div class="cf-field">
           <label class="cf-label" for="{{ voice_form.display_name.id_for_label }}">{{ voice_form.display_name.label }}</label>
@@ -228,6 +256,9 @@
       micSourceHelp: 'Default microphone will be used until device access is allowed.',
       isLoadingMicrophones: false,
       requestVersion: 0,
+      pendingTranscriptText: '',
+      pendingTranscriptTimeoutId: null,
+      turnSilenceDelayMs: 1200,
       statusLabel: 'Ready to test',
       csrfToken() {
         const input = document.querySelector('[name=csrfmiddlewaretoken]');
@@ -261,7 +292,29 @@
         this.stopMediaStream(this.recognitionStream);
         this.recognitionStream = null;
       },
+      clearPendingTranscriptTurn() {
+        if (this.pendingTranscriptTimeoutId) window.clearTimeout(this.pendingTranscriptTimeoutId);
+        this.pendingTranscriptTimeoutId = null;
+        this.pendingTranscriptText = '';
+      },
+      recognitionEventText(event) {
+        const results = event && event.results ? event.results : [];
+        const parts = [];
+        for (let index = 0; index < results.length; index += 1) {
+          const transcript = results[index] && results[index][0] ? results[index][0].transcript.trim() : '';
+          if (transcript) parts.push(transcript);
+        }
+        return parts.join(' ').replace(/\s+/g, ' ').trim();
+      },
+      recognitionEventHasFinalResult(event) {
+        const results = event && event.results ? event.results : [];
+        for (let index = 0; index < results.length; index += 1) {
+          if (results[index] && results[index].isFinal) return true;
+        }
+        return false;
+      },
       stopActiveRecognition() {
+        this.clearPendingTranscriptTurn();
         const recognition = this.recognition;
         this.recognition = null;
         if (recognition) {
@@ -418,6 +471,29 @@
       isCurrentRequest(requestVersion, sessionId) {
         return this.requestVersion === requestVersion && this.sessionId === sessionId;
       },
+      schedulePendingTranscriptTurn(recognition, requestVersion, sessionId, text) {
+        if (!text || !this.isCurrentRequest(requestVersion, sessionId) || this.recognition !== recognition) return;
+        this.pendingTranscriptText = text;
+        if (this.pendingTranscriptTimeoutId) window.clearTimeout(this.pendingTranscriptTimeoutId);
+        this.pendingTranscriptTimeoutId = window.setTimeout(async () => {
+          if (!this.isCurrentRequest(requestVersion, sessionId) || this.recognition !== recognition) return;
+          const text = this.pendingTranscriptText.trim();
+          this.clearPendingTranscriptTurn();
+          if (!text) return;
+          this.isListening = false;
+          if (this.recognition === recognition) this.recognition = null;
+          recognition.onend = null;
+          recognition.onerror = null;
+          recognition.onresult = null;
+          try {
+            recognition.stop();
+          } catch (error) {
+            // Recognition may already be stopped by the browser.
+          }
+          this.stopRecognitionStream();
+          await this.sendTurn(text);
+        }, this.turnSilenceDelayMs);
+      },
       async startTestSession() {
         if (this.isStarting) return;
         this.requestVersion += 1;
@@ -446,7 +522,7 @@
           this.statusLabel = 'Ready to test';
           this.startTimer();
           if (data.message) {
-            this.speakTestReply(data.message, requestVersion, data.session_id, () => {
+            this.speakTestReply(data.message, data.provider_payload, requestVersion, data.session_id, () => {
               this.continueTestLoop(requestVersion, data.session_id);
             });
           } else {
@@ -481,7 +557,7 @@
         }
         if (this.isListening) {
           this.autoListen = false;
-          if (this.recognition) this.recognition.stop();
+          this.stopActiveRecognition();
           this.isListening = false;
           this.statusLabel = 'Ready to test';
           return;
@@ -521,7 +597,8 @@
         let terminalRecognitionError = false;
         const recognition = new Recognition();
         recognition.lang = 'en-US';
-        recognition.interimResults = false;
+        recognition.continuous = true;
+        recognition.interimResults = true;
         recognition.maxAlternatives = 1;
         recognition.onstart = () => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
@@ -565,9 +642,10 @@
         };
         recognition.onend = () => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
-          if (this.recognition === recognition) this.recognition = null;
           this.stopRecognitionStream();
           this.isListening = false;
+          if (this.pendingTranscriptTimeoutId) return;
+          if (this.recognition === recognition) this.recognition = null;
           if (terminalRecognitionError) return;
           if (!this.isProcessing && !heardSpeech && this.autoListen) {
             window.setTimeout(() => {
@@ -579,21 +657,10 @@
         };
         recognition.onresult = async (event) => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
-          const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          const text = this.recognitionEventText(event);
           heardSpeech = Boolean(text);
           if (text) {
-            this.isListening = false;
-            if (this.recognition === recognition) this.recognition = null;
-            recognition.onend = null;
-            recognition.onerror = null;
-            recognition.onresult = null;
-            try {
-              recognition.stop();
-            } catch (error) {
-              // Recognition may already be stopped by the browser.
-            }
-            this.stopRecognitionStream();
-            await this.sendTurn(text);
+            this.schedulePendingTranscriptTurn(recognition, requestVersion, sessionId, text);
           }
         };
         this.recognition = recognition;
@@ -645,7 +712,7 @@
         const recognition = new Recognition();
         recognition.lang = 'en-US';
         recognition.continuous = false;
-        recognition.interimResults = false;
+        recognition.interimResults = true;
         recognition.maxAlternatives = 1;
         recognition.onerror = (event) => {
           if (!this.isCurrentRequest(requestVersion, sessionId) || this.speechTurnId !== speechTurnId) return;
@@ -679,10 +746,13 @@
         };
         recognition.onresult = async (event) => {
           if (!this.isCurrentRequest(requestVersion, sessionId) || this.speechTurnId !== speechTurnId) return;
-          const text = event.results && event.results[0] && event.results[0][0] ? event.results[0][0].transcript.trim() : '';
+          const text = this.recognitionEventText(event);
+          const hasFinalResult = this.recognitionEventHasFinalResult(event);
           if (!this.isValidBargeInTranscript(text, assistantText)) {
-            restartScheduled = true;
-            this.restartBargeInListening(requestVersion, sessionId, assistantText, speechTurnId);
+            if (hasFinalResult) {
+              restartScheduled = true;
+              this.restartBargeInListening(requestVersion, sessionId, assistantText, speechTurnId);
+            }
             return;
           }
           acceptedBargeIn = true;
@@ -757,7 +827,7 @@
           if (response.ok && data.message) {
             this.transcript.push({id: Date.now() + 1, role: 'assistant', text: data.message});
             this.isProcessing = false;
-            this.speakTestReply(data.message, requestVersion, sessionId, () => {
+            this.speakTestReply(data.message, data.provider_payload, requestVersion, sessionId, () => {
               this.continueTestLoop(requestVersion, sessionId);
             });
           } else {
@@ -776,7 +846,7 @@
           }
         }
       },
-      speakTestReply(text, requestVersion, sessionId, afterSpeak) {
+      speakTestReply(text, providerPayload, requestVersion, sessionId, afterSpeak) {
         if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) {
           window.setTimeout(() => {
             if (afterSpeak) afterSpeak();
@@ -795,6 +865,7 @@
         this.currentSpokenText = text;
         this.startBargeInListening(requestVersion, sessionId, text, speechTurnId);
         const utterance = new window.SpeechSynthesisUtterance(text);
+        this.applySpeechHints(utterance, providerPayload);
         const finishSpeaking = () => {
           if (!this.isCurrentRequest(requestVersion, sessionId)) return;
           if (this.speechTurnId !== speechTurnId) return;
@@ -808,6 +879,17 @@
         utterance.onend = finishSpeaking;
         utterance.onerror = finishSpeaking;
         window.speechSynthesis.speak(utterance);
+      },
+      speechHintNumber(value, fallback, minimum, maximum) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return fallback;
+        return Math.min(Math.max(parsed, minimum), maximum);
+      },
+      applySpeechHints(utterance, providerPayload) {
+        const speech = providerPayload && providerPayload.speech ? providerPayload.speech : null;
+        if (!speech) return;
+        utterance.rate = this.speechHintNumber(speech.rate, 1, 0.85, 1.12);
+        utterance.pitch = this.speechHintNumber(speech.pitch, 1, 0.92, 1.12);
       },
       interruptTest() {
         this.isSpeaking = false;
@@ -835,6 +917,7 @@
         this.autoListen = false;
         this.speechTurnId += 1;
         this.currentSpokenText = '';
+        this.clearPendingTranscriptTurn();
         this.stopBargeInRecognition();
         this.isSpeaking = false;
         const requestVersion = this.requestVersion;
@@ -871,6 +954,7 @@
         this.autoListen = false;
         this.speechTurnId += 1;
         this.currentSpokenText = '';
+        this.clearPendingTranscriptTurn();
         this.stopBargeInRecognition();
         this.stopTimer();
         this.elapsedSeconds = 0;

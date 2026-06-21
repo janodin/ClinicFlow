@@ -71,6 +71,205 @@ def test_voice_agent_settings_defaults(voice_clinic):
     assert settings.provider_config == {}
     assert settings.provider_secret_ref == ""
     assert settings.is_test_mode_enabled is True
+    assert settings.emotion_mode == VoiceAgentSettings.EMOTION_MODE_ADAPTIVE
+    assert settings.emotion_intensity == VoiceAgentSettings.EMOTION_INTENSITY_BALANCED
+    assert settings.fixed_emotion == VoiceAgentSettings.EMOTION_WARM
+    assert settings.safe_emotion_mode == VoiceAgentSettings.EMOTION_MODE_ADAPTIVE
+    assert settings.safe_emotion_intensity == VoiceAgentSettings.EMOTION_INTENSITY_BALANCED
+    assert settings.safe_fixed_emotion == VoiceAgentSettings.EMOTION_WARM
+
+
+@pytest.mark.django_db
+def test_voice_agent_settings_invalid_emotion_values_fail_closed(voice_clinic):
+    from voice.models import VoiceAgentSettings
+
+    settings = VoiceAgentSettings.objects.create(clinic=voice_clinic)
+    VoiceAgentSettings.objects.filter(pk=settings.pk).update(
+        emotion_mode="unsafe-mode",
+        emotion_intensity="unsafe-intensity",
+        fixed_emotion="unsafe-emotion",
+    )
+
+    settings.refresh_from_db()
+
+    assert settings.safe_emotion_mode == VoiceAgentSettings.EMOTION_MODE_OFF
+    assert settings.safe_emotion_intensity == VoiceAgentSettings.EMOTION_INTENSITY_BALANCED
+    assert settings.safe_fixed_emotion == VoiceAgentSettings.EMOTION_WARM
+
+
+def test_voice_emotion_profile_returns_clamped_speech_hints():
+    from voice.emotion import voice_emotion_profile
+    from voice.models import VoiceAgentSettings
+
+    expected_profiles = [
+        (VoiceAgentSettings.EMOTION_NEUTRAL, {"rate": 1.0, "pitch": 1.0}),
+        (VoiceAgentSettings.EMOTION_WARM, {"rate": 0.98, "pitch": 1.04}),
+        (VoiceAgentSettings.EMOTION_REASSURING, {"rate": 0.92, "pitch": 0.98}),
+        (VoiceAgentSettings.EMOTION_CONCISE, {"rate": 1.06, "pitch": 1.0}),
+        (VoiceAgentSettings.EMOTION_CELEBRATORY, {"rate": 1.02, "pitch": 1.08}),
+    ]
+
+    for emotion, speech in expected_profiles:
+        assert voice_emotion_profile(emotion, VoiceAgentSettings.EMOTION_INTENSITY_BALANCED) == {
+            "emotion": emotion,
+            "emotion_intensity": VoiceAgentSettings.EMOTION_INTENSITY_BALANCED,
+            "speech": speech,
+        }
+
+
+def test_voice_emotion_profile_fails_closed_for_invalid_values():
+    from voice.emotion import voice_emotion_profile
+    from voice.models import VoiceAgentSettings
+
+    profile = voice_emotion_profile("unsafe", "unsafe")
+
+    assert profile == {
+        "emotion": VoiceAgentSettings.EMOTION_NEUTRAL,
+        "emotion_intensity": VoiceAgentSettings.EMOTION_INTENSITY_BALANCED,
+        "speech": {"rate": 1.0, "pitch": 1.0},
+    }
+
+
+def test_browser_voice_adapter_includes_optional_emotion_payload():
+    from voice.adapters import BrowserVoiceAdapter
+    from voice.models import VoiceAgentSettings
+
+    reply = BrowserVoiceAdapter().reply_payload(
+        "Hello patient.",
+        emotion_profile={
+            "emotion": VoiceAgentSettings.EMOTION_WARM,
+            "emotion_intensity": VoiceAgentSettings.EMOTION_INTENSITY_BALANCED,
+            "speech": {"rate": 0.98, "pitch": 1.04},
+        },
+    )
+
+    assert reply.text == "Hello patient."
+    assert reply.provider_payload == {
+        "type": "browser_speech",
+        "text": "Hello patient.",
+        "emotion": VoiceAgentSettings.EMOTION_WARM,
+        "emotion_intensity": VoiceAgentSettings.EMOTION_INTENSITY_BALANCED,
+        "speech": {"rate": 0.98, "pitch": 1.04},
+    }
+
+
+def test_voice_emotion_profile_fails_closed_for_unhashable_invalid_values():
+    from voice.emotion import voice_emotion_profile
+    from voice.models import VoiceAgentSettings
+
+    profile = voice_emotion_profile([], {})
+
+    assert profile == {
+        "emotion": VoiceAgentSettings.EMOTION_NEUTRAL,
+        "emotion_intensity": VoiceAgentSettings.EMOTION_INTENSITY_BALANCED,
+        "speech": {"rate": 1.0, "pitch": 1.0},
+    }
+
+
+@pytest.mark.django_db
+def test_resolve_voice_emotion_uses_mode_and_adaptive_rules(voice_clinic):
+    from voice.emotion import resolve_voice_emotion
+    from voice.models import VoiceAgentSettings
+
+    settings = VoiceAgentSettings.objects.create(clinic=voice_clinic)
+
+    assert resolve_voice_emotion("I am confused about booking", "", settings) == VoiceAgentSettings.EMOTION_REASSURING
+    assert resolve_voice_emotion("What are your clinic hours?", "", settings) == VoiceAgentSettings.EMOTION_CONCISE
+    assert resolve_voice_emotion("Yes confirm", "Your Consultation is booked for Monday.", settings) == VoiceAgentSettings.EMOTION_CELEBRATORY
+    assert resolve_voice_emotion("Yes confirm", "Your Consultation appointment has been successfully booked for Monday.", settings) == VoiceAgentSettings.EMOTION_CELEBRATORY
+    assert resolve_voice_emotion("Cancel my appointment", "Your appointment has been cancelled.", settings) == VoiceAgentSettings.EMOTION_NEUTRAL
+    assert resolve_voice_emotion("Hello there", "I can help with appointments.", settings) == VoiceAgentSettings.EMOTION_WARM
+
+    settings.emotion_mode = VoiceAgentSettings.EMOTION_MODE_FIXED
+    settings.fixed_emotion = VoiceAgentSettings.EMOTION_REASSURING
+    settings.save(update_fields=["emotion_mode", "fixed_emotion", "updated_at"])
+    assert resolve_voice_emotion("What are your hours?", "", settings) == VoiceAgentSettings.EMOTION_REASSURING
+    assert resolve_voice_emotion("What happened?", "Your appointment has been cancelled under our policy.", settings) == VoiceAgentSettings.EMOTION_NEUTRAL
+
+    settings.emotion_mode = VoiceAgentSettings.EMOTION_MODE_OFF
+    settings.save(update_fields=["emotion_mode", "updated_at"])
+    assert resolve_voice_emotion("I am confused", "", settings) == VoiceAgentSettings.EMOTION_NEUTRAL
+
+
+@pytest.mark.django_db
+def test_resolve_voice_emotion_uses_reassuring_for_booked_conflicts(voice_clinic):
+    from voice.emotion import resolve_voice_emotion
+    from voice.models import VoiceAgentSettings
+
+    settings = VoiceAgentSettings.objects.create(clinic=voice_clinic)
+
+    conflict_replies = [
+        "That appointment time is already booked.",
+        "That appointment time is booked.",
+        "Your appointment could not be booked because that time is booked.",
+        "Your appointment couldn't be successfully booked for Tuesday.",
+        "Your appointment didn't get successfully booked for Tuesday.",
+        "Your appointment was unable to be successfully booked.",
+        "Your appointment was not successfully booked.",
+        "Your appointment wasn't successfully booked.",
+        "Your appointment is booked by another patient.",
+        "Your requested slot is booked by another patient.",
+    ]
+    for reply_text in conflict_replies:
+        assert resolve_voice_emotion("Can I book?", reply_text, settings) == VoiceAgentSettings.EMOTION_REASSURING
+
+
+@pytest.mark.django_db
+def test_fixed_voice_emotion_keeps_failure_replies_reassuring(voice_clinic):
+    from voice.emotion import resolve_voice_emotion
+    from voice.models import VoiceAgentSettings
+
+    settings = VoiceAgentSettings.objects.create(
+        clinic=voice_clinic,
+        emotion_mode=VoiceAgentSettings.EMOTION_MODE_FIXED,
+        fixed_emotion=VoiceAgentSettings.EMOTION_CELEBRATORY,
+    )
+
+    assert (
+        resolve_voice_emotion(
+            "Please book this slot",
+            "Your appointment couldn't be successfully booked for Tuesday.",
+            settings,
+        )
+        == VoiceAgentSettings.EMOTION_REASSURING
+    )
+
+
+@pytest.mark.django_db
+def test_fixed_voice_emotion_keeps_out_of_scope_replies_neutral(voice_clinic):
+    from voice.emotion import resolve_voice_emotion
+    from voice.models import VoiceAgentSettings
+
+    settings = VoiceAgentSettings.objects.create(
+        clinic=voice_clinic,
+        emotion_mode=VoiceAgentSettings.EMOTION_MODE_FIXED,
+        fixed_emotion=VoiceAgentSettings.EMOTION_CELEBRATORY,
+    )
+
+    assert (
+        resolve_voice_emotion(
+            "How is your system integrated?",
+            "I can help with Voice Clinic services, FAQs, and appointments. I don't have information about system integrations or technical implementation.",
+            settings,
+        )
+        == VoiceAgentSettings.EMOTION_NEUTRAL
+    )
+
+
+def test_voice_style_guidance_is_style_only():
+    from voice.emotion import voice_style_guidance
+    from voice.models import VoiceAgentSettings
+
+    guidance = voice_style_guidance(
+        VoiceAgentSettings.EMOTION_REASSURING,
+        VoiceAgentSettings.EMOTION_INTENSITY_BALANCED,
+    )
+
+    assert "Voice delivery style:" in guidance
+    assert "Current emotion: reassuring" in guidance
+    assert "Emotion affects wording only" in guidance
+    assert "must not override clinic data" in guidance
+    assert "appointment confirmation" in guidance
 
 
 @pytest.mark.django_db
@@ -123,6 +322,13 @@ def test_voice_session_create_returns_session_for_enabled_clinic(voice_clinic, c
     payload = response.json()
     assert payload["message"] == "Hi from voice."
     assert payload["state"] == "active"
+    assert payload["provider_payload"] == {
+        "type": "browser_speech",
+        "text": "Hi from voice.",
+        "emotion": "warm",
+        "emotion_intensity": "balanced",
+        "speech": {"rate": 0.98, "pitch": 1.04},
+    }
     assert VoiceSession.objects.filter(
         clinic=voice_clinic,
         public_session_id=payload["session_id"],
@@ -239,6 +445,66 @@ def test_handle_voice_turn_sends_latest_prior_history_without_current_message(vo
 
 
 @pytest.mark.django_db
+def test_handle_voice_turn_sends_style_guidance_to_gateway_and_returns_emotion_payload(voice_clinic):
+    from voice.models import VoiceAgentSettings, VoiceSession
+    from voice.services import handle_voice_turn
+
+    VoiceAgentSettings.objects.create(
+        clinic=voice_clinic,
+        emotion_mode=VoiceAgentSettings.EMOTION_MODE_ADAPTIVE,
+        emotion_intensity=VoiceAgentSettings.EMOTION_INTENSITY_BALANCED,
+    )
+    session = VoiceSession.objects.create(
+        clinic=voice_clinic,
+        status=VoiceSession.STATUS_ACTIVE,
+        source=VoiceSession.SOURCE_WIDGET,
+    )
+
+    with patch("voice.services.build_gateway_reply", return_value={"reply": "I can help. That slot is not available, but we can find another time."}) as mock_gateway:
+        reply = handle_voice_turn(session, "I am confused about booking")
+
+    payload = mock_gateway.call_args.args[0]
+    assert payload["voice_style"].startswith("Voice delivery style:")
+    assert "Current emotion: reassuring" in payload["voice_style"]
+    assert "Emotion affects wording only" in payload["voice_style"]
+    assert reply.provider_payload == {
+        "type": "browser_speech",
+        "text": "I can help. That slot is not available, but we can find another time.",
+        "emotion": "reassuring",
+        "emotion_intensity": "balanced",
+        "speech": {"rate": 0.92, "pitch": 0.98},
+    }
+
+
+@pytest.mark.django_db
+def test_handle_voice_turn_does_not_send_celebratory_gateway_style_before_booking_result(voice_clinic):
+    from voice.models import VoiceAgentSettings, VoiceSession
+    from voice.services import handle_voice_turn
+
+    VoiceAgentSettings.objects.create(
+        clinic=voice_clinic,
+        emotion_mode=VoiceAgentSettings.EMOTION_MODE_FIXED,
+        fixed_emotion=VoiceAgentSettings.EMOTION_CELEBRATORY,
+    )
+    session = VoiceSession.objects.create(
+        clinic=voice_clinic,
+        status=VoiceSession.STATUS_ACTIVE,
+        source=VoiceSession.SOURCE_WIDGET,
+    )
+
+    with patch(
+        "voice.services.build_gateway_reply",
+        return_value={"reply": "Your appointment couldn't be successfully booked for Tuesday."},
+    ) as mock_gateway:
+        reply = handle_voice_turn(session, "Please book this slot")
+
+    payload = mock_gateway.call_args.args[0]
+    assert "Current emotion: celebratory" not in payload["voice_style"]
+    assert "Current emotion: warm" in payload["voice_style"]
+    assert reply.provider_payload["emotion"] == VoiceAgentSettings.EMOTION_REASSURING
+
+
+@pytest.mark.django_db
 def test_dashboard_test_session_rejects_staff_member(voice_clinic, client):
     User = get_user_model()
     staff = User.objects.create_user(username="voice-staff@example.com", email="voice-staff@example.com", password="password123")
@@ -327,6 +593,29 @@ def test_dashboard_voice_test_page_hardens_live_test_javascript(voice_clinic, cl
 
 
 @pytest.mark.django_db
+def test_dashboard_voice_test_applies_provider_speech_hints(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    start_block = content[content.index("async startTestSession()"):content.index("async toggleListening()")]
+    send_block = content[content.index("async sendTurn(text)"):content.index("speakTestReply(text")]
+    speak_block = content[content.index("speakTestReply(text"):content.index("interruptTest()", content.index("speakTestReply(text"))]
+
+    assert "providerPayload" in content
+    assert "this.speakTestReply(data.message, data.provider_payload, requestVersion, data.session_id, () => {" in start_block
+    assert "this.speakTestReply(data.message, data.provider_payload, requestVersion, sessionId, () => {" in send_block
+    assert "speechHintNumber(value, fallback, minimum, maximum)" in content
+    assert "applySpeechHints(utterance, providerPayload)" in content
+    assert "utterance.rate = this.speechHintNumber(speech.rate, 1, 0.85, 1.12);" in speak_block
+    assert "utterance.pitch = this.speechHintNumber(speech.pitch, 1, 0.92, 1.12);" in speak_block
+
+
+@pytest.mark.django_db
 def test_dashboard_voice_test_start_ignores_duplicate_start_and_ends_stale_response(voice_clinic, client):
     from clinics.models import ClinicMembership
 
@@ -380,7 +669,7 @@ def test_dashboard_voice_test_speaks_welcome_then_auto_listens_and_supports_barg
     assert "bargeInRecognition: null," in content
     assert "currentSpokenText: ''," in content
     assert "this.autoListen = true;" in start_block
-    assert "this.speakTestReply(data.message, requestVersion, data.session_id, () => {" in start_block
+    assert "this.speakTestReply(data.message, data.provider_payload, requestVersion, data.session_id, () => {" in start_block
     assert "this.continueTestLoop(requestVersion, data.session_id);" in start_block
     assert "Tap the mic to speak, or end the test." not in content
     assert "Talk to interrupt or tap the mic." in content
@@ -389,7 +678,7 @@ def test_dashboard_voice_test_speaks_welcome_then_auto_listens_and_supports_barg
     assert "this.interruptTest();" in toggle_block
     assert "this.autoListen = true;" in toggle_block
     assert "if (!this.isProcessing && !heardSpeech && this.autoListen) {" in listen_block
-    assert "this.speakTestReply(data.message, requestVersion, sessionId, () => {" in send_block
+    assert "this.speakTestReply(data.message, data.provider_payload, requestVersion, sessionId, () => {" in send_block
     assert "this.continueTestLoop(requestVersion, sessionId);" in send_block
     assert "this.statusLabel = 'Voice error';" in send_block
     assert "if (!this.isSpeaking && !this.error) this.statusLabel = 'Ready to test';" in send_block
@@ -473,7 +762,8 @@ def test_dashboard_voice_test_barge_in_recognition_interrupts_speech_and_sends_t
     assert "acceptedBargeIn = true;" in barge_block
     assert "bargeInPermissionDenied = true;" in barge_block
     assert "recognition.continuous = false;" in barge_block
-    assert "recognition.interimResults = false;" in barge_block
+    assert "recognition.interimResults = true;" in barge_block
+    assert "const text = this.recognitionEventText(event);" in barge_block
     assert "this.isValidBargeInTranscript(text, assistantText)" in barge_block
     assert "await this.acceptBargeInTurn(text, requestVersion, sessionId, speechTurnId);" in barge_block
     assert "recognition.start(audioTrack);" in barge_block
@@ -562,19 +852,83 @@ def test_dashboard_voice_test_main_recognition_stops_before_sending_turn_and_doe
     result_block = listen_block[result_start:listen_block.index("};", result_start)]
     end_start = listen_block.index("recognition.onend = () => {")
     end_block = listen_block[end_start:listen_block.index("};", end_start)]
+    schedule_start = content.index("schedulePendingTranscriptTurn(recognition, requestVersion, sessionId, text) {")
+    schedule_end = content.index("async startTestListening", schedule_start)
+    schedule_block = content[schedule_start:schedule_end]
 
     assert "if (this.recognition === recognition) this.recognition = null;" in end_block
     assert "if (!this.isProcessing && !this.isSpeaking) this.statusLabel = 'Ready to test';" in end_block
-    assert "this.isListening = false;" in result_block
-    assert "if (this.recognition === recognition) this.recognition = null;" in result_block
-    assert "recognition.onend = null;" in result_block
-    assert "recognition.onerror = null;" in result_block
-    assert "recognition.onresult = null;" in result_block
-    assert "recognition.stop();" in result_block
-    assert "this.stopRecognitionStream();" in result_block
-    assert result_block.index("recognition.onerror = null;") < result_block.index("recognition.stop();")
-    assert result_block.index("recognition.onresult = null;") < result_block.index("recognition.stop();")
-    assert result_block.index("recognition.stop();") < result_block.index("await this.sendTurn(text);")
+    assert "this.schedulePendingTranscriptTurn(recognition, requestVersion, sessionId, text);" in result_block
+    assert "this.isListening = false;" in schedule_block
+    assert "if (this.recognition === recognition) this.recognition = null;" in schedule_block
+    assert "recognition.onend = null;" in schedule_block
+    assert "recognition.onerror = null;" in schedule_block
+    assert "recognition.onresult = null;" in schedule_block
+    assert "recognition.stop();" in schedule_block
+    assert "this.stopRecognitionStream();" in schedule_block
+    assert schedule_block.index("recognition.onerror = null;") < schedule_block.index("recognition.stop();")
+    assert schedule_block.index("recognition.onresult = null;") < schedule_block.index("recognition.stop();")
+    assert schedule_block.index("recognition.stop();") < schedule_block.index("await this.sendTurn(text);")
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_main_recognition_waits_for_silence_before_sending_turn(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    listen_start = content.index("startTestListening({ auto = false } = {})")
+    listen_end = content.index("async startBargeInListening", listen_start)
+    listen_block = content[listen_start:listen_end]
+    result_start = listen_block.index("recognition.onresult = async (event) => {")
+    result_block = listen_block[result_start:listen_block.index("};", result_start)]
+    end_start = listen_block.index("recognition.onend = () => {")
+    end_block = listen_block[end_start:listen_block.index("};", end_start)]
+    schedule_start = content.find("schedulePendingTranscriptTurn(recognition, requestVersion, sessionId, text) {")
+    assert schedule_start != -1
+    schedule_end = content.index("async startTestListening", schedule_start)
+    schedule_block = content[schedule_start:schedule_end]
+
+    assert "pendingTranscriptText: ''," in content
+    assert "pendingTranscriptTimeoutId: null," in content
+    assert "turnSilenceDelayMs: 1200," in content
+    assert "recognition.continuous = true;" in listen_block
+    assert "recognition.interimResults = true;" in listen_block
+    assert "const text = this.recognitionEventText(event);" in result_block
+    assert "this.schedulePendingTranscriptTurn(recognition, requestVersion, sessionId, text);" in result_block
+    assert "await this.sendTurn(text);" not in result_block
+    assert end_block.index("if (this.pendingTranscriptTimeoutId) return;") < end_block.index("if (this.recognition === recognition) this.recognition = null;")
+    assert "this.pendingTranscriptTimeoutId = window.setTimeout(async () => {" in schedule_block
+    assert "this.clearPendingTranscriptTurn();" in schedule_block
+    assert "await this.sendTurn(text);" in schedule_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_barge_in_uses_interim_results_for_fast_interruption(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    barge_start = content.index("async startBargeInListening")
+    barge_end = content.index("async acceptBargeInTurn", barge_start)
+    barge_block = content[barge_start:barge_end]
+    result_start = barge_block.index("recognition.onresult = async (event) => {")
+    result_block = barge_block[result_start:barge_block.index("};", result_start)]
+
+    assert "recognition.interimResults = true;" in barge_block
+    assert "const text = this.recognitionEventText(event);" in result_block
+    assert "const hasFinalResult = this.recognitionEventHasFinalResult(event);" in result_block
+    assert "if (hasFinalResult) {" in result_block
+    assert result_block.index("if (hasFinalResult) {") < result_block.index("this.restartBargeInListening")
+    assert "acceptedBargeIn = true;" in result_block
 
 
 @pytest.mark.django_db
@@ -790,6 +1144,13 @@ def test_dashboard_test_session_creates_test_session_for_owner(voice_clinic, cli
     assert payload["session_id"]
     assert payload["state"] == VoiceSession.STATUS_ACTIVE
     assert payload["message"] == "Owner test welcome."
+    assert payload["provider_payload"] == {
+        "type": "browser_speech",
+        "text": "Owner test welcome.",
+        "emotion": "warm",
+        "emotion_intensity": "balanced",
+        "speech": {"rate": 0.98, "pitch": 1.04},
+    }
     assert VoiceSession.objects.filter(
         clinic=voice_clinic,
         public_session_id=payload["session_id"],
@@ -856,7 +1217,13 @@ def test_dashboard_test_turn_returns_reply_for_owner_and_records_transcript(voic
     assert response.status_code == 200
     payload = response.json()
     assert payload["message"] == "Dashboard voice reply."
-    assert payload["provider_payload"] == {"type": "browser_speech", "text": "Dashboard voice reply."}
+    assert payload["provider_payload"] == {
+        "type": "browser_speech",
+        "text": "Dashboard voice reply.",
+        "emotion": "warm",
+        "emotion_intensity": "balanced",
+        "speech": {"rate": 0.98, "pitch": 1.04},
+    }
     assert payload["state"] == VoiceSession.STATUS_ACTIVE
     assert list(session.transcript_turns.values_list("role", "text")) == [
         (VoiceTranscriptTurn.ROLE_USER, "Can I book?"),
@@ -1003,7 +1370,13 @@ def test_voice_turn_non_empty_message_returns_fallback_reply(voice_clinic, clien
     assert response.status_code == 200
     payload = response.json()
     assert payload["message"] == "Fallback voice reply."
-    assert payload["provider_payload"] == {"type": "browser_speech", "text": "Fallback voice reply."}
+    assert payload["provider_payload"] == {
+        "type": "browser_speech",
+        "text": "Fallback voice reply.",
+        "emotion": "warm",
+        "emotion_intensity": "balanced",
+        "speech": {"rate": 0.98, "pitch": 1.04},
+    }
 
 
 @pytest.mark.django_db

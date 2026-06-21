@@ -1750,6 +1750,11 @@ def test_voice_agent_nav_link_and_page_render_for_owner(clinic_setup, client):
     assert "Ready to test" in content
     assert 'name="display_name"' in content
     assert 'name="is_enabled"' in content
+    assert "Voice Emotion" in content
+    assert 'name="emotion_mode"' in content
+    assert 'name="emotion_intensity"' in content
+    assert 'name="fixed_emotion"' in content
+    assert "Emotion changes voice style only" in content
     assert reverse("dashboard:assistant_settings") in content
     assert reverse("dashboard:voice_agent") in content
 
@@ -1767,6 +1772,9 @@ def test_voice_agent_settings_save_is_clinic_scoped(clinic_setup, client):
             "is_enabled": "on",
             "display_name": "Welcome Voice",
             "voice_label": VoiceAgentSettings.VOICE_WARM,
+            "emotion_mode": VoiceAgentSettings.EMOTION_MODE_FIXED,
+            "emotion_intensity": VoiceAgentSettings.EMOTION_INTENSITY_EXPRESSIVE,
+            "fixed_emotion": VoiceAgentSettings.EMOTION_REASSURING,
             "welcome_message": "Hello, I can help you book.",
             "provider": VoiceAgentSettings.PROVIDER_BROWSER,
             "is_test_mode_enabled": "on",
@@ -1780,6 +1788,9 @@ def test_voice_agent_settings_save_is_clinic_scoped(clinic_setup, client):
     assert settings.voice_label == VoiceAgentSettings.VOICE_WARM
     assert settings.welcome_message == "Hello, I can help you book."
     assert settings.provider == VoiceAgentSettings.PROVIDER_BROWSER
+    assert settings.emotion_mode == VoiceAgentSettings.EMOTION_MODE_FIXED
+    assert settings.emotion_intensity == VoiceAgentSettings.EMOTION_INTENSITY_EXPRESSIVE
+    assert settings.fixed_emotion == VoiceAgentSettings.EMOTION_REASSURING
 
 
 @pytest.mark.django_db
