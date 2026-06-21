@@ -314,9 +314,10 @@ def test_dashboard_voice_test_page_hardens_live_test_javascript(voice_clinic, cl
     assert "clearTranscript() { this.requestVersion += 1;" in compact_content
     assert "this.requestVersion += 1;" in start_test_block
     assert "const requestVersion = this.requestVersion;" in start_test_block
-    assert "if (this.requestVersion !== requestVersion) return;" in start_test_block
+    assert "if (this.requestVersion !== requestVersion) {" in start_test_block
+    assert "if (data.session_id) await this.endStaleTestSession(data.session_id);" in start_test_block
     assert start_test_block.index("const requestVersion = this.requestVersion;") < start_test_block.index("await fetch")
-    assert start_test_block.index("if (this.requestVersion !== requestVersion) return;") < start_test_block.index("this.sessionId = data.session_id;")
+    assert start_test_block.index("if (this.requestVersion !== requestVersion) {") < start_test_block.index("this.sessionId = data.session_id;")
     assert "const requestVersion = this.requestVersion;" in end_test_block
     assert "if (!response.ok && this.requestVersion === requestVersion) this.error = data.message || 'Could not end voice test.';" in end_test_block
     assert "if (this.requestVersion === requestVersion) this.error = 'Could not end voice test.';" in end_test_block
@@ -326,7 +327,37 @@ def test_dashboard_voice_test_page_hardens_live_test_javascript(voice_clinic, cl
 
 
 @pytest.mark.django_db
-def test_dashboard_voice_test_page_auto_loop_and_interrupt_javascript(voice_clinic, client):
+def test_dashboard_voice_test_start_ignores_duplicate_start_and_ends_stale_response(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    start_block = content[content.index("async startTestSession()"):content.index("async toggleListening()")]
+    toggle_block = content[content.index("async toggleListening()") : content.index("startTestListening", content.index("async toggleListening()"))]
+    end_block = content[content.index("async endTest()") : content.index("clearTranscript()")]
+    clear_block = content[content.index("clearTranscript()") : content.index("</script>", content.index("clearTranscript()"))]
+
+    assert "isStarting: false," in content
+    assert "if (this.isStarting) return;" in start_block
+    assert "this.isStarting = true;" in start_block
+    assert "if (data.session_id) await this.endStaleTestSession(data.session_id);" in start_block
+    assert "async endStaleTestSession(sessionId) {" in content
+    assert "/voice/dashboard/test/session/VOICE_SESSION_ID/end/" in content
+    assert "if (this.requestVersion === requestVersion) {" in start_block
+    assert "this.isStarting = false;" in start_block
+    assert "if (this.isStarting) {" in toggle_block
+    assert "this.statusLabel = 'Starting test';" in toggle_block
+    assert toggle_block.index("if (this.isStarting) {") < toggle_block.index("if (!this.sessionId) {")
+    assert "this.isStarting = false;" in end_block
+    assert "this.isStarting = false;" in clear_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_speaks_welcome_then_auto_listens_and_supports_barge_in(voice_clinic, client):
     from clinics.models import ClinicMembership
 
     owner = voice_clinic.group.owner
@@ -346,27 +377,204 @@ def test_dashboard_voice_test_page_auto_loop_and_interrupt_javascript(voice_clin
 
     assert "isSpeaking: false," in content
     assert "autoListen: false," in content
-    assert "this.autoListen = true;" not in start_block
-    assert "this.speakTestReply(data.message, requestVersion, data.session_id);" in start_block
-    assert "this.continueTestLoop" not in start_block
-    assert "Tap the mic to speak, or end the test." in content
+    assert "bargeInRecognition: null," in content
+    assert "currentSpokenText: ''," in content
+    assert "this.autoListen = true;" in start_block
+    assert "this.speakTestReply(data.message, requestVersion, data.session_id, () => {" in start_block
+    assert "this.continueTestLoop(requestVersion, data.session_id);" in start_block
+    assert "Tap the mic to speak, or end the test." not in content
+    assert "Talk to interrupt or tap the mic." in content
     assert "if (this.isProcessing) {" in toggle_block
     assert "if (this.isSpeaking) {" in toggle_block
     assert "this.interruptTest();" in toggle_block
     assert "this.autoListen = true;" in toggle_block
     assert "if (!this.isProcessing && !heardSpeech && this.autoListen) {" in listen_block
-    assert "auto && this.autoListen" not in listen_block
     assert "this.speakTestReply(data.message, requestVersion, sessionId, () => {" in send_block
     assert "this.continueTestLoop(requestVersion, sessionId);" in send_block
+    assert "this.statusLabel = 'Voice error';" in send_block
+    assert "if (!this.isSpeaking && !this.error) this.statusLabel = 'Ready to test';" in send_block
+    assert "if (!this.isSpeaking) this.statusLabel = 'Ready to test';" not in send_block
     assert "const utterance = new window.SpeechSynthesisUtterance(text);" in speak_block
+    assert "this.startBargeInListening(requestVersion, sessionId, text, speechTurnId);" in speak_block
     assert "utterance.onend = finishSpeaking;" in speak_block
     assert "utterance.onerror = finishSpeaking;" in speak_block
     assert finish_block.index("if (!this.isSpeaking) return;") < finish_block.index("if (afterSpeak) afterSpeak();")
     assert "interruptTest()" in content
     assert interrupt_block.index("this.isSpeaking = false;") < interrupt_block.index("window.speechSynthesis.cancel();")
+    assert "this.stopBargeInRecognition();" in interrupt_block
     assert "continueTestLoop" in content
     assert "this.autoListen = false;" in end_block
     assert "this.isSpeaking = false;" in end_block
+    assert "this.stopBargeInRecognition();" in end_block
+    assert "this.error = '';" in end_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_defines_barge_in_feedback_filters(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    normalize_start = content.index("normalizeVoiceText(text) {")
+    normalize_end = content.index("isNoiseVoiceText(text) {", normalize_start)
+    normalize_block = content[normalize_start:normalize_end]
+    noise_start = content.index("isNoiseVoiceText(text) {")
+    noise_end = content.index("isAssistantSelfFeedback(transcript, assistantText) {", noise_start)
+    noise_block = content[noise_start:noise_end]
+    feedback_start = content.index("isAssistantSelfFeedback(transcript, assistantText) {")
+    feedback_end = content.index("isValidBargeInTranscript(transcript, assistantText) {", feedback_start)
+    feedback_block = content[feedback_start:feedback_end]
+    valid_start = content.index("isValidBargeInTranscript(transcript, assistantText) {")
+    valid_end = content.index("stopBargeInRecognition() {", valid_start)
+    valid_block = content[valid_start:valid_end]
+
+    assert ".toLowerCase()" in normalize_block
+    assert ".replace(/[^a-z0-9\\s]/g, ' ')" in normalize_block
+    assert ".replace(/\\s+/g, ' ')" in normalize_block
+    assert "const noise = ['uh', 'um', 'er', 'ah', 'hmm'];" in noise_block
+    assert "return !normalized || normalized.length < 2 || noise.includes(normalized);" in noise_block
+    assert "if (heard === spoken) return true;" in feedback_block
+    assert "if (heard.length >= 12 && spoken.includes(heard)) return true;" in feedback_block
+    assert "if (heardWords.length >= 3 && spoken.includes(heard)) return true;" in feedback_block
+    assert "return !this.isNoiseVoiceText(transcript) && !this.isAssistantSelfFeedback(transcript, assistantText);" in valid_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_barge_in_recognition_interrupts_speech_and_sends_turn(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    barge_start = content.index("async startBargeInListening")
+    barge_end = content.index("async acceptBargeInTurn", barge_start)
+    barge_block = content[barge_start:barge_end]
+    accept_start = content.index("async acceptBargeInTurn")
+    accept_end = content.index("async sendTurn(text)", accept_start)
+    accept_block = content[accept_start:accept_end]
+
+    assert "if (!this.autoListen || !this.isSpeaking || this.isProcessing) return;" in barge_block
+    assert "this.stopBargeInRecognition();" in barge_block
+    assert "let acceptedBargeIn = false;" in barge_block
+    assert "let bargeInPermissionDenied = false;" in barge_block
+    assert "let bargeInTerminalError = false;" in barge_block
+    assert "bargeInStream = await this.selectedMicrophoneStreamForRecognition();" in barge_block
+    assert "const blocked = error && (error.name === 'NotAllowedError' || error.name === 'SecurityError');" in barge_block
+    assert "this.statusLabel = 'Microphone blocked';" in barge_block
+    assert "this.error = 'Microphone access was blocked.';" in barge_block
+    assert "this.restartBargeInListening(requestVersion, sessionId, assistantText, speechTurnId);" in barge_block
+    assert "acceptedBargeIn = true;" in barge_block
+    assert "bargeInPermissionDenied = true;" in barge_block
+    assert "recognition.continuous = false;" in barge_block
+    assert "recognition.interimResults = false;" in barge_block
+    assert "this.isValidBargeInTranscript(text, assistantText)" in barge_block
+    assert "await this.acceptBargeInTurn(text, requestVersion, sessionId, speechTurnId);" in barge_block
+    assert "recognition.start(audioTrack);" in barge_block
+    assert "recognition.start();" in barge_block
+    assert "this.isSpeaking = false;" in accept_block
+    assert "this.stopBargeInRecognition();" in accept_block
+    assert "this.stopActiveRecognition();" in accept_block
+    assert "window.speechSynthesis.cancel();" in accept_block
+    assert "await this.sendTurn(text);" in accept_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_barge_in_restarts_after_filtered_self_feedback(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    restart_start = content.index("restartBargeInListening(requestVersion, sessionId, assistantText, speechTurnId) {")
+    restart_end = content.index("async acceptBargeInTurn", restart_start)
+    restart_block = content[restart_start:restart_end]
+    barge_start = content.index("async startBargeInListening")
+    barge_end = content.index("async acceptBargeInTurn", barge_start)
+    barge_block = content[barge_start:barge_end]
+
+    assert "window.setTimeout(() => {" in restart_block
+    assert "this.speechTurnId !== speechTurnId" in restart_block
+    assert "!this.isSpeaking || this.isProcessing || !this.autoListen" in restart_block
+    assert "this.startBargeInListening(requestVersion, sessionId, assistantText, speechTurnId);" in restart_block
+    assert "if (!this.isValidBargeInTranscript(text, assistantText)) {" in barge_block
+    assert "this.restartBargeInListening(requestVersion, sessionId, assistantText, speechTurnId);" in barge_block
+    assert "if (!acceptedBargeIn && !bargeInPermissionDenied && !bargeInTerminalError) {" in barge_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_barge_in_uses_speech_turn_guard_for_stale_callbacks(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    speak_start = content.index("speakTestReply(text")
+    speak_end = content.index("interruptTest()", speak_start)
+    speak_block = content[speak_start:speak_end]
+    barge_start = content.index("async startBargeInListening")
+    barge_end = content.index("async acceptBargeInTurn", barge_start)
+    barge_block = content[barge_start:barge_end]
+    accept_start = content.index("async acceptBargeInTurn")
+    accept_end = content.index("async sendTurn(text)", accept_start)
+    accept_block = content[accept_start:accept_end]
+
+    assert "speechTurnId: 0," in content
+    assert "this.speechTurnId += 1;" in speak_block
+    assert "const speechTurnId = this.speechTurnId;" in speak_block
+    assert "this.speechTurnId !== speechTurnId" in speak_block
+    assert "this.startBargeInListening(requestVersion, sessionId, text, speechTurnId);" in speak_block
+    assert "if (!this.isProcessing && !this.error && this.autoListen) this.statusLabel = 'Ready to test';" in speak_block
+    assert "if (!this.isProcessing) this.statusLabel = 'Ready to test';" not in speak_block
+    assert "async startBargeInListening(requestVersion, sessionId, assistantText, speechTurnId) {" in barge_block
+    assert barge_block.count("this.speechTurnId !== speechTurnId") >= 3
+    assert "await this.acceptBargeInTurn(text, requestVersion, sessionId, speechTurnId);" in barge_block
+    assert "async acceptBargeInTurn(text, requestVersion, sessionId, speechTurnId) {" in accept_block
+    assert "this.speechTurnId !== speechTurnId" in accept_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_main_recognition_stops_before_sending_turn_and_does_not_mark_ready_while_speaking(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    listen_start = content.index("startTestListening({ auto = false } = {})")
+    listen_end = content.index("async startBargeInListening", listen_start)
+    listen_block = content[listen_start:listen_end]
+    result_start = listen_block.index("recognition.onresult = async (event) => {")
+    result_block = listen_block[result_start:listen_block.index("};", result_start)]
+    end_start = listen_block.index("recognition.onend = () => {")
+    end_block = listen_block[end_start:listen_block.index("};", end_start)]
+
+    assert "if (this.recognition === recognition) this.recognition = null;" in end_block
+    assert "if (!this.isProcessing && !this.isSpeaking) this.statusLabel = 'Ready to test';" in end_block
+    assert "this.isListening = false;" in result_block
+    assert "if (this.recognition === recognition) this.recognition = null;" in result_block
+    assert "recognition.onend = null;" in result_block
+    assert "recognition.onerror = null;" in result_block
+    assert "recognition.onresult = null;" in result_block
+    assert "recognition.stop();" in result_block
+    assert "this.stopRecognitionStream();" in result_block
+    assert result_block.index("recognition.onerror = null;") < result_block.index("recognition.stop();")
+    assert result_block.index("recognition.onresult = null;") < result_block.index("recognition.stop();")
+    assert result_block.index("recognition.stop();") < result_block.index("await this.sendTurn(text);")
 
 
 @pytest.mark.django_db
@@ -415,6 +623,30 @@ def test_dashboard_voice_test_auto_aborted_does_not_show_trouble_hearing_error(v
     assert "this.error = '';" in recoverable_block
     assert "return;" in recoverable_block
     assert "Voice recognition had trouble hearing you. Please try again." not in recoverable_block
+
+
+@pytest.mark.django_db
+def test_dashboard_voice_test_terminal_recognition_errors_do_not_reset_ready_on_end(voice_clinic, client):
+    from clinics.models import ClinicMembership
+
+    owner = voice_clinic.group.owner
+    ClinicMembership.objects.create(clinic=voice_clinic, user=owner, role=ClinicMembership.ROLE_OWNER)
+    client.force_login(owner)
+
+    response = client.get(reverse("dashboard:voice_agent"))
+    content = response.content.decode()
+    listen_start = content.index("startTestListening({ auto = false } = {})")
+    listen_end = content.index("async startBargeInListening", listen_start)
+    listen_block = content[listen_start:listen_end]
+    error_start = listen_block.index("recognition.onerror = (event) => {")
+    error_block = listen_block[error_start:listen_block.index("};", error_start)]
+    end_start = listen_block.index("recognition.onend = () => {")
+    end_block = listen_block[end_start:listen_block.index("};", end_start)]
+
+    assert "let terminalRecognitionError = false;" in listen_block
+    assert "terminalRecognitionError = true;" in error_block
+    assert "if (terminalRecognitionError) return;" in end_block
+    assert end_block.index("if (terminalRecognitionError) return;") < end_block.index("if (!this.isProcessing && !this.isSpeaking)")
 
 
 @pytest.mark.django_db
@@ -486,6 +718,11 @@ def test_dashboard_voice_test_clear_transcript_stops_audio_and_recognition(voice
 
     assert "this.requestVersion += 1;" in clear_block
     assert "this.autoListen = false;" in clear_block
+    assert "this.stopBargeInRecognition();" in clear_block
+    assert "this.currentSpokenText = '';" in clear_block
+    assert "this.stopTimer();" in clear_block
+    assert "this.elapsedSeconds = 0;" in clear_block
+    assert "this.error = '';" in clear_block
     assert "const recognition = this.recognition;" in clear_block
     assert "this.recognition = null;" in clear_block
     assert "recognition.onstart = null;" in clear_block

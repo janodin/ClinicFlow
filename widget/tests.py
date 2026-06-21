@@ -163,7 +163,7 @@ class WidgetTests(TestCase):
         voice_panel = content[voice_panel_start:voice_panel_end]
 
         self.assertNotIn("Microphone access was blocked. You can still type or book manually.", voice_panel)
-        self.assertIn("Tap the mic to speak with the assistant.", voice_panel)
+        self.assertIn("Tap once to start a hands-free voice call.", voice_panel)
 
     def test_widget_voice_start_session_ignores_stale_response(self):
         from voice.models import VoiceAgentSettings
@@ -177,15 +177,62 @@ class WidgetTests(TestCase):
         start_voice_block = content[start_voice_start:start_voice_end]
 
         self.assertIn("const stateResetVersion = this.stateResetVersion;", start_voice_block)
-        self.assertIn("if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;", start_voice_block)
+        stale_guard = "if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') {"
+        self.assertIn(stale_guard, start_voice_block)
         self.assertLess(
             start_voice_block.index("const stateResetVersion = this.stateResetVersion;"),
             start_voice_block.index("const resp = await fetch"),
         )
         self.assertLess(
-            start_voice_block.index("if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;"),
+            start_voice_block.index(stale_guard),
             start_voice_block.index("this.voiceSessionId = data.session_id;"),
         )
+
+    def test_widget_voice_start_checks_recognition_support_before_session_request(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        start_voice_start = content.index("async startVoice()")
+        start_voice_end = content.index("interruptVoice()", start_voice_start)
+        start_voice_block = content[start_voice_start:start_voice_end]
+        unsupported_start = start_voice_block.index("if (!this.voiceSupported()) {")
+        fetch_start = start_voice_block.index("const resp = await fetch")
+
+        self.assertLess(unsupported_start, fetch_start)
+        unsupported_block = start_voice_block[unsupported_start:start_voice_block.index("try {", unsupported_start)]
+        self.assertIn("this.voiceStatusLabel = 'Voice unavailable';", unsupported_block)
+        self.assertIn("this.voiceHelpText = 'Use chat or manual booking instead.';", unsupported_block)
+        self.assertIn("this.voiceError = 'Voice recognition is not available in this browser. You can still type or book manually.';", unsupported_block)
+        self.assertIn("return;", unsupported_block)
+
+    def test_widget_voice_start_ignores_duplicate_start_while_pending(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        start_voice_start = content.index("async startVoice()")
+        start_voice_end = content.index("interruptVoice()", start_voice_start)
+        start_voice_block = content[start_voice_start:start_voice_end]
+        toggle_start = content.index("toggleVoiceListening() {")
+        toggle_end = content.index("startVoiceListening", toggle_start)
+        toggle_block = content[toggle_start:toggle_end]
+        end_start = content.index("async endVoice()")
+        end_end = content.index("get filteredFaqs()", end_start)
+        end_block = content[end_start:end_end]
+
+        self.assertIn("voiceStarting: false,", content)
+        self.assertIn("if (this.voiceStarting) return;", start_voice_block)
+        self.assertIn("this.voiceStarting = true;", start_voice_block)
+        self.assertIn("if (stateResetVersion === this.stateResetVersion && this.mode === 'voice') this.voiceStarting = false;", start_voice_block)
+        self.assertIn("if (this.voiceStarting) {", toggle_block)
+        self.assertIn("this.voiceStatusLabel = 'Preparing voice session';", toggle_block)
+        self.assertLess(toggle_block.index("if (this.voiceStarting) {"), toggle_block.index("if (!this.voiceSessionId) {"))
+        self.assertIn("this.voiceStarting = false;", end_block)
 
     def test_widget_voice_end_invalidates_pending_start_voice_response(self):
         from voice.models import VoiceAgentSettings
@@ -205,6 +252,23 @@ class WidgetTests(TestCase):
         self.assertIn("if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') return;", start_voice_block)
         self.assertIn("this.stateResetVersion += 1;", end_block)
         self.assertLess(end_block.index("this.stateResetVersion += 1;"), end_block.index("const sessionId = this.voiceSessionId;"))
+
+    def test_widget_voice_start_ends_stale_session_response(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        start_voice_start = content.index("async startVoice()")
+        start_voice_end = content.index("interruptVoice()", start_voice_start)
+        start_voice_block = content[start_voice_start:start_voice_end]
+        widget_end_url = reverse("voice:widget_end", args=[self.clinic.slug, "VOICE_SESSION_ID"])
+
+        self.assertIn("if (stateResetVersion !== this.stateResetVersion || this.mode !== 'voice') {", start_voice_block)
+        self.assertIn("if (data.session_id) await this.endStaleVoiceSession(data.session_id);", start_voice_block)
+        self.assertIn("async endStaleVoiceSession(sessionId) {", content)
+        self.assertIn(widget_end_url, content)
 
     def test_widget_voice_turn_ignores_stale_response_before_reply_mutation(self):
         from voice.models import VoiceAgentSettings
@@ -226,6 +290,26 @@ class WidgetTests(TestCase):
         self.assertLess(turn_block.index(stale_guard), turn_block.index("this.voiceTranscript.push({id: this.nextId++, role: 'assistant'"))
         self.assertLess(turn_block.index(stale_guard), turn_block.index("this.speakVoiceReply(data.message, stateResetVersion, sessionId, () => {"))
 
+    def test_widget_voice_turn_error_status_is_not_overwritten_by_finally(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        turn_start = content.index("async sendVoiceTurn(text)")
+        turn_end = content.index("speakVoiceReply(text", turn_start)
+        turn_block = content[turn_start:turn_end]
+        catch_start = turn_block.index("} catch (error) {")
+        catch_block = turn_block[catch_start:turn_block.index("} finally {", catch_start)]
+        finally_start = turn_block.index("} finally {")
+        finally_block = turn_block[finally_start:]
+
+        self.assertIn("this.voiceStatusLabel = 'Voice error';", catch_block)
+        self.assertIn("this.voiceHelpText = 'Tap the mic and try again, or use chat/manual booking.';", catch_block)
+        self.assertIn("if (!this.voiceSpeaking && !this.voiceError) {", finally_block)
+        self.assertNotIn("if (!this.voiceSpeaking) {", finally_block)
+
     def test_widget_voice_end_resets_processing_and_ignores_end_failures(self):
         from voice.models import VoiceAgentSettings
 
@@ -238,6 +322,10 @@ class WidgetTests(TestCase):
         end_block = content[end_start:end_end]
 
         self.assertIn("this.voiceProcessing = false;", end_block)
+        self.assertIn("this.stopVoiceBargeInRecognition();", end_block)
+        self.assertIn("this.voiceCurrentSpokenText = '';", end_block)
+        self.assertIn("this.voiceHelpText = 'Voice session ended. You can start again anytime.';", end_block)
+        self.assertIn("this.voiceError = '';", end_block)
         self.assertIn("try {", end_block)
         self.assertIn("} catch (error) {", end_block)
         self.assertIn("// Ending is best-effort", end_block)
@@ -321,6 +409,43 @@ class WidgetTests(TestCase):
         self.assertIn("return;", recoverable_block)
         self.assertNotIn("Voice recognition had trouble hearing you. Please try again.", recoverable_block)
 
+    def test_widget_voice_terminal_recognition_errors_do_not_reset_ready_on_end(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening({ auto = false } = {})")
+        listen_end = content.index("startVoiceBargeInListening", listen_start)
+        listen_block = content[listen_start:listen_end]
+        error_start = listen_block.index("recognition.onerror = (event) => {")
+        error_block = listen_block[error_start:listen_block.index("};", error_start)]
+        end_start = listen_block.index("recognition.onend = () => {")
+        end_block = listen_block[end_start:listen_block.index("};", end_start)]
+
+        self.assertIn("let terminalRecognitionError = false;", listen_block)
+        self.assertIn("terminalRecognitionError = true;", error_block)
+        self.assertIn("if (terminalRecognitionError) return;", end_block)
+        self.assertLess(end_block.index("if (terminalRecognitionError) return;"), end_block.index("if (!this.voiceProcessing && !this.voiceSpeaking)"))
+
+    def test_widget_voice_manual_no_speech_end_resets_help_text(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening({ auto = false } = {})")
+        listen_end = content.index("startVoiceBargeInListening", listen_start)
+        listen_block = content[listen_start:listen_end]
+        end_start = listen_block.index("recognition.onend = () => {")
+        end_block = listen_block[end_start:listen_block.index("};", end_start)]
+
+        self.assertIn("if (!this.voiceProcessing && !this.voiceSpeaking) this.voiceStatusLabel = 'Ready to talk';", end_block)
+        self.assertIn("this.voiceHelpText = 'Tap the mic to continue.';", end_block)
+        self.assertLess(end_block.index("this.voiceStatusLabel = 'Ready to talk';"), end_block.index("this.voiceHelpText = 'Tap the mic to continue.';"))
+
     def test_widget_voice_recognition_callbacks_ignore_stale_session(self):
         from voice.models import VoiceAgentSettings
 
@@ -338,7 +463,34 @@ class WidgetTests(TestCase):
         self.assertGreaterEqual(listen_block.count(stale_guard), 4)
         self.assertLess(listen_block.index("const sessionId = this.voiceSessionId;"), listen_block.index("recognition.onstart = () => {"))
 
-    def test_widget_voice_speaks_welcome_then_waits_for_explicit_mic_tap(self):
+    def test_widget_voice_main_recognition_stops_before_sending_turn_and_does_not_mark_ready_while_speaking(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        listen_start = content.index("startVoiceListening({ auto = false } = {})")
+        listen_end = content.index("startVoiceBargeInListening", listen_start)
+        listen_block = content[listen_start:listen_end]
+        result_start = listen_block.index("recognition.onresult = async (event) => {")
+        result_block = listen_block[result_start:listen_block.index("};", result_start)]
+        end_start = listen_block.index("recognition.onend = () => {")
+        end_block = listen_block[end_start:listen_block.index("};", end_start)]
+
+        self.assertIn("if (this.voiceRecognition === recognition) this.voiceRecognition = null;", end_block)
+        self.assertIn("if (!this.voiceProcessing && !this.voiceSpeaking) this.voiceStatusLabel = 'Ready to talk';", end_block)
+        self.assertIn("this.voiceListening = false;", result_block)
+        self.assertIn("if (this.voiceRecognition === recognition) this.voiceRecognition = null;", result_block)
+        self.assertIn("recognition.onend = null;", result_block)
+        self.assertIn("recognition.onerror = null;", result_block)
+        self.assertIn("recognition.onresult = null;", result_block)
+        self.assertIn("recognition.stop();", result_block)
+        self.assertLess(result_block.index("recognition.onerror = null;"), result_block.index("recognition.stop();"))
+        self.assertLess(result_block.index("recognition.onresult = null;"), result_block.index("recognition.stop();"))
+        self.assertLess(result_block.index("recognition.stop();"), result_block.index("await this.sendVoiceTurn(text);"))
+
+    def test_widget_voice_speaks_welcome_then_auto_listens_and_supports_barge_in(self):
         from voice.models import VoiceAgentSettings
 
         VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
@@ -354,12 +506,117 @@ class WidgetTests(TestCase):
 
         self.assertIn("voiceAutoListen: false,", content)
         self.assertIn("voiceSpeaking: false,", content)
-        self.assertNotIn("this.voiceAutoListen = true;", start_voice_block)
+        self.assertIn("voiceBargeInRecognition: null,", content)
+        self.assertIn("voiceCurrentSpokenText: '',", content)
+        self.assertIn("this.voiceAutoListen = true;", start_voice_block)
         self.assertIn("this.speakVoiceReply(data.message, stateResetVersion, data.session_id, () => {", start_voice_block)
-        self.assertIn("this.voiceHelpText = 'Tap the mic to speak.';", start_voice_block)
-        self.assertNotIn("this.continueVoiceLoop", start_voice_block)
+        self.assertIn("this.continueVoiceLoop(stateResetVersion, data.session_id);", start_voice_block)
+        self.assertNotIn("this.voiceHelpText = 'Tap the mic to speak.';", start_voice_block)
         self.assertIn("this.speakVoiceReply(data.message, stateResetVersion, sessionId, () => {", send_turn_block)
         self.assertIn("this.continueVoiceLoop(stateResetVersion, sessionId);", send_turn_block)
+
+    def test_widget_voice_defines_barge_in_feedback_filters(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        normalize_start = content.index("normalizeVoiceText(text) {")
+        normalize_end = content.index("isNoiseVoiceText(text) {", normalize_start)
+        normalize_block = content[normalize_start:normalize_end]
+        noise_start = content.index("isNoiseVoiceText(text) {")
+        noise_end = content.index("isAssistantSelfFeedback(transcript, assistantText) {", noise_start)
+        noise_block = content[noise_start:noise_end]
+        feedback_start = content.index("isAssistantSelfFeedback(transcript, assistantText) {")
+        feedback_end = content.index("isValidBargeInTranscript(transcript, assistantText) {", feedback_start)
+        feedback_block = content[feedback_start:feedback_end]
+        valid_start = content.index("isValidBargeInTranscript(transcript, assistantText) {")
+        valid_end = content.index("async startVoice()", valid_start)
+        valid_block = content[valid_start:valid_end]
+
+        self.assertIn(".toLowerCase()", normalize_block)
+        self.assertIn(".replace(/[^a-z0-9\\s]/g, ' ')", normalize_block)
+        self.assertIn(".replace(/\\s+/g, ' ')", normalize_block)
+        self.assertIn("const noise = ['uh', 'um', 'er', 'ah', 'hmm'];", noise_block)
+        self.assertIn("return !normalized || normalized.length < 2 || noise.includes(normalized);", noise_block)
+        self.assertIn("if (heard === spoken) return true;", feedback_block)
+        self.assertIn("if (heard.length >= 12 && spoken.includes(heard)) return true;", feedback_block)
+        self.assertIn("if (heardWords.length >= 3 && spoken.includes(heard)) return true;", feedback_block)
+        self.assertIn("return !this.isNoiseVoiceText(transcript) && !this.isAssistantSelfFeedback(transcript, assistantText);", valid_block)
+
+    def test_widget_voice_barge_in_recognition_interrupts_speech_and_sends_turn(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        barge_start = content.index("startVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId)")
+        barge_end = content.index("async acceptVoiceBargeInTurn(text, stateResetVersion, sessionId, voiceSpeechTurnId)", barge_start)
+        barge_block = content[barge_start:barge_end]
+        accept_start = content.index("async acceptVoiceBargeInTurn(text, stateResetVersion, sessionId, voiceSpeechTurnId)")
+        accept_end = content.index("async sendVoiceTurn(text)", accept_start)
+        accept_block = content[accept_start:accept_end]
+
+        self.assertIn("if (!this.voiceAutoListen || !this.voiceSpeaking || this.voiceProcessing) return;", barge_block)
+        self.assertIn("this.stopVoiceBargeInRecognition();", barge_block)
+        self.assertIn("let acceptedBargeIn = false;", barge_block)
+        self.assertIn("let bargeInPermissionDenied = false;", barge_block)
+        self.assertIn("this.restartVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId);", barge_block)
+        self.assertIn("acceptedBargeIn = true;", barge_block)
+        self.assertIn("bargeInPermissionDenied = true;", barge_block)
+        self.assertIn("this.voiceAutoListen = false;", barge_block)
+        self.assertIn("this.voiceError = 'Microphone access was blocked. You can still type or book manually.';", barge_block)
+        self.assertIn("recognition.continuous = false;", barge_block)
+        self.assertIn("recognition.interimResults = false;", barge_block)
+        self.assertIn("this.isValidBargeInTranscript(text, assistantText)", barge_block)
+        self.assertIn("await this.acceptVoiceBargeInTurn(text, stateResetVersion, sessionId, voiceSpeechTurnId);", barge_block)
+        self.assertIn("recognition.start();", barge_block)
+        self.assertIn("this.voiceSpeaking = false;", accept_block)
+        self.assertIn("this.stopVoiceBargeInRecognition();", accept_block)
+        self.assertIn("this.stopVoiceActiveRecognition();", accept_block)
+        self.assertIn("window.speechSynthesis.cancel();", accept_block)
+        self.assertIn("await this.sendVoiceTurn(text);", accept_block)
+
+    def test_widget_voice_barge_in_restarts_after_filtered_self_feedback(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        restart_start = content.index("restartVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId) {")
+        restart_end = content.index("async acceptVoiceBargeInTurn", restart_start)
+        restart_block = content[restart_start:restart_end]
+        barge_start = content.index("startVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId)")
+        barge_end = content.index("async acceptVoiceBargeInTurn", barge_start)
+        barge_block = content[barge_start:barge_end]
+
+        self.assertIn("window.setTimeout(() => {", restart_block)
+        self.assertIn("this.voiceSpeechTurnId !== voiceSpeechTurnId", restart_block)
+        self.assertIn("!this.voiceSpeaking || this.voiceProcessing || !this.voiceAutoListen", restart_block)
+        self.assertIn("this.startVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId);", restart_block)
+        self.assertIn("if (!this.isValidBargeInTranscript(text, assistantText)) {", barge_block)
+        self.assertIn("this.restartVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId);", barge_block)
+        self.assertIn("if (!acceptedBargeIn && !bargeInPermissionDenied && !bargeInTerminalError) {", barge_block)
+
+    def test_widget_voice_barge_in_terminal_errors_stop_restart_loop(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        barge_start = content.index("startVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId)")
+        barge_end = content.index("async acceptVoiceBargeInTurn", barge_start)
+        barge_block = content[barge_start:barge_end]
+
+        self.assertIn("let bargeInTerminalError = false;", barge_block)
+        self.assertIn("const terminalBargeInError = recognitionError === 'audio-capture' || recognitionError === 'network' || recognitionError === 'language-not-supported';", barge_block)
+        self.assertIn("bargeInTerminalError = true;", barge_block)
+        self.assertIn("this.voiceAutoListen = false;", barge_block)
+        self.assertIn("if (!acceptedBargeIn && !bargeInPermissionDenied && !bargeInTerminalError) {", barge_block)
 
     def test_widget_voice_mic_interrupts_speech_and_blocks_duplicates_while_processing(self):
         from voice.models import VoiceAgentSettings
@@ -384,6 +641,26 @@ class WidgetTests(TestCase):
         self.assertLess(interrupt_block.index("this.voiceSpeaking = false;"), interrupt_block.index("window.speechSynthesis.cancel();"))
         self.assertIn("this.startVoiceListening({ auto: false });", interrupt_block)
 
+    def test_widget_voice_mic_starts_new_session_after_end(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        toggle_start = content.index("toggleVoiceListening() {")
+        toggle_end = content.index("startVoiceListening", toggle_start)
+        toggle_block = content[toggle_start:toggle_end]
+        end_start = content.index("async endVoice()")
+        end_end = content.index("get filteredFaqs()", end_start)
+        end_block = content[end_start:end_end]
+
+        self.assertIn("if (!this.voiceSessionId) {", toggle_block)
+        self.assertIn("this.startVoice();", toggle_block)
+        self.assertLess(toggle_block.index("if (!this.voiceSessionId) {"), toggle_block.index("if (this.voiceProcessing) {"))
+        self.assertIn("this.voiceSessionId = '';", end_block)
+        self.assertIn("this.voiceHelpText = 'Voice session ended. You can start again anytime.';", end_block)
+
     def test_widget_voice_auto_listen_stops_on_end_and_uses_synthesis_callbacks(self):
         from voice.models import VoiceAgentSettings
 
@@ -405,9 +682,41 @@ class WidgetTests(TestCase):
         self.assertIn("utterance.onerror = finishSpeaking;", speak_block)
         self.assertIn("this.voiceSpeaking = true;", speak_block)
         self.assertIn("this.voiceStatusLabel = 'Speaking';", speak_block)
+        self.assertIn("this.stopVoiceBargeInRecognition();", speak_block)
+        self.assertIn("this.startVoiceBargeInListening(stateResetVersion, sessionId, text, voiceSpeechTurnId);", speak_block)
+        self.assertIn("if (!this.voiceProcessing && !this.voiceError && this.voiceAutoListen) {", finish_block)
+        self.assertNotIn("if (!this.voiceProcessing) {", finish_block)
         self.assertLess(finish_block.index("if (!this.voiceSpeaking) return;"), finish_block.index("if (afterSpeak) afterSpeak();"))
         self.assertIn("this.voiceAutoListen = false;", end_block)
         self.assertIn("this.voiceSpeaking = false;", end_block)
+
+    def test_widget_voice_barge_in_uses_speech_turn_guard_for_stale_callbacks(self):
+        from voice.models import VoiceAgentSettings
+
+        VoiceAgentSettings.objects.create(clinic=self.clinic, is_enabled=True, display_name="Clinic Voice")
+
+        response = self.client.get(reverse("widget:home", args=[self.clinic.slug]))
+        content = response.content.decode()
+        speak_start = content.index("speakVoiceReply(text")
+        speak_end = content.index("async endVoice()", speak_start)
+        speak_block = content[speak_start:speak_end]
+        barge_start = content.index("startVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId)")
+        barge_end = content.index("async acceptVoiceBargeInTurn(text, stateResetVersion, sessionId, voiceSpeechTurnId)", barge_start)
+        barge_block = content[barge_start:barge_end]
+        accept_start = content.index("async acceptVoiceBargeInTurn(text, stateResetVersion, sessionId, voiceSpeechTurnId)")
+        accept_end = content.index("async sendVoiceTurn(text)", accept_start)
+        accept_block = content[accept_start:accept_end]
+
+        self.assertIn("voiceSpeechTurnId: 0,", content)
+        self.assertIn("this.voiceSpeechTurnId += 1;", speak_block)
+        self.assertIn("const voiceSpeechTurnId = this.voiceSpeechTurnId;", speak_block)
+        self.assertIn("this.voiceSpeechTurnId !== voiceSpeechTurnId", speak_block)
+        self.assertIn("this.startVoiceBargeInListening(stateResetVersion, sessionId, text, voiceSpeechTurnId);", speak_block)
+        self.assertIn("startVoiceBargeInListening(stateResetVersion, sessionId, assistantText, voiceSpeechTurnId) {", barge_block)
+        self.assertGreaterEqual(barge_block.count("this.voiceSpeechTurnId !== voiceSpeechTurnId"), 4)
+        self.assertIn("await this.acceptVoiceBargeInTurn(text, stateResetVersion, sessionId, voiceSpeechTurnId);", barge_block)
+        self.assertIn("async acceptVoiceBargeInTurn(text, stateResetVersion, sessionId, voiceSpeechTurnId) {", accept_block)
+        self.assertIn("this.voiceSpeechTurnId !== voiceSpeechTurnId", accept_block)
 
     def test_widget_voice_no_synthesis_defers_after_speak_for_auto_loop(self):
         from voice.models import VoiceAgentSettings

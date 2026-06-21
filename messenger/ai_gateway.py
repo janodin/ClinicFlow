@@ -233,6 +233,28 @@ def _text_has_contact_detail(text):
 
 
 SPECIFIC_TIME_RE = re.compile(r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:[01]?\d|2[0-3]):[0-5]\d\b", re.IGNORECASE)
+EXPLICIT_DATE_RE = re.compile(
+    r"\b(?:today|tomorrow)\b|"
+    r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b|"
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b",
+    re.IGNORECASE,
+)
+EXPLICIT_YEAR_DATE_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|"
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*)\d{4}\b",
+    re.IGNORECASE,
+)
+TIED_YEAR_DATE_RE = re.compile(
+    r"(?:\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?\b"
+    r"[^.!?\n]{0,80}\b\d{4}\b)|"
+    r"(?:\b\d{4}\b[^.!?\n]{0,80}\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?\b)",
+    re.IGNORECASE,
+)
+WEEKDAY_RE = re.compile(r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.IGNORECASE)
 
 
 def _text_mentions_specific_time(text):
@@ -284,7 +306,34 @@ def _current_turn_mentions_tool_time(channel, data, args):
     text = _latest_current_turn_time_text(data)
     if not text:
         return False
-    return any(marker in text for marker in _time_markers_for_summary(local_start))
+    return any(_text_contains_marker(text, marker) for marker in _time_markers_for_summary(local_start))
+
+
+def _text_contains_marker(text, marker):
+    marker = str(marker or "").strip()
+    if not marker:
+        return False
+    return bool(re.search(rf"(?<![A-Za-z0-9]){re.escape(marker)}(?![A-Za-z0-9])", str(text or ""), flags=re.IGNORECASE))
+
+
+def _text_has_tied_year_date(text):
+    value = str(text or "")
+    return bool(EXPLICIT_YEAR_DATE_RE.search(value) or TIED_YEAR_DATE_RE.search(value))
+
+
+def _current_turn_date_conflicts_tool_date(channel, data, args):
+    clinic = _clinic_for_tool(channel, data)
+    local_start = _local_start_from_availability_args(channel, data, args)
+    if not clinic or not local_start:
+        return False
+    text = "\n".join(_current_turn_texts(data)).lower()
+    if not text:
+        return False
+    if EXPLICIT_DATE_RE.search(text):
+        return not _date_text_matches_local_start(clinic, local_start, text)
+    if WEEKDAY_RE.search(text):
+        return local_start.strftime("%A").lower() not in text
+    return False
 
 
 def _current_turn_mentions_past_date(data):
@@ -301,6 +350,8 @@ def _availability_tool_args_are_explicit_past_request(channel, data, args):
 
 def _availability_tool_args_match_current_turn(channel, data, args):
     if not isinstance(args, dict):
+        return _blocked_exact_slot_tool_result()
+    if args.get("preferred_starts_at") and _current_turn_date_conflicts_tool_date(channel, data, args):
         return _blocked_exact_slot_tool_result()
     if args.get("preferred_starts_at") and not (
         _current_turn_mentions_tool_time(channel, data, args) or _current_turn_selects_listed_option(data)
@@ -424,7 +475,6 @@ def _blocked_availability_tool_result():
 def _blocked_exact_slot_tool_result():
     return {
         "found": False,
-        "available": False,
         "exact_slot_tool_blocked": True,
         "message": BLOCKED_EXACT_SLOT_TOOL_MESSAGE,
     }
@@ -715,18 +765,73 @@ def _local_start_from_booking_args(clinic, args):
 
 
 def _date_markers_for_summary(clinic, local_start):
+    return _date_markers_for_matching(clinic, local_start)
+
+
+def _ordinal_day(day):
+    if 10 <= day % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def _text_contains_matching_tied_year_date(text, local_start):
+    value = str(text or "")
+    month_names = {local_start.strftime("%B"), local_start.strftime("%b")}
+    month_pattern = "|".join(re.escape(month.lower()) for month in sorted(month_names, key=len, reverse=True))
+    day_pattern = re.escape(str(local_start.day))
+    patterns = [
+        rf"\b(?:{month_pattern})\s+{day_pattern}(?:st|nd|rd|th)?\b[^.!?\n]{{0,80}}\b{local_start.year}\b",
+        rf"\b{local_start.year}\b[^.!?\n]{{0,80}}\b(?:{month_pattern})\s+{day_pattern}(?:st|nd|rd|th)?\b",
+    ]
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _date_text_matches_local_start(clinic, local_start, text):
+    value = str(text or "").lower()
+    if any(_text_contains_marker(value, marker) for marker in _date_markers_for_matching(clinic, local_start, value)):
+        return True
+    return _text_has_tied_year_date(value) and _text_contains_matching_tied_year_date(value, local_start)
+
+
+def _date_markers_for_matching(clinic, local_start, text=""):
     clinic_today = timezone.now().astimezone(ZoneInfo(clinic.timezone)).date()
     target_date = local_start.date()
     month = local_start.strftime("%B")
     short_month = local_start.strftime("%b")
-    day = str(local_start.day)
+    day_number = local_start.day
+    day = str(day_number)
+    ordinal_day = _ordinal_day(day_number)
     year = str(local_start.year)
-    markers = {
+    year_markers = {
         target_date.isoformat(),
-        f"{month} {day}",
         f"{month} {day}, {year}",
-        f"{short_month} {day}",
+        f"{month} {day} {year}",
+        f"{month} {ordinal_day}, {year}",
+        f"{month} {ordinal_day} {year}",
         f"{short_month} {day}, {year}",
+        f"{short_month} {day} {year}",
+        f"{short_month} {ordinal_day}, {year}",
+        f"{short_month} {ordinal_day} {year}",
+        f"{local_start.month}/{day_number}/{year}",
+        f"{local_start.month:02d}/{day_number:02d}/{year}",
+        f"{local_start.month}-{day_number}-{year}",
+        f"{local_start.month:02d}-{day_number:02d}-{year}",
+    }
+    if _text_has_tied_year_date(text):
+        return {marker.lower() for marker in year_markers}
+
+    markers = {
+        *year_markers,
+        f"{month} {day}",
+        f"{month} {ordinal_day}",
+        f"{short_month} {day}",
+        f"{short_month} {ordinal_day}",
+        f"{local_start.month}/{day_number}",
+        f"{local_start.month:02d}/{day_number:02d}",
+        f"{local_start.month}-{day_number}",
+        f"{local_start.month:02d}-{day_number:02d}",
     }
     if target_date == clinic_today:
         markers.add("today")
@@ -767,9 +872,9 @@ def _booking_summary_tool_mismatch_error(text, args=None, clinic=None):
 
     local_start = _local_start_from_booking_args(clinic, args)
     if local_start:
-        if not any(marker in lower for marker in _date_markers_for_summary(clinic, local_start)):
+        if not _date_text_matches_local_start(clinic, local_start, lower):
             return "Appointment creation rejected because the tool date does not match the preceding booking summary."
-        if not any(marker in lower for marker in _time_markers_for_summary(local_start)):
+        if not any(_text_contains_marker(lower, marker) for marker in _time_markers_for_summary(local_start)):
             return "Appointment creation rejected because the tool time does not match the preceding booking summary."
     return ""
 
@@ -956,6 +1061,8 @@ def _reply_from_tool_result(result, *, clinic=None, data=None, args=None):
         return error
     if result.get("availability_tool_blocked") is True:
         return BLOCKED_AVAILABILITY_SAFE_REPLY
+    if result.get("exact_slot_tool_blocked") is True:
+        return "I got your message. Please send the exact date and time you want to check, or choose one of the listed options."
     if result.get("created") is True and isinstance(result.get("appointment"), dict):
         appointment = result["appointment"]
         if str((data or {}).get("channel", "")).strip().lower() == "voice":
@@ -1015,26 +1122,42 @@ def _contains_unverified_availability_claim(reply):
     text = str(reply or "").lower()
     if not text:
         return False
+    time_words = r"(?:\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b)"
+    clinic_hours_subject = r"(?:we|clinic|office|our\s+clinic|the\s+clinic|our\s+office|the\s+office)"
+    clinic_hours_sentence = rf"\b(?:(?:{clinic_hours_subject})\s*(?:are|is)?\s*open\s+from\s+{time_words}\s*(?:to|-)\s*{time_words}|(?:our\s+)?hours\s+(?:are|is)\s+{time_words}\s*(?:to|-)\s*{time_words})\s*(?:[.,;]|$)"
+    scan_text = re.sub(clinic_hours_sentence, " ", text, flags=re.IGNORECASE).strip()
+    if not scan_text:
+        return False
     date_words = (
         r"(?:today|tomorrow|"
         r"\b\d{4}-\d{2}-\d{2}\b|"
         r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|"
         r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
     )
-    time_words = r"(?:\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b)"
     technical_object_words = r"(?:system|software|widget|platform|page|portal|app)"
     appointment_cue = rf"(?:\bappointments?\b(?!\s+{technical_object_words})|\bappointment\s+times?\b)"
     booking_cue = rf"(?:\bbook(?:ing)?\b(?!\s+{technical_object_words}))"
     scheduling_cue = rf"(?:{time_words}|{date_words}|\bslots?\b|{appointment_cue}|{booking_cue})"
     availability_words = r"(?:available|unavailable|fully booked|open|closed)"
+    availability_nouns = r"(?:availability|openings?|open\s+slots?)"
+    negative_booked_words = r"(?:already\s+booked|taken|occupied)"
+    bookable_words = r"(?:can\s+book|can\s+be\s+booked|is\s+free)"
     patterns = [
         rf"{scheduling_cue}.{{0,60}}\b{availability_words}\b",
         rf"\b{availability_words}\b.{{0,60}}{scheduling_cue}",
+        rf"{scheduling_cue}.{{0,60}}\b{availability_nouns}\b",
+        rf"\b{availability_nouns}\b.{{0,60}}{scheduling_cue}",
+        rf"{scheduling_cue}.{{0,60}}\b{bookable_words}\b",
+        rf"\b{bookable_words}\b.{{0,60}}{scheduling_cue}",
+        rf"{scheduling_cue}.{{0,60}}\b{negative_booked_words}\b",
+        rf"\b{negative_booked_words}\b.{{0,60}}{scheduling_cue}",
         r"\bfully booked\b",
-        r"\b(?:(?:that|this|the)\s+)?time\s+(?:is\s+)?(?:available|unavailable|open|closed)\b",
+        r"\b(?:(?:that|this|the)\s+)?time\s+(?:is\s+)?(?:available|unavailable|open|closed|taken|occupied)\b",
+        r"\b(?:(?:that|this|the|requested)\s+)?(?:appointment\s+)?(?:slot|time)\s+(?:is\s+)?(?:already\s+)?booked\b",
+        r"\b(?:that|this|the|requested)\s+appointment\s+(?:is\s+)?(?:already\s+)?booked\b",
         r"\bno\s+slots?\b",
     ]
-    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+    return any(re.search(pattern, scan_text, flags=re.IGNORECASE) for pattern in patterns)
 
 
 def _system_message(clinic, context, patient_details_prompt="", confirmation_followup_prompt=""):

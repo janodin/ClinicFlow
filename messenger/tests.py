@@ -2417,6 +2417,26 @@ def test_ai_gateway_formats_widget_provider_reply_without_raw_html(mock_call):
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_preserves_patient_facing_need_to_reply(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_need_to_reply", "PAGE-GATEWAY-NEED-TO-REPLY")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-need-to-reply")
+    mock_call.return_value = {"role": "assistant", "content": "I need to know which service you want."}
+
+    result = build_gateway_reply({"channel": "widget", "clinic_slug": clinic.slug, "message": "I want to book"})
+
+    assert result == {
+        "reply": "I need to know which service you want.",
+        "fallback": False,
+        "error": "",
+    }
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 def test_ai_gateway_formats_voice_provider_reply_for_spoken_output(mock_call):
     from clinics.models import ClinicAIProviderSettings, ClinicAISettings
     from messenger.ai_gateway import build_gateway_reply
@@ -3705,6 +3725,205 @@ def test_ai_gateway_uses_tool_result_for_provider_followup_availability_claim(mo
 
 @pytest.mark.django_db
 @patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_allows_clinic_hours_open_reply_without_availability_tool(mock_call):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_open_hours_reply", "PAGE-GATEWAY-OPEN-HOURS")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-open-hours")
+    mock_call.return_value = {"role": "assistant", "content": "We are open from 9:00 AM to 5:00 PM."}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "What times are you open?",
+    })
+
+    assert result == {
+        "reply": "We are open from 9:00 AM to 5:00 PM.",
+        "fallback": False,
+        "error": "",
+    }
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("provider_reply", [
+    "We are open from 9:00 AM to 5:00 PM, but 9:00 AM is already booked.",
+    "Our hours are 9:00 AM to 5:00 PM, but that time is booked.",
+    "Our hours are 9:00 AM to 5:00 PM, but that time is taken.",
+])
+def test_ai_gateway_mixed_clinic_hours_slot_claim_triggers_unverified_availability_guard(mock_call, provider_reply):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_mixed_hours_reply", "PAGE-GATEWAY-MIXED-HOURS")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-mixed-hours")
+    mock_call.return_value = {"role": "assistant", "content": provider_reply}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "What times are you open?",
+    })
+
+    assert result == {
+        "reply": "Please use the booking form.",
+        "fallback": True,
+        "error": "unverified_availability_claim",
+    }
+    assert result["reply"] != provider_reply
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("provider_reply", [
+    "We are open from 9:00 AM to 5:00 PM. Tomorrow is available.",
+    "We are open from 9:00 AM to 5:00 PM, tomorrow is available.",
+])
+def test_ai_gateway_separate_clinic_hours_availability_claim_triggers_unverified_availability_guard(mock_call, provider_reply):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_separate_hours_claim", "PAGE-GATEWAY-SEPARATE-HOURS")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-separate-hours")
+    mock_call.return_value = {"role": "assistant", "content": provider_reply}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "What times are you open?",
+    })
+
+    assert result == {
+        "reply": "Please use the booking form.",
+        "fallback": True,
+        "error": "unverified_availability_claim",
+    }
+    assert result["reply"] != provider_reply
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("provider_reply", [
+    "We have availability tomorrow.",
+    "Tomorrow has openings.",
+])
+def test_ai_gateway_availability_noun_claim_triggers_unverified_availability_guard(mock_call, provider_reply):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_availability_noun", "PAGE-GATEWAY-AVAILABILITY-NOUN")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-availability-noun")
+    mock_call.return_value = {"role": "assistant", "content": provider_reply}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "Do you have appointments tomorrow?",
+    })
+
+    assert result == {
+        "reply": "Please use the booking form.",
+        "fallback": True,
+        "error": "unverified_availability_claim",
+    }
+    assert result["reply"] != provider_reply
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("provider_reply", [
+    "We are open from 9:00 AM to 5:00 PM. Please call us if you need help.",
+    "We are open from 9:00 AM to 5:00 PM, please call us if you need help.",
+])
+def test_ai_gateway_allows_clinic_hours_safe_help_text_without_availability_tool(mock_call, provider_reply):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_hours_help_text", "PAGE-GATEWAY-HOURS-HELP")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-hours-help")
+    mock_call.return_value = {"role": "assistant", "content": provider_reply}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "What times are you open?",
+    })
+
+    assert result == {
+        "reply": provider_reply,
+        "fallback": False,
+        "error": "",
+    }
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("provider_reply", [
+    "Slots are open from 9:00 AM to 10:00 AM.",
+    "Appointments are open from 9:00 AM to 10:00 AM.",
+])
+def test_ai_gateway_open_from_slot_claim_triggers_unverified_availability_guard(mock_call, provider_reply):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_open_from_slot_claim", "PAGE-GATEWAY-OPEN-FROM-SLOT")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-open-from-slot")
+    mock_call.return_value = {"role": "assistant", "content": provider_reply}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "What appointment times are open?",
+    })
+
+    assert result == {
+        "reply": "Please use the booking form.",
+        "fallback": True,
+        "error": "unverified_availability_claim",
+    }
+    assert result["reply"] != provider_reply
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+@pytest.mark.parametrize("provider_reply", [
+    "You can book tomorrow at 9:00 AM.",
+    "Tomorrow can be booked.",
+    "9:00 AM is free tomorrow.",
+])
+def test_ai_gateway_raw_booking_availability_claim_triggers_unverified_availability_guard(mock_call, provider_reply):
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_raw_booking_claim", "PAGE-GATEWAY-RAW-BOOKING")
+    ClinicAISettings.objects.create(clinic=clinic, is_ai_enabled=True, fallback_message="Please use the booking form.")
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-raw-booking")
+    mock_call.return_value = {"role": "assistant", "content": provider_reply}
+
+    result = build_gateway_reply({
+        "channel": "widget",
+        "clinic_slug": clinic.slug,
+        "message": "Can I book tomorrow?",
+    })
+
+    assert result == {
+        "reply": "Please use the booking form.",
+        "fallback": True,
+        "error": "unverified_availability_claim",
+    }
+    assert result["reply"] != provider_reply
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
 @pytest.mark.parametrize("message", [
     "Hello",
     "Hello, can you tell me the exact location?",
@@ -3937,6 +4156,645 @@ def test_ai_gateway_blocks_reused_exact_slot_when_current_turn_has_no_time(mock_
     tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
     assert "exact_slot_tool_blocked" in tool_message["content"]
     assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_block_provider_failure_returns_safe_clarification(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+    from messenger.ai_provider_client import AIProviderError
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_exact_slot_failure", "PAGE-GATEWAY-EXACT-SLOT-FAILURE")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="Please use the booking form.",
+    )
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-exact-slot-failure")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    stale_start = timezone.make_aware(timezone.datetime.combine(target_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": stale_start.isoformat()}),
+                },
+            }],
+        },
+        AIProviderError("primary failed"),
+        AIProviderError("fallback failed"),
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-EXACT-SLOT-FAILURE",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"I still want {target_date.strftime('%B')} {target_date.day} for my schedule.",
+        "history": [
+            {"role": "assistant", "content": "That slot is available: 1:00 PM. Please provide the remaining booking details so I can summarize before confirmation."},
+        ],
+    })
+
+    assert result == {
+        "reply": "I got your message. Please send the exact date and time you want to check, or choose one of the listed options.",
+        "fallback": False,
+        "error": "",
+    }
+    assert "not available" not in result["reply"]
+    assert result["reply"] != "Please use the booking form."
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_block_unverified_claim_returns_safe_clarification(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_exact_slot_claim", "PAGE-GATEWAY-EXACT-SLOT-CLAIM")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="Please use the booking form.",
+    )
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-exact-slot-claim")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    stale_start = timezone.make_aware(timezone.datetime.combine(target_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": stale_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "That appointment time is not available."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-EXACT-SLOT-CLAIM",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"I still want {target_date.strftime('%B')} {target_date.day} for my schedule.",
+        "history": [
+            {"role": "assistant", "content": "That slot is available: 1:00 PM. Please provide the remaining booking details so I can summarize before confirmation."},
+        ],
+    })
+
+    assert result == {
+        "reply": "I got your message. Please send the exact date and time you want to check, or choose one of the listed options.",
+        "fallback": False,
+        "error": "",
+    }
+    assert "not available" not in result["reply"]
+    assert result["reply"] != "Please use the booking form."
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_block_already_booked_claim_returns_safe_clarification(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_exact_slot_booked", "PAGE-GATEWAY-EXACT-SLOT-BOOKED")
+    ClinicAISettings.objects.create(
+        clinic=clinic,
+        messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI,
+        fallback_message="Please use the booking form.",
+    )
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-exact-slot-booked")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    stale_start = timezone.make_aware(timezone.datetime.combine(target_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": stale_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "That slot is already booked."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-EXACT-SLOT-BOOKED",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"I still want {target_date.strftime('%B')} {target_date.day} for my schedule.",
+        "history": [
+            {"role": "assistant", "content": "That slot is available: 1:00 PM. Please provide the remaining booking details so I can summarize before confirmation."},
+        ],
+    })
+
+    assert result == {
+        "reply": "I got your message. Please send the exact date and time you want to check, or choose one of the listed options.",
+        "fallback": False,
+        "error": "",
+    }
+    assert "already booked" not in result["reply"]
+    assert result["reply"] != "Please use the booking form."
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_blocks_exact_slot_when_current_turn_date_differs(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_stale_date", "PAGE-GATEWAY-STALE-DATE")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-stale-date")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    wrong_date = timezone.localdate() + timedelta(days=3)
+    current_turn_date = wrong_date + timedelta(days=1)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=wrong_date.weekday(), open_time=time(9), close_time=time(10))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    stale_start = timezone.make_aware(timezone.datetime.combine(wrong_date, time(9)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": stale_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please send the exact date and time you want to check, or choose one of the listed options."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-STALE-DATE",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"{current_turn_date.strftime('%B')} {current_turn_date.day} at 9am",
+        "history": [
+            {"role": "assistant", "content": "What date and time would you like to check?"},
+        ],
+    })
+
+    assert result["fallback"] is False
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_date_overlap_blocks_substring_match(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_date_overlap", "PAGE-GATEWAY-DATE-OVERLAP")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-date-overlap")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    today = timezone.localdate()
+    year = today.year + 1 if today.month == 12 else today.year
+    month = 1 if today.month == 12 else today.month + 1
+    tool_date = date(year, month, 2)
+    current_turn_date = date(year, month, 21)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=tool_date.weekday(), open_time=time(9), close_time=time(10))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    tool_start = timezone.make_aware(timezone.datetime.combine(tool_date, time(9)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": tool_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please send the exact date and time you want to check, or choose one of the listed options."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-DATE-OVERLAP",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"{current_turn_date.strftime('%B')} {current_turn_date.day} at 9am",
+        "history": [{"role": "assistant", "content": "What date and time would you like to check?"}],
+    })
+
+    assert result["fallback"] is False
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_time_overlap_blocks_substring_match(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_time_overlap", "PAGE-GATEWAY-TIME-OVERLAP")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-time-overlap")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    target_date = timezone.localdate() + timedelta(days=3)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    tool_start = timezone.make_aware(timezone.datetime.combine(target_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": tool_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please send the exact date and time you want to check, or choose one of the listed options."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-TIME-OVERLAP",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"{target_date.strftime('%B')} {target_date.day} at 11:00 PM",
+        "history": [{"role": "assistant", "content": "What date and time would you like to check?"}],
+    })
+
+    assert result["fallback"] is False
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+def test_ai_gateway_booking_summary_date_overlap_returns_mismatch():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_gateway import _booking_summary_tool_mismatch_error
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_summary_date_overlap", "PAGE-GATEWAY-SUMMARY-DATE-OVERLAP")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime(2026, 7, 2, 13, 0), clinic_tz)
+    summary = "Booking summary: service Dental Cleaning, date/time July 21 at 1:00 PM. Please confirm."
+
+    error = _booking_summary_tool_mismatch_error(summary, {"service_id": service.id, "starts_at": starts_at.isoformat()}, clinic)
+
+    assert error == "Appointment creation rejected because the tool date does not match the preceding booking summary."
+
+
+@pytest.mark.django_db
+def test_ai_gateway_booking_summary_time_overlap_returns_mismatch():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_gateway import _booking_summary_tool_mismatch_error
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_summary_time_overlap", "PAGE-GATEWAY-SUMMARY-TIME-OVERLAP")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime(2026, 7, 21, 13, 0), clinic_tz)
+    summary = "Booking summary: service Dental Cleaning, date/time July 21 at 11:00 PM. Please confirm."
+
+    error = _booking_summary_tool_mismatch_error(summary, {"service_id": service.id, "starts_at": starts_at.isoformat()}, clinic)
+
+    assert error == "Appointment creation rejected because the tool time does not match the preceding booking summary."
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_wrong_year_blocks_unyearred_date_match(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_wrong_year", "PAGE-GATEWAY-WRONG-YEAR")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-wrong-year")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    tool_year = timezone.localdate().year + 1
+    current_turn_year = tool_year + 1
+    tool_date = date(tool_year, 7, 2)
+    current_turn_date = date(current_turn_year, 7, 2)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=tool_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    tool_start = timezone.make_aware(timezone.datetime.combine(tool_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": tool_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please send the exact date and time you want to check, or choose one of the listed options."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-WRONG-YEAR",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"{current_turn_date.strftime('%B')} {current_turn_date.day}, {current_turn_date.year} at 1:00 PM",
+        "history": [{"role": "assistant", "content": "What date and time would you like to check?"}],
+    })
+
+    assert result["fallback"] is False
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_separated_wrong_year_blocks_unyearred_date_match(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_separated_wrong_year", "PAGE-GATEWAY-SEPARATED-WRONG-YEAR")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-separated-wrong-year")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    tool_year = timezone.localdate().year + 1
+    current_turn_year = tool_year + 1
+    tool_date = date(tool_year, 7, 2)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=tool_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    tool_start = timezone.make_aware(timezone.datetime.combine(tool_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": tool_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please send the exact date and time you want to check, or choose one of the listed options."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-SEPARATED-WRONG-YEAR",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"July 2 at 1:00 PM in {current_turn_year}",
+        "history": [{"role": "assistant", "content": "What date and time would you like to check?"}],
+    })
+
+    assert result["fallback"] is False
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_year_before_wrong_year_blocks_unyearred_date_match(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_year_before_wrong_year", "PAGE-GATEWAY-YEAR-BEFORE-WRONG")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-year-before-wrong")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    tool_year = timezone.localdate().year + 1
+    current_turn_year = tool_year + 1
+    tool_date = date(tool_year, 7, 2)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=tool_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    tool_start = timezone.make_aware(timezone.datetime.combine(tool_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": tool_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please send the exact date and time you want to check, or choose one of the listed options."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-YEAR-BEFORE-WRONG",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": f"in {current_turn_year}, July 2 at 1:00 PM",
+        "history": [{"role": "assistant", "content": "What date and time would you like to check?"}],
+    })
+
+    assert result["fallback"] is False
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" in tool_message["content"]
+    assert "selected_slot" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+def test_ai_gateway_booking_summary_wrong_year_returns_mismatch():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_gateway import _booking_summary_tool_mismatch_error
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_summary_wrong_year", "PAGE-GATEWAY-SUMMARY-WRONG-YEAR")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    tool_year = timezone.localdate().year + 1
+    summary_year = tool_year + 1
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime(tool_year, 7, 2, 13, 0), clinic_tz)
+    summary = f"Booking summary: service Dental Cleaning, date/time July 2, {summary_year} at 1:00 PM. Please confirm."
+
+    error = _booking_summary_tool_mismatch_error(summary, {"service_id": service.id, "starts_at": starts_at.isoformat()}, clinic)
+
+    assert error == "Appointment creation rejected because the tool date does not match the preceding booking summary."
+
+
+@pytest.mark.django_db
+def test_ai_gateway_booking_summary_separated_wrong_year_returns_mismatch():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_gateway import _booking_summary_tool_mismatch_error
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_summary_separated_wrong_year", "PAGE-GATEWAY-SUMMARY-SEPARATED-WRONG-YEAR")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    tool_year = timezone.localdate().year + 1
+    summary_year = tool_year + 1
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime(tool_year, 7, 2, 13, 0), clinic_tz)
+    summary = f"Booking summary: service Dental Cleaning, date/time July 2 at 1:00 PM in {summary_year}. Please confirm."
+
+    error = _booking_summary_tool_mismatch_error(summary, {"service_id": service.id, "starts_at": starts_at.isoformat()}, clinic)
+
+    assert error == "Appointment creation rejected because the tool date does not match the preceding booking summary."
+
+
+@pytest.mark.django_db
+def test_ai_gateway_booking_summary_year_before_wrong_year_returns_mismatch():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_gateway import _booking_summary_tool_mismatch_error
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_summary_year_before_wrong_year", "PAGE-GATEWAY-SUMMARY-YEAR-BEFORE-WRONG")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    tool_year = timezone.localdate().year + 1
+    summary_year = tool_year + 1
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime(tool_year, 7, 2, 13, 0), clinic_tz)
+    summary = f"Booking summary: service Dental Cleaning, date/time in {summary_year}, July 2 at 1:00 PM. Please confirm."
+
+    error = _booking_summary_tool_mismatch_error(summary, {"service_id": service.id, "starts_at": starts_at.isoformat()}, clinic)
+
+    assert error == "Appointment creation rejected because the tool date does not match the preceding booking summary."
+
+
+@pytest.mark.django_db
+@patch("messenger.ai_gateway.call_chat_completion")
+def test_ai_gateway_exact_slot_ordinal_date_is_accepted(mock_call):
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+    from clinics.models import ClinicAIProviderSettings, ClinicAISettings
+    from messenger.ai_gateway import build_gateway_reply
+
+    clinic, connection = _create_messenger_clinic("owner_gateway_ordinal_date", "PAGE-GATEWAY-ORDINAL-DATE")
+    ClinicAISettings.objects.create(clinic=clinic, messenger_response_mode=ClinicAISettings.MESSENGER_MODE_AI)
+    ClinicAIProviderSettings.objects.create(clinic=clinic, model="gpt-4o-mini", api_key="sk-ordinal-date")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    target_year = timezone.localdate().year + 1
+    target_date = date(target_year, 7, 2)
+    ClinicBusinessHour.objects.create(clinic=clinic, weekday=target_date.weekday(), open_time=time(13), close_time=time(14))
+    clinic_tz = ZoneInfo(clinic.timezone)
+    tool_start = timezone.make_aware(timezone.datetime.combine(target_date, time(13)), clinic_tz).astimezone(dt_timezone.utc)
+    mock_call.side_effect = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "arguments": json.dumps({"service_id": service.id, "preferred_starts_at": tool_start.isoformat()}),
+                },
+            }],
+        },
+        {"role": "assistant", "content": "Please provide your remaining booking details."},
+    ]
+
+    result = build_gateway_reply({
+        "channel": "messenger",
+        "page_id": connection.page_id,
+        "psid": "PSID-ORDINAL-DATE",
+        "turn_token": "turn-token",
+        "input_sequence": 3,
+        "message": "July 2nd at 1:00 PM",
+        "history": [{"role": "assistant", "content": "What date and time would you like to check?"}],
+    })
+
+    assert result["fallback"] is False
+    second_messages = mock_call.call_args_list[1].args[1]
+    tool_message = [message for message in second_messages if message.get("role") == "tool"][0]
+    assert "exact_slot_tool_blocked" not in tool_message["content"]
+
+
+@pytest.mark.django_db
+def test_ai_gateway_booking_summary_ordinal_date_is_accepted():
+    from zoneinfo import ZoneInfo
+    from messenger.ai_gateway import _booking_summary_tool_mismatch_error
+
+    clinic, _connection = _create_messenger_clinic("owner_gateway_summary_ordinal_date", "PAGE-GATEWAY-SUMMARY-ORDINAL-DATE")
+    service = Service.objects.create(clinic=clinic, name="Dental Cleaning", duration_minutes=30)
+    target_year = timezone.localdate().year + 1
+    clinic_tz = ZoneInfo(clinic.timezone)
+    starts_at = timezone.make_aware(timezone.datetime(target_year, 7, 2, 13, 0), clinic_tz)
+    summary = "Booking summary: service Dental Cleaning, date/time July 2nd at 1:00 PM. Please confirm."
+
+    error = _booking_summary_tool_mismatch_error(summary, {"service_id": service.id, "starts_at": starts_at.isoformat()}, clinic)
+
+    assert error == ""
+
+
+def test_ai_gateway_blocked_exact_slot_result_does_not_include_available_key():
+    from messenger.ai_gateway import _blocked_exact_slot_tool_result
+
+    assert "available" not in _blocked_exact_slot_tool_result()
 
 
 @pytest.mark.django_db

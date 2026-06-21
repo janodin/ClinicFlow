@@ -54,6 +54,12 @@ def test_patient_facing_reschedule_cta_is_not_stripped_as_reasoning():
     assert format_ai_reply(raw, "messenger") == "Need to reschedule? Reply here and we can help."
 
 
+def test_patient_facing_need_to_reply_is_not_stripped_as_reasoning():
+    raw = "I need to know which service you want."
+
+    assert format_ai_reply(raw, "widget") == "I need to know which service you want."
+
+
 def test_explicit_reasoning_marker_with_question_is_stripped():
     raw = "Analysis: Should I call the availability tool?\n\nPlease send your preferred date."
 

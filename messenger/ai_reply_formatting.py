@@ -102,11 +102,11 @@ def _looks_like_internal_reasoning(paragraph):
     if "?" in value:
         return False
 
-    first_person_process = (
-        "i should ",
-        "i need to ",
+    internal_process_patterns = (
+        r"^i should (?:verify|check|call|use|review|analy[sz]e|determine)\b.*\b(?:before replying|before responding|tool|availability|clinic slots)\b",
+        r"^i need to (?:verify|check|call|use|review|analy[sz]e|determine)\b.*\b(?:before replying|before responding|tool|availability|clinic slots)\b",
     )
-    return value.startswith(first_person_process)
+    return any(re.search(pattern, value) for pattern in internal_process_patterns)
 
 
 def _convert_markdown_tables(text, *, number_general_tables):
